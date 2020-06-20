@@ -9,13 +9,13 @@ pub enum TokenType {
     Ident(String),
 
     // keywords
-    If, Else, For, Let, Fn, Print,
+    If, Else, For, Let, Fn, Print, True, False,
 
     // literals
-    Nat(Unsigned), True, False,
+    Nat(Unsigned),
 
     // two-character token types
-    StopStop, EqualEqual, TildeEqual, LessMinus,
+    StopStop, EqualEqual, TildeEqual,
 
     // single-character token types
     Plus, Star, Bang, QuestionMark, Tilde, Comma, Semicolon,

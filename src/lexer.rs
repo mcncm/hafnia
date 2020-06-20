@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::str::Chars;
 use std::vec::Vec;
 
-use crate::token::TokenType::{Eof, Nat};
+use crate::token::TokenType::{Eof, Ident, Nat};
 use crate::token::{Location, Token, TokenType, Unsigned};
 
 use lazy_static::lazy_static;
@@ -17,6 +17,8 @@ lazy_static! {
         m.insert("let", TokenType::Let);
         m.insert("fn", TokenType::Fn);
         m.insert("print", TokenType::Print);
+        m.insert("true", TokenType::True);
+        m.insert("false", TokenType::False);
         m
     };
     static ref SCTOKENS: HashMap<char, TokenType> = {
@@ -33,6 +35,13 @@ lazy_static! {
         m.insert(')', TokenType::RParen);
         m.insert('{', TokenType::LBrace);
         m.insert('}', TokenType::RBrace);
+        m
+    };
+    static ref TCTOKENS: HashMap<(char, char), TokenType> = {
+        let mut m = HashMap::new();
+        m.insert(('.', '.'), TokenType::StopStop);
+        m.insert(('=', '='), TokenType::EqualEqual);
+        m.insert(('~', '='), TokenType::TildeEqual);
         m
     };
 }
@@ -177,17 +186,31 @@ impl<'a> Lexer<'a> {
         // all the characters in the Lexer's `token_buf`.
 
         while let Some(ch) = self.next_char() {
+            // Greedily check for two-character tokens
+            if let Some(&following) = self.scan_head.peek() {
+                if let Some(token_type) = TCTOKENS.get(&(ch, following)) {
+                    let token_type = token_type.clone();
+                    push_token!(self, token_type);
+                    // Consume the second character and loop again.
+                    self.scan_head.next_raw_char();
+                    continue;
+                }
+            }
             // Single-character tokens
             if let Some(token_type) = SCTOKENS.get(&ch) {
                 let token_type = token_type.clone();
                 push_token!(self, token_type);
             }
-
             // Otherwise, may be beginning a number
-            if ch.is_ascii_digit() {
+            else if ch.is_ascii_digit() {
                 self.consume_nat();
             }
+            // Or it could be a keyword or identifier
+            else if ch.is_alphabetic() {
+                self.consume_ident();
+            }
         }
+
         // Finally, add the end-of-file sentinel
         push_token!(self, Eof);
 
@@ -198,6 +221,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Either completes a `Nat` token ands adds it to the Lexer's `tokens`
+    /// vector, or adds an error. `Nat`s must consist solely of ascii digits.
     fn consume_nat(&mut self) {
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
@@ -209,12 +234,33 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Shouldn't fail, except possibly for very long numbers!
+        // Shouldn't fail except for numbers larger than an `Unsigned`!
         let value: Result<Unsigned, _> = self.token_buf.iter().collect::<String>().parse();
         if let Ok(value) = value {
             push_token!(self, Nat(value));
         } else {
             self.scrub_token("Failed to parse numeric token.");
+        }
+    }
+
+    /// Either completes an identifier or keyword and adds it to the Lexer's
+    /// `tokens` vector, or adds an error. Idents must begin with an alphabetic
+    /// character, and may be followed by alphabetic and numeric characters.
+    fn consume_ident(&mut self) {
+        while let Some(ch) = self.scan_head.peek() {
+            if ch.is_ascii_alphanumeric() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+
+        let ident: String = self.token_buf.iter().collect();
+        if let Some(keyword) = KEYWORDS.get(ident.as_str()) {
+            let keyword = keyword.clone();
+            push_token!(self, keyword);
+        } else {
+            push_token!(self, Ident(ident));
         }
     }
 }
@@ -252,6 +298,8 @@ mod tests {
         };
     }
 
+    // Basic tests
+
     #[test]
     #[should_panic]
     fn lex_test_works() {
@@ -267,13 +315,34 @@ mod tests {
     }
 
     #[test]
+    fn two_character_tokens() {
+        lex_test!(".. == ~="; StopStop, EqualEqual, TildeEqual);
+    }
+
+    #[test]
     fn whitespace() {
         lex_test!("+    +\n+\t\t\t+"; Plus, Plus, Plus, Plus);
     }
 
+    // Numeric tests
+
     #[test]
-    fn simple_numbers() {
-        lex_test!("12 + 3"; Nat(12), Plus, Nat(3));
+    fn numbers_simple() {
+        lex_test!("12 + 3 * 0"; Nat(12), Plus, Nat(3), Star, Nat(0));
+    }
+
+    #[test]
+    fn numbers_equality() {
+        lex_test!("1 == 1"; Nat(1), EqualEqual, Nat(1));
+    }
+
+    #[test]
+    fn numbers_equality_no_whitespace() {
+        lex_test!("2==2"; Nat(2), EqualEqual, Nat(2));
+    }
+    #[test]
+    fn numbers_inequality() {
+        lex_test!("3 ~= 3"; Nat(3), TildeEqual, Nat(3));
     }
 
     #[test]
@@ -297,5 +366,38 @@ mod tests {
         lex_test!("1111111111111111111111111111111";
                   Nat(1111111111111111111111111111111)
         );
+    }
+
+    // Identifier-related tests
+
+    #[test]
+    fn ident_simple() {
+        lex_test!("ihtfp"; Ident(String::from("ihtfp")));
+    }
+
+    #[test]
+    fn ident_trailing_numbers() {
+        lex_test!("foo1"; Ident(String::from("foo1")));
+    }
+
+    #[test]
+    #[should_panic]
+    fn ident_leading_numbers() {
+        lex_test!("99luft_ballons"; Ident(String::from("99luft_ballons")));
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn ident_no_whitespace() {
+        lex_test!("zip!zap!";
+                  Ident(String::from("zip")), Bang,
+                  Ident(String::from("zap")), Bang);
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn ident_keywords() {
+        lex_test!("if else for let fn print true false";
+                  If, Else, For, Let, Fn, Print, True, False);
     }
 }
