@@ -1,5 +1,7 @@
 use std::fmt;
 
+pub type Unsigned = u32;
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenType {
@@ -7,10 +9,10 @@ pub enum TokenType {
     Ident(String),
 
     // keywords
-    If, Else, For, Fn, Reg, Print,
+    If, Else, For, Let, Fn, Print,
 
     // literals
-    Int(u32), True, False,
+    Nat(Unsigned), True, False,
 
     // two-character token types
     StopStop, EqualEqual, TildeEqual, LessMinus,
@@ -30,7 +32,6 @@ pub struct Location {
     pub pos: usize,  // starting position in source file
     pub line: usize, // line number in source file
     pub col: usize,  // column number in source file
-    pub len: usize,  // length of the token
 }
 
 pub struct Token {
