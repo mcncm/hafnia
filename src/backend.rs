@@ -10,18 +10,16 @@ pub trait Backend {
 
 /// A backend that does nothing. When executing a code object, it simply returns
 /// an empty output.
-pub struct NullBackend {
-
-}
+pub struct NullBackend {}
 
 impl NullBackend {
     pub fn new() -> NullBackend {
-        NullBackend { }
+        NullBackend {}
     }
 }
 
 impl Backend for NullBackend {
-    fn execute(&mut self, obj: &CodeObject) -> Output {
-        Output { }
+    fn execute(&mut self, _obj: &CodeObject) -> Output {
+        Output {}
     }
 }

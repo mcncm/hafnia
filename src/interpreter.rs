@@ -1,13 +1,12 @@
 use crate::environment::Environment;
 use crate::errors::Error;
-use crate::parser;
 
 pub struct Interpreter {
     env: Environment,
 }
 
 impl Interpreter {
-    pub fn new() -> Interpreter {
+    pub fn new() -> Self {
         Interpreter {
             env: Environment::new(),
         }

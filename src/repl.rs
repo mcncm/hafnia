@@ -5,11 +5,11 @@ use crate::errors;
 use crate::interpreter::Interpreter;
 use crate::sys;
 
-const UNICODE_PROMPT: &'static str = "ψ⟩ ";
-const ASCII_PROMPT: &'static str = "> ";
-const WELCOME: &'static str = "Welcome to the alpha version of cavy-rs!";
-const GOODBYE: &'static str = "Thanks for hacking with us!";
-const HELP: &'static str = "Enter ':h' for help, or ':q' to quit.";
+const UNICODE_PROMPT: &str = "ψ⟩ ";
+const ASCII_PROMPT: &str = "> ";
+const WELCOME: &str = "Welcome to the alpha version of cavy-rs!";
+const GOODBYE: &str = "Thanks for hacking with us!";
+const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
 pub struct Repl {
     interpreter: Interpreter,
@@ -21,12 +21,12 @@ impl Repl {
     pub fn new(backend: Box<dyn Backend>, flags: sys::Flags) -> Repl {
         Repl {
             interpreter: Interpreter::new(),
-            backend: backend,
-            flags: flags,
+            backend,
+            flags,
         }
     }
 
-    pub fn run(&mut self) -> () {
+    pub fn run(&mut self) {
         self.greet();
         loop {
             let input = self.get_input();
@@ -50,11 +50,11 @@ impl Repl {
         self.farewell();
     }
 
-    fn handle_error(&self, err: errors::Error) -> () {
+    fn handle_error(&self, err: errors::Error) {
         println!("Error: {:?}", err);
     }
 
-    fn greet(&self) -> () {
+    fn greet(&self) {
         println!("{}", WELCOME);
         if self.flags.debug {
             println!("This interpreter is running in DEBUG mode.");
@@ -62,16 +62,16 @@ impl Repl {
         self.help();
     }
 
-    fn farewell(&self) -> () {
+    fn farewell(&self) {
         println!("{}", GOODBYE);
     }
 
-    fn help(&self) -> () {
+    fn help(&self) {
         println!("{}", HELP);
     }
 
     // An undocumented behavior of the repl
-    fn wheek(&self) -> () {
+    fn wheek(&self) {
         println!("Wheek!");
     }
 

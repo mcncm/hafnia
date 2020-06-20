@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use dirs;
-
-pub const VERSION_STRING: &'static str = include_str!(concat!(env!("OUT_DIR"), "/version"));
+pub const VERSION_STRING: &str = include_str!(concat!(env!("OUT_DIR"), "/version"));
 
 pub fn cavy_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|dir| dir.join(Path::new(".cavy")))

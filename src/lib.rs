@@ -1,6 +1,9 @@
-pub mod errors;
+#![allow(clippy::new_without_default)]
+#![allow(dead_code)]
+
 pub mod backend;
 pub mod environment;
+pub mod errors;
 pub mod interpreter;
 pub mod parser;
 pub mod repl;

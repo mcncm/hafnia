@@ -35,7 +35,7 @@ pub mod panic {
                      send them the error log found at '{}'.",
                     crashlog.as_os_str().to_string_lossy()
                 );
-            },
+            }
             Err(err) => {
                 //let inner_err = err.into_inner().unwrap();
                 eprintln!(
@@ -56,32 +56,34 @@ pub mod panic {
             write_crashes(&crashlog, crashes)?;
             Ok(crashlog)
         } else {
-            Err(Error::new(ErrorKind::Other, "Crash log path does not exist."))
+            Err(Error::new(
+                ErrorKind::Other,
+                "Crash log path does not exist.",
+            ))
         }
     }
 
     fn get_crashes(crashlog: &PathBuf) -> io::Result<Vec<serde_json::Value>> {
         let file = fs::OpenOptions::new()
             .create(true)
-            .write(true)  // must be included with `create`
+            .write(true) // must be included with `create`
             .read(true)
             .open(&crashlog)?;
 
         match serde_json::from_reader(file) {
             Ok(Value::Array(values)) => Ok(values),
             Ok(_) => Err(Error::new(ErrorKind::Other, "Corrupted crash log")),
-            Err(_) => Ok(vec![]),  // crash log empty or corrupted; start over
+            Err(_) => Ok(vec![]), // crash log empty or corrupted; start over
         }
     }
 
     fn write_crashes(crashlog: &PathBuf, crashes: Vec<Value>) -> io::Result<()> {
-        let mut file = fs::OpenOptions::new()
+        let file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .open(&crashlog)?;
 
-        serde_json::to_writer(file, &Value::Array(crashes))
-            .map_err(|e| e.into())
+        serde_json::to_writer(file, &Value::Array(crashes)).map_err(|e| e.into())
     }
 }
 

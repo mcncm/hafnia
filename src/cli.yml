@@ -1,0 +1,18 @@
+name: Cavy
+version: "0.2.0\n"
+author: mcncm <cavy-lang-support@mit.edu>
+about: A small, imperative quantum programming language
+args:
+  - INPUT:
+      about: The source file to compile
+      required: false
+      index: 1
+  - debug:
+      short: d
+      long: debug
+      about: Runs the interpreter in debug mode
+  - opt:
+      short: O
+      value_name: OPT
+      about: Sets an optimization level [O0, O1, O2, or O3].
+      required: false
