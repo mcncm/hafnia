@@ -1,5 +1,7 @@
 use crate::environment::Environment;
-use crate::errors::Error;
+use crate::parser::ParseError;
+use crate::scanner::{ScanError, Scanner};
+use std::fmt;
 
 pub struct Interpreter {
     env: Environment,
@@ -12,8 +14,7 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&mut self, input: &str) -> Result<(), Error> {
-        println!("Your input: {}", input);
+    pub fn interpret(&mut self, _input: &str) -> Result<(), Vec<Box<dyn fmt::Display>>> {
         Ok(())
     }
 }

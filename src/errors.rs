@@ -1,3 +1,9 @@
+use std::fmt;
+
+/// This trait should be implemented for all Cavy error types. It guarantees
+/// that there is a way to represent the error to the user can be unwrapped.
+pub trait Error: fmt::Display + fmt::Debug {}
+
 /// This module contains this the custom panic handler that logs system state on
 /// an unexpected crash.
 pub mod panic {
@@ -85,10 +91,4 @@ pub mod panic {
 
         serde_json::to_writer(file, &Value::Array(crashes)).map_err(|e| e.into())
     }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    ScanError(String),
-    ParseError(String),
 }

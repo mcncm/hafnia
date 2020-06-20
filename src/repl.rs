@@ -1,9 +1,10 @@
-use std::io::{self, Write};
-
 use crate::backend::Backend;
 use crate::errors;
 use crate::interpreter::Interpreter;
+use crate::scanner::{Scanner, SourceObject};
 use crate::sys;
+use std::fmt::Display;
+use std::io::{self, Write};
 
 const UNICODE_PROMPT: &str = "ψ⟩ ";
 const ASCII_PROMPT: &str = "> ";
@@ -41,17 +42,26 @@ impl Repl {
                     self.wheek();
                 }
                 s => {
-                    self.interpreter.interpret(s).unwrap_or_else(|err| {
-                        self.handle_error(err);
-                    });
+                    let source = SourceObject::from_src(s);
+                    let scanner = Scanner::new(source);
+                    match scanner.lex() {
+                        Ok(tokens) => {
+                            println!("{:?}", tokens);
+                        }
+                        Err(errs) => {
+                            self.handle_errors(errs);
+                        }
+                    };
                 }
             }
         }
         self.farewell();
     }
 
-    fn handle_error(&self, err: errors::Error) {
-        println!("Error: {:?}", err);
+    fn handle_errors(&self, errors: Vec<Box<dyn errors::Error>>) {
+        for err in errors {
+            eprintln!("{}", err);
+        }
     }
 
     fn greet(&self) {

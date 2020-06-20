@@ -1,69 +1,97 @@
+use crate::errors;
+use crate::token::Lexeme::{Eof, Ident, Nat};
+use crate::token::{Lexeme, Location, Token, Unsigned};
+use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::fmt;
 use std::iter::Peekable;
+use std::path::Path;
 use std::str::Chars;
 use std::vec::Vec;
 
-use crate::token::TokenType::{Eof, Ident, Nat};
-use crate::token::{Location, Token, TokenType, Unsigned};
-
-use lazy_static::lazy_static;
-
 lazy_static! {
-    static ref KEYWORDS: HashMap<&'static str, TokenType> = {
+    static ref KEYWORDS: HashMap<&'static str, Lexeme> = {
         let mut m = HashMap::new();
-        m.insert("if", TokenType::If);
-        m.insert("else", TokenType::Else);
-        m.insert("for", TokenType::For);
-        m.insert("let", TokenType::Let);
-        m.insert("fn", TokenType::Fn);
-        m.insert("print", TokenType::Print);
-        m.insert("true", TokenType::True);
-        m.insert("false", TokenType::False);
+        m.insert("if", Lexeme::If);
+        m.insert("else", Lexeme::Else);
+        m.insert("for", Lexeme::For);
+        m.insert("let", Lexeme::Let);
+        m.insert("fn", Lexeme::Fn);
+        m.insert("print", Lexeme::Print);
+        m.insert("true", Lexeme::True);
+        m.insert("false", Lexeme::False);
         m
     };
-    static ref SCTOKENS: HashMap<char, TokenType> = {
+    static ref SCTOKENS: HashMap<char, Lexeme> = {
         let mut m = HashMap::new();
-        m.insert('+', TokenType::Plus);
-        m.insert('*', TokenType::Star);
-        m.insert(',', TokenType::Comma);
-        m.insert('!', TokenType::Bang);
-        m.insert('?', TokenType::QuestionMark);
-        m.insert(';', TokenType::Semicolon);
-        m.insert('[', TokenType::LBracket);
-        m.insert(']', TokenType::RBracket);
-        m.insert('(', TokenType::LParen);
-        m.insert(')', TokenType::RParen);
-        m.insert('{', TokenType::LBrace);
-        m.insert('}', TokenType::RBrace);
+        m.insert('+', Lexeme::Plus);
+        m.insert('*', Lexeme::Star);
+        m.insert(',', Lexeme::Comma);
+        m.insert('!', Lexeme::Bang);
+        m.insert('?', Lexeme::QuestionMark);
+        m.insert(';', Lexeme::Semicolon);
+        m.insert('[', Lexeme::LBracket);
+        m.insert(']', Lexeme::RBracket);
+        m.insert('(', Lexeme::LParen);
+        m.insert(')', Lexeme::RParen);
+        m.insert('{', Lexeme::LBrace);
+        m.insert('}', Lexeme::RBrace);
         m
     };
-    static ref TCTOKENS: HashMap<(char, char), TokenType> = {
+    static ref TCTOKENS: HashMap<(char, char), Lexeme> = {
         let mut m = HashMap::new();
-        m.insert(('.', '.'), TokenType::StopStop);
-        m.insert(('=', '='), TokenType::EqualEqual);
-        m.insert(('~', '='), TokenType::TildeEqual);
+        m.insert(('.', '.'), Lexeme::StopStop);
+        m.insert(('=', '='), Lexeme::EqualEqual);
+        m.insert(('~', '='), Lexeme::TildeEqual);
         m
     };
 }
 
 #[derive(Debug)]
-struct LexError {
+pub struct ScanError {
     loc: Location,
     msg: &'static str,
     chars: String,
 }
 
+impl fmt::Display for ScanError {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Scanning error in '{}' [{}]: {}",
+              self.chars, self.loc, self.msg
+        )
+    }
+}
+
+impl errors::Error for ScanError {}
+
+pub struct SourceObject<'a> {
+    pub code: Peekable<Chars<'a>>,
+    // TODO: should replace this with a &Path or &PathBuf, but this leads to a lot
+    // of lifetime wrangling I don't want to deal with right now.
+    pub file: Option<String>,
+}
+
+impl<'a> SourceObject<'a> {
+    pub fn from_src(src: &'a str) -> Self {
+        Self {
+            code: src.chars().peekable(),
+            file: None,
+        }
+    }
+}
+
 struct ScanHead<'a> {
-    code: Peekable<Chars<'a>>,
+    src: SourceObject<'a>,
     pub pos: usize,  // absolute position in source
     pub line: usize, // line number in source
     pub col: usize,  // column number in source
 }
 
 impl<'a> ScanHead<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(src: SourceObject<'a>) -> Self {
         ScanHead {
-            code: source.chars().peekable(),
+            src,
             pos: 0,
             line: 1,
             col: 1,
@@ -75,13 +103,15 @@ impl<'a> ScanHead<'a> {
             pos: self.pos,
             line: self.line,
             col: self.col,
+            file: self.src.file.as_ref().cloned(),
         }
     }
 
     fn next_raw_char(&mut self) -> Option<char> {
-        let next = self.code.next();
+        let next = self.src.code.next();
         if let Some(ch) = next {
             self.pos += 1;
+            self.col += 1;
             if ch == '\n' {
                 self.line += 1;
                 self.col = 1;
@@ -102,20 +132,8 @@ impl<'a> ScanHead<'a> {
         self.advance_to('\n');
     }
 
-    // Advance the scan head to the next whitespace character, and return
-    // position before advancing.
-    pub fn advance_to_whitespace(&mut self) -> Location {
-        let loc = self.loc();
-        while let Some(ch) = self.next_raw_char() {
-            if !ch.is_ascii_whitespace() {
-                break;
-            }
-        }
-        loc
-    }
-
     fn peek(&mut self) -> Option<&char> {
-        self.code.peek()
+        self.src.code.peek()
     }
 }
 
@@ -133,29 +151,29 @@ impl<'a> Iterator for ScanHead<'a> {
     }
 }
 
-struct Lexer<'a> {
-    // Lexer data
+pub struct Scanner<'a> {
+    // Scanner data
     scan_head: ScanHead<'a>,
     token_buf: Vec<char>,
     tokens: Vec<Token>,
-    errors: Vec<LexError>,
+    errors: Vec<Box<dyn errors::Error>>,
 }
 
-// Adds a lexed token to a Lexer's `tokens` vector.
+// Adds a lexed token to a Scanner's `tokens` vector.
 macro_rules! push_token {
     ($self:ident, $tok:ident$(($($arg:expr),*))?) => {
         $self.tokens.push(Token {
-            token_type: $tok$(($($arg),+))?,
+            lexeme: $tok$(($($arg),+))?,
             loc: $self.scan_head.loc(),
         });
         $self.token_buf.clear();
     };
 }
 
-impl<'a> Lexer<'a> {
-    fn new(code: &'a str) -> Self {
-        Lexer {
-            scan_head: ScanHead::new(code),
+impl<'a> Scanner<'a> {
+    pub fn new(src: SourceObject<'a>) -> Self {
+        Scanner {
+            scan_head: ScanHead::new(src),
             token_buf: vec![],
             tokens: vec![],
             errors: vec![],
@@ -172,34 +190,48 @@ impl<'a> Lexer<'a> {
     // abort this token; advance to the next whitespace character and empty the
     // token buffer.
     fn scrub_token(&mut self, msg: &'static str) {
-        let loc = self.scan_head.advance_to_whitespace();
-        self.token_buf.clear();
-        self.errors.push(LexError {
+        let loc = self.synchronize_to_whitespace();
+        self.errors.push(Box::new(ScanError {
             loc,
             msg,
             chars: self.token_buf.iter().collect(),
-        });
+        }));
+        self.token_buf.clear();
     }
 
-    fn lex(mut self) -> Result<Vec<Token>, Vec<LexError>> {
+    // Advance the scan head to the next whitespace character, and return
+    // position before advancing.
+    pub fn synchronize_to_whitespace(&mut self) -> Location {
+        let loc = self.scan_head.loc();
+        while let Some(ch) = self.scan_head.peek() {
+            if !ch.is_ascii_whitespace() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        loc
+    }
+
+    pub fn lex(mut self) -> Result<Vec<Token>, Vec<Box<dyn errors::Error>>> {
         // This macro adds a token to the `tokens` vector, consuming
-        // all the characters in the Lexer's `token_buf`.
+        // all the characters in the Scanner's `token_buf`.
 
         while let Some(ch) = self.next_char() {
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
-                if let Some(token_type) = TCTOKENS.get(&(ch, following)) {
-                    let token_type = token_type.clone();
-                    push_token!(self, token_type);
+                if let Some(lexeme) = TCTOKENS.get(&(ch, following)) {
+                    let lexeme = lexeme.clone();
+                    push_token!(self, lexeme);
                     // Consume the second character and loop again.
                     self.scan_head.next_raw_char();
                     continue;
                 }
             }
             // Single-character tokens
-            if let Some(token_type) = SCTOKENS.get(&ch) {
-                let token_type = token_type.clone();
-                push_token!(self, token_type);
+            if let Some(lexeme) = SCTOKENS.get(&ch) {
+                let lexeme = lexeme.clone();
+                push_token!(self, lexeme);
             }
             // Otherwise, may be beginning a number
             else if ch.is_ascii_digit() {
@@ -221,7 +253,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Either completes a `Nat` token ands adds it to the Lexer's `tokens`
+    /// Either completes a `Nat` token ands adds it to the Scanner's `tokens`
     /// vector, or adds an error. `Nat`s must consist solely of ascii digits.
     fn consume_nat(&mut self) {
         while let Some(ch) = self.scan_head.peek() {
@@ -229,6 +261,7 @@ impl<'a> Lexer<'a> {
                 self.next_char();
             } else if ch.is_ascii_alphabetic() {
                 self.scrub_token("Numeric tokens may not contain alphabetic characters.");
+                return;
             } else {
                 break;
             }
@@ -243,7 +276,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Either completes an identifier or keyword and adds it to the Lexer's
+    /// Either completes an identifier or keyword and adds it to the Scanner's
     /// `tokens` vector, or adds an error. Idents must begin with an alphabetic
     /// character, and may be followed by alphabetic and numeric characters.
     fn consume_ident(&mut self) {
@@ -279,17 +312,22 @@ mod tests {
             let mut expected_tokens = vec![];
             $(
                 $(
-                    expected_tokens.push(TokenType::$tok $(($($arg),+))?);
+                    expected_tokens.push(Lexeme::$tok $(($($arg),+))?);
                 )*
             )?
-            expected_tokens.push(TokenType::Eof);
+            expected_tokens.push(Lexeme::Eof);
 
-            let lexer = Lexer::new($code);
-            let tokens = lexer.lex().unwrap();
+            let src = SourceObject {
+                code: $code.chars().peekable(),
+                file: None,
+            };
+
+            let scanner = Scanner::new(src);
+            let tokens = scanner.lex().unwrap();
 
             let token_pairs = tokens
                 .into_iter()
-                .map(|token| token.token_type)
+                .map(|token| token.lexeme)
                 .zip(expected_tokens);
 
             for (token, expected_token) in token_pairs {
@@ -357,6 +395,12 @@ mod tests {
     #[should_panic]
     fn invalid_number_1() {
         lex_test!("123if234"; Nat(123), If, Nat(234));
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_number_2() {
+        lex_test!("123else"; Nat(123), Else);
     }
 
     #[test]
