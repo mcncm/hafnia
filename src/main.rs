@@ -1,9 +1,11 @@
 use std::fs;
 use std::io;
+use std::panic;
 use std::path::Path;
 use std::process;
 
 use cavy::backend;
+use cavy::errors;
 use cavy::repl::Repl;
 use cavy::sys;
 
@@ -46,6 +48,14 @@ fn get_code(argmatches: &ArgMatches) -> Result<Option<String>, io::Error> {
 }
 
 fn main() {
+    #[cfg(not(debug_assertions))] // release build only
+    {
+        eprintln!("Warning: crash reporting is not fully implemented.");
+        panic::set_hook(Box::new(errors::panic::panic_hook));
+    }
+
+    panic!();
+
     let yaml = load_yaml!("cli.yml");
     let argmatches = App::from(yaml).get_matches();
     let backend = get_backend(&argmatches);

@@ -1,7 +1,8 @@
 use std::io::{self, Write};
 
-use crate::interpreter::Interpreter;
 use crate::backend::Backend;
+use crate::errors;
+use crate::interpreter::Interpreter;
 use crate::sys;
 
 const UNICODE_PROMPT: &'static str = "ψ⟩ ";
@@ -30,13 +31,27 @@ impl Repl {
         loop {
             let input = self.get_input();
             match input.as_str() {
-                ":q" => { break; }
-                ":h" => { self.help(); }
-                ":w" => { self.wheek(); }
-                s => { self.interpreter.interpret(s); }
+                ":q" => {
+                    break;
+                }
+                ":h" => {
+                    self.help();
+                }
+                ":w" => {
+                    self.wheek();
+                }
+                s => {
+                    self.interpreter.interpret(s).unwrap_or_else(|err| {
+                        self.handle_error(err);
+                    });
+                }
             }
         }
         self.farewell();
+    }
+
+    fn handle_error(&self, err: errors::Error) -> () {
+        println!("Error: {:?}", err);
     }
 
     fn greet(&self) -> () {
@@ -62,9 +77,7 @@ impl Repl {
 
     fn get_input(&self) -> String {
         print!("{}", UNICODE_PROMPT);
-        io::stdout()
-            .flush()
-            .expect("Failed to flush stdout.");
+        io::stdout().flush().expect("Failed to flush stdout.");
 
         let mut input = String::new();
         io::stdin()

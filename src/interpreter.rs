@@ -1,7 +1,6 @@
-use std::vec::Vec;
-
-use crate::parser;
 use crate::environment::Environment;
+use crate::errors::Error;
+use crate::parser;
 
 pub struct Interpreter {
     env: Environment,
@@ -14,8 +13,9 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&mut self, input: &str) -> () {
-        println!("Your input: {}", input)
+    pub fn interpret(&mut self, input: &str) -> Result<(), Error> {
+        println!("Your input: {}", input);
+        Ok(())
     }
 }
 
