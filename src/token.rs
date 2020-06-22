@@ -4,7 +4,7 @@ use std::path::PathBuf;
 pub type Unsigned = u32;
 
 #[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Lexeme {
     // identifiers
     Ident(String),
@@ -46,7 +46,7 @@ impl fmt::Display for Lexeme {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct Location {
     pub pos: usize,  // starting position in source file
     pub line: usize, // line number in source file
@@ -63,7 +63,7 @@ impl fmt::Display for Location {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Token {
     pub lexeme: Lexeme,
     pub loc: Location,

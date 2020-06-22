@@ -17,6 +17,7 @@ const BUILD_TYPE: &'static str = "release";
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let version_path = Path::new(&out_dir).join("version");
+    let address_path = Path::new(&out_dir).join("address");
 
     let version_string = format!(
         "{} {} ({}:{}{}, {} build, {} [{}])",
@@ -31,6 +32,7 @@ fn main() {
     );
 
     fs::write(version_path, version_string).unwrap();
+    fs::write(address_path, contact_address()).unwrap();
 }
 
 fn get_commit_hash() -> String {
@@ -78,4 +80,17 @@ fn is_working_tree_clean() -> bool {
         .unwrap();
 
     status.code().unwrap() == 0
+}
+
+fn contact_address() -> String {
+    // deliberate mild obfuscation, which isn't really possible with string
+    // literals, and hence computed at build time.
+    let mut addr = String::from("'cavy-lang-support");
+    addr.push(0x40 as char);
+    addr += "mit";
+    addr.push(0x2e as char);
+    addr += "e\
+             d\
+             u'";
+    addr
 }

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub const VERSION_STRING: &str = include_str!(concat!(env!("OUT_DIR"), "/version"));
+pub const CONTACT_ADDRESS: &str = include_str!(concat!(env!("OUT_DIR"), "/address"));
 
 pub fn cavy_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|dir| dir.join(Path::new(".cavy")))
@@ -8,6 +9,10 @@ pub fn cavy_dir() -> Option<PathBuf> {
 
 pub fn crashlog_path() -> Option<PathBuf> {
     cavy_dir().map(|dir| dir.join(Path::new("crashlog.json")))
+}
+
+pub fn history_path() -> Option<PathBuf> {
+    cavy_dir().map(|dir| dir.join(Path::new(".history")))
 }
 
 pub struct Flags {

@@ -1,24 +1,24 @@
 use crate::token::Token;
 use std::fmt;
 
-#[derive(Debug)]
-pub enum Expression {
+#[derive(Debug, PartialEq)]
+pub enum Expr {
     BinOp {
-        left: Box<Expression>,
+        left: Box<Expr>,
         op: Token,
-        right: Box<Expression>,
+        right: Box<Expr>,
     },
     UnOp {
         op: Token,
-        right: Box<Expression>,
+        right: Box<Expr>,
     },
     Literal(Token),
     Variable(Token),
 }
 
-impl Expression {}
+impl Expr {}
 
-impl fmt::Display for Expression {
+impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s_expr = match self {
             Self::BinOp { left, op, right } => format!("({} {} {})", op, left, right),

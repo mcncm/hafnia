@@ -37,8 +37,9 @@ pub mod panic {
             Ok(crashlog) => {
                 eprintln!(
                     "Cavy has encountered an unexpected error. \
-                     Please contact the developers, and if possible \
+                     Please contact the developers at {}, and if possible \
                      send them the error log found at '{}'.",
+                    sys::CONTACT_ADDRESS,
                     crashlog.as_os_str().to_string_lossy()
                 );
             }
@@ -46,8 +47,9 @@ pub mod panic {
                 //let inner_err = err.into_inner().unwrap();
                 eprintln!(
                     "Cavy has encountered an unexpected error. \
-                     Please contact the developers.\n\
+                     Please contact the developers at {}.\n\
                      Crash reporting failure: {:?}",
+                    sys::CONTACT_ADDRESS,
                     err,
                 );
             }
