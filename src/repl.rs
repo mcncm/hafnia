@@ -77,7 +77,11 @@ impl Repl {
     }
 
     fn help(&self) {
-        println!("{}", HELP);
+        println!(
+            "{}\nFeel free to email {} with questions.",
+            HELP,
+            sys::CONTACT_ADDRESS
+        );
     }
 
     // An undocumented behavior of the repl

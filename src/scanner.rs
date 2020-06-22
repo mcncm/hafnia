@@ -10,15 +10,16 @@ use std::str::Chars;
 use std::vec::Vec;
 
 lazy_static! {
+    #[rustfmt::skip]
     static ref KEYWORDS: HashMap<&'static str, Lexeme> = {
         let mut m = HashMap::new();
-        m.insert("if", Lexeme::If);
-        m.insert("else", Lexeme::Else);
-        m.insert("for", Lexeme::For);
-        m.insert("let", Lexeme::Let);
-        m.insert("fn", Lexeme::Fn);
+        m.insert("if",    Lexeme::If);
+        m.insert("else",  Lexeme::Else);
+        m.insert("for",   Lexeme::For);
+        m.insert("let",   Lexeme::Let);
+        m.insert("fn",    Lexeme::Fn);
         m.insert("print", Lexeme::Print);
-        m.insert("true", Lexeme::True);
+        m.insert("true",  Lexeme::True);
         m.insert("false", Lexeme::False);
         m
     };
