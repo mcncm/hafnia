@@ -33,10 +33,12 @@ pub fn panic_hook(info: &PanicInfo) {
     }
 }
 
+/// This cratewide macro can be used to log an unexpected state which may or may
+/// not be fatal, but does not proximally trigger a panic.
 #[macro_export]
 macro_rules! warn {
-    () => { cavy::errors::fault::log_warning("Cavy has entered an unexpected state.") };
-    ($msg:expr) => { cavy::errors::fault::log_warning($msg.to_string()); };
+    () => { $crate::errors::fault::log_warning("Cavy has entered an unexpected state."); };
+    ($msg:expr) => { $crate::errors::fault::log_warning($msg.to_string()); };
     ($fmt:expr, $($arg:tt),*) => {
         let info = format!($fmt, $($arg),*);
         cavy::errors::fault::log_warning(info);

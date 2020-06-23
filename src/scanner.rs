@@ -1,5 +1,5 @@
 use crate::errors;
-use crate::token::Lexeme::{Eof, Ident, Nat};
+use crate::token::Lexeme::{Ident, Nat};
 use crate::token::{Lexeme, Location, Token, Unsigned};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -21,12 +21,18 @@ lazy_static! {
         m.insert("print", Lexeme::Print);
         m.insert("true",  Lexeme::True);
         m.insert("false", Lexeme::False);
+        m.insert("bool",  Lexeme::Bool);
+        m.insert("u4",    Lexeme::U4);
+        m.insert("u8",    Lexeme::U8);
+        m.insert("u16",   Lexeme::U16);
+        m.insert("u32",   Lexeme::U32);
         m
     };
     static ref SCTOKENS: HashMap<char, Lexeme> = {
         let mut m = HashMap::new();
         m.insert('+', Lexeme::Plus);
         m.insert('*', Lexeme::Star);
+        m.insert('~', Lexeme::Tilde);
         m.insert(',', Lexeme::Comma);
         m.insert('!', Lexeme::Bang);
         m.insert('?', Lexeme::QuestionMark);
@@ -214,7 +220,7 @@ impl<'a> Scanner<'a> {
         loc
     }
 
-    pub fn lex(mut self) -> Result<Vec<Token>, Vec<Box<dyn errors::Error>>> {
+    pub fn tokenize(mut self) -> Result<Vec<Token>, Vec<Box<dyn errors::Error>>> {
         // This macro adds a token to the `tokens` vector, consuming
         // all the characters in the Scanner's `token_buf`.
 
@@ -243,9 +249,6 @@ impl<'a> Scanner<'a> {
                 self.consume_ident();
             }
         }
-
-        // Finally, add the end-of-file sentinel
-        push_token!(self, Eof);
 
         if self.errors.is_empty() {
             Ok(self.tokens)
@@ -303,8 +306,8 @@ impl<'a> Scanner<'a> {
 mod tests {
     use super::*;
 
-    /// Tests sample code against a sequence of token types, not including an
-    /// Eof. In more human-readable form, the syntax looks like:
+    /// Tests sample code against a sequence of token types. In more
+    /// human-readable form, the syntax looks like:
     ///
     ///   lex_test("4 + 8;"; Int(4), Plus, Int(8), Semicolon);
     ///
@@ -316,7 +319,6 @@ mod tests {
                     expected_tokens.push(Lexeme::$tok $(($($arg),+))?);
                 )*
             )?
-            expected_tokens.push(Lexeme::Eof);
 
             let src = SourceObject {
                 code: $code.chars().peekable(),
@@ -324,7 +326,9 @@ mod tests {
             };
 
             let scanner = Scanner::new(src);
-            let tokens = scanner.lex().unwrap();
+            let tokens = scanner.tokenize().unwrap();
+
+            assert_eq!(tokens.len(), expected_tokens.len());
 
             let token_pairs = tokens
                 .into_iter()
@@ -342,14 +346,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn lex_test_works() {
-        lex_test!("&"; Star);
+        lex_test!("!"; Star);
     }
 
     #[test]
     #[rustfmt::skip]
     fn single_character_tokens() {
-        lex_test!("+ * , ! ? ; [ ] ( ) { }";
-                  Plus,  Star, Comma, Bang, QuestionMark, Semicolon,
+        lex_test!("+ * ~ , ! ? ; [ ] ( ) { }";
+                  Plus, Star, Tilde, Comma, Bang, QuestionMark, Semicolon,
                   LBracket, RBracket, LParen, RParen, LBrace, RBrace);
     }
 

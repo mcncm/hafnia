@@ -11,6 +11,7 @@ pub enum Lexeme {
 
     // keywords
     If, Else, For, Let, Fn, Print, True, False,
+    Bool, U4, U8, U16, U32,
 
     // literals
     Nat(Unsigned),
@@ -23,9 +24,6 @@ pub enum Lexeme {
 
     // delimiters
     LBracket, RBracket, LParen, RParen, LBrace, RBrace,
-
-    // end of file
-    Eof,
 }
 
 impl fmt::Display for Lexeme {

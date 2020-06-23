@@ -10,6 +10,22 @@ use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+/// Operator precedence: the first field is the scalar precedence; the second is
+/// its right associativity.
+struct Precedence(u8, bool);
+
+lazy_static! {
+    #[rustfmt::skip]
+    static ref OPERATOR_TABLE: HashMap<Lexeme, Precedence> = {
+        let mut m = HashMap::new();
+        m.insert(TildeEqual, Precedence(0, false));
+        m.insert(EqualEqual, Precedence(0, false));
+        m.insert(Plus,       Precedence(1, false));
+        m.insert(Star,       Precedence(2, false));
+        m
+    };
+}
+
 #[derive(Debug)]
 pub struct ParseError {
     msg: &'static str,
@@ -27,13 +43,13 @@ impl fmt::Display for ParseError {
 
 impl errors::Error for ParseError {}
 
-struct Parser {
+pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
     errors: Vec<ParseError>,
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
             errors: vec![],
@@ -44,12 +60,16 @@ impl Parser {
         self.tokens.peek().map(|tok| &tok.lexeme)
     }
 
+    fn forward(&mut self) {
+        self.tokens.next();
+    }
+
     #[allow(unused_mut)]
     fn parse(mut self) -> Result<Expr, ParseError> {
         todo!();
     }
 
-    fn expression(&mut self) -> Result<Expr, ParseError> {
+    pub fn expression(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.unary()?;
         self.precedence_climb(lhs, 0)
     }
@@ -63,10 +83,10 @@ impl Parser {
                 right: Box::new(right),
             });
         }
-        self.terminal()
+        self.primary()
     }
 
-    fn terminal(&mut self) -> Result<Expr, ParseError> {
+    fn primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek_lexeme().unwrap() {
             Nat(_) | True | False => Ok(Expr::Literal(self.tokens.next().unwrap())),
             Ident(_) => Ok(Expr::Variable(self.tokens.next().unwrap())),
@@ -76,8 +96,37 @@ impl Parser {
         }
     }
 
-    fn precedence_climb(&self, _lhs: Expr, _min_precedence: u8) -> Result<Expr, ParseError> {
-        todo!();
+    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, ParseError> {
+        let mut lhs = lhs;
+        let mut op_prec;
+        while let Some(outer) = self.peek_lexeme() {
+            // Check the outer operator's precedence
+            if let Some(Precedence(outer_prec, _)) = OPERATOR_TABLE.get(outer) {
+                op_prec = *outer_prec;
+                if op_prec < min_precedence {
+                    break;
+                }
+                let outer = self.tokens.next().unwrap();
+                let mut rhs = self.unary()?;
+                while let Some(inner) = self.peek_lexeme() {
+                    // Check the inner operator's precedence
+                    if let Some(Precedence(inner_prec, r_assoc)) = OPERATOR_TABLE.get(inner) {
+                        if inner_prec + (*r_assoc as u8) <= op_prec {
+                            break;
+                        }
+                        rhs = self.precedence_climb(rhs, *inner_prec)?;
+                    }
+                }
+                lhs = Expr::BinOp {
+                    op: outer,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(lhs)
     }
 
     fn synchronize(&mut self, _err: &str) {
@@ -92,14 +141,9 @@ mod tests {
     use crate::token::Token;
     use Lexeme::*;
 
-    // macro_rules! token {
-    //     ($lexeme:expr) => {
-    //         Token {
-    //             lexeme: $lexeme,
-    //             loc: Location::default(),
-    //         }
-    //     }
-    // }
+    //////////////////////////////////////////////////////
+    // Functions and macros for constructing test cases //
+    //////////////////////////////////////////////////////
 
     fn token(lexeme: Lexeme) -> Token {
         Token {
@@ -108,71 +152,70 @@ mod tests {
         }
     }
 
-    fn literal(lexeme: Lexeme) -> Expr {
-        Literal(token(lexeme))
-    }
-
-    fn variable(lexeme: Lexeme) -> Expr {
-        Variable(token(lexeme))
-    }
-
     /// We'll use this macro to test the parser. The parse tree templates will
-    /// take the form of S-expressions parenthesizes with curly braces (for
-    /// readability), with leaves being calls to the `token`, `literal`, and
-    /// `variable` functions.
+    /// take the form of S-expressions. Two avoid wrangling with the Rust macro
+    /// system more than necessary, the leaves of the S-expressions must be
+    /// enclosed in curly braces.
     macro_rules! test_s_expr {
-        // Literal
-        ($ast:expr, literal($lexeme:expr)) => {
-            assert_eq!($ast, literal($lexeme));
-        };
-        // Variable
-        ($ast:expr, variable($lexeme:expr)) => {
-            assert_eq!($ast, variable($lexeme));
-        };
-        // UnOp
-        ($ast:expr, {token($op:ident) $($right:tt)+}) => {
+        // BinOp
+        ($ast:expr, ({$op:expr} $left:tt $right:tt)) => {
             match $ast {
-                UnOp { op, right } => {
-                    assert_eq!(op, token($op));
-                    test_s_expr! { *right, $($right)+ };
-                },
-                _ => { panic!(); },
+                BinOp { op, left, right } => {
+                    assert_eq!(op.lexeme, $op);
+                    test_s_expr! { *left, $left };
+                    test_s_expr! { *right, $right };
+                }
+                _ => {
+                    panic!("AST is not a BinOp!");
+                }
             }
         };
-        // BinOp
-        //($ast:ident (BinOp $left:tt $right:tt)) => {
-
-        //}
+        // UnOp
+        ($ast:expr, ({$op:expr} $right:tt)) => {
+            match $ast {
+                UnOp { op, right } => {
+                    assert_eq!(op.lexeme, $op);
+                    test_s_expr! { *right, $right };
+                }
+                _ => {
+                    panic!("AST is not a UnOp!");
+                }
+            }
+        };
+        // Literals and variables
+        ($ast:expr, {$literal:expr}) => {
+            match $ast {
+                Literal(token) => {
+                    assert_eq!(token.lexeme, $literal);
+                }
+                Variable(token) => {
+                    assert_eq!(token.lexeme, $literal);
+                }
+                _ => {
+                    panic!("This should have been a literal or variable.");
+                }
+            }
+        };
     }
 
     macro_rules! test_parser {
-        // $leaf needs this peculiar structure, and cannot be an `expr`, because
-        // it would otherwise capture its own output and recurse forever.
         ([$($lexeme:expr),+], $($s_expr:tt)+) => {
             let tokens = vec![$(token($lexeme)),+];
             let mut parser = Parser::new(tokens);
-            let ast = parser.unary().unwrap();
+            let ast = parser.expression().unwrap();
             test_s_expr!(ast, $($s_expr)+);
         };
     }
 
-    #[test]
-    fn token_macro() {
-        let token = token(Nat(1));
-        assert_eq!(
-            token,
-            Token {
-                lexeme: Nat(1),
-                loc: Location::default()
-            }
-        );
-    }
+    ///////////////////////////////////////
+    // Terminals: literals and variables //
+    ///////////////////////////////////////
 
     #[test]
     fn single_nat_1() {
         test_parser! {
             [Nat(1)],
-            literal(Nat(1))
+            {Nat(1)}
         };
     }
 
@@ -181,7 +224,7 @@ mod tests {
     fn single_nat_2() {
         test_parser! {
             [Nat(0)],
-            literal(Nat(1))
+            {Nat(1)}
         };
     }
 
@@ -189,7 +232,7 @@ mod tests {
     fn single_false() {
         test_parser! {
             [False],
-            literal(False)
+            {False}
         }
     }
 
@@ -197,7 +240,7 @@ mod tests {
     fn single_true() {
         test_parser! {
             [True],
-            literal(True)
+            {True}
         }
     }
 
@@ -206,7 +249,7 @@ mod tests {
         let name = "foo";
         test_parser! {
             [Ident(name.to_owned())],
-            variable(Ident(name.to_owned()))
+            {Ident(name.to_owned())}
         };
     }
 
@@ -215,23 +258,27 @@ mod tests {
     fn single_var_2() {
         test_parser! {
             [Ident("foo".to_owned())],
-            variable(Ident("bar".to_owned()))
+            {Ident("bar".to_owned())}
         };
     }
+
+    ///////////////////////////////////////
+    // Unari operators: tildes and bangs //
+    ///////////////////////////////////////
 
     #[test]
     fn tilde_false() {
         test_parser! {
             [Tilde, False],
-            {token(Tilde) literal(False)}
+            ({Tilde} {False})
         }
     }
 
     #[test]
-    fn bang_false() {
+    fn bang_true() {
         test_parser! {
-            [Bang, False],
-            {token(Bang) literal(False)}
+            [Bang, True],
+            ({Bang} {True})
         }
     }
 
@@ -239,15 +286,120 @@ mod tests {
     fn tilde_tilde_false() {
         test_parser! {
             [Tilde, Tilde, False],
-            {token(Tilde) {token(Tilde) literal(False)}}
+            ({Tilde} ({Tilde} {False}))
         }
     }
 
     #[test]
     fn tilde_bang_false() {
         test_parser! {
-            [Tilde, Tilde, False],
-            {token(Tilde) {token(Tilde) literal(False)}}
+            [Tilde, Bang, False],
+            ({Tilde} ({Bang} {False}))
+        }
+    }
+
+    //////////////////////
+    // Binary operators //
+    //////////////////////
+
+    #[test]
+    fn plus_simple() {
+        test_parser! {
+            [Nat(1), Plus, Nat(1)],
+            ({Plus} {Nat(1)} {Nat(1)})
+        }
+    }
+
+    #[test]
+    fn star_simple() {
+        test_parser! {
+            [Nat(1), Star, Nat(1)],
+            ({Star} {Nat(1)} {Nat(1)})
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn plus_left_assoc() {
+        test_parser! {
+            [Nat(1), Plus, Nat(2), Plus, Nat(3)],
+            ({Plus}
+             ({Plus} {Nat(1)} {Nat(2)})
+             {Nat(3)})
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn star_left_assoc() {
+        test_parser! {
+            [Nat(1), Star, Nat(2), Star, Nat(3)],
+            ({Star}
+             ({Star} {Nat(1)} {Nat(2)})
+             {Nat(3)})
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn mixed_star_plus() {
+        test_parser! {
+            [Nat(1), Star, Nat(2), Plus, Nat(3)],
+            ({Plus}
+             ({Star} {Nat(1)} {Nat(2)})
+             {Nat(3)})
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn mixed_plus_star() {
+        test_parser! {
+            [Nat(1), Plus, Nat(2), Star, Nat(3)],
+            ({Plus} {Nat(1)}
+             ({Star} {Nat(2)} {Nat(3)}))
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn mixed_plus_equalequal() {
+        test_parser! {
+            [Nat(2), Plus, Nat(2), EqualEqual, Nat(3), Plus, Nat(1)],
+            ({EqualEqual}
+             ({Plus} {Nat(2)} {Nat(2)})
+             ({Plus} {Nat(3)} {Nat(1)})
+            )
+        }
+    }
+
+    //////////////////////////////
+    // Binary + unary operators //
+    //////////////////////////////
+
+    #[test]
+    fn bang_plus() {
+        test_parser! {
+            [Bang, Nat(1), Plus, Nat(2)],
+            ({Plus} ({Bang} {Nat(1)}) {Nat(2)})
+        }
+    }
+
+    #[test]
+    fn plus_bang() {
+        test_parser! {
+            [Nat(1), Plus, Bang, Nat(2)],
+            ({Plus} {Nat(1)} ({Bang} {Nat(2)}))
+        }
+    }
+
+    #[test]
+    fn plus_bang_plus() {
+        test_parser! {
+            [Nat(1), Plus, Bang, Nat(2), Plus, Nat(3)],
+            ({Plus}
+             ({Plus} {Nat(1)} ({Bang} {Nat(2)}))
+             {Nat(3)})
         }
     }
 }

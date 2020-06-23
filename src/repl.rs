@@ -1,6 +1,7 @@
 use crate::backend::Backend;
 use crate::errors;
 use crate::interpreter::Interpreter;
+use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceObject};
 use crate::sys;
 use std::fmt::Display;
@@ -32,30 +33,35 @@ impl Repl {
         loop {
             let input = self.get_input();
             match input.as_str() {
-                ":q" => {
-                    break;
+                ":c" => {
+                    self.show_circuit();
                 }
                 ":h" => {
                     self.help();
+                }
+                ":q" => {
+                    break;
                 }
                 ":w" => {
                     self.wheek();
                 }
                 s => {
-                    let source = SourceObject::from_src(s);
-                    let scanner = Scanner::new(source);
-                    match scanner.lex() {
-                        Ok(tokens) => {
-                            println!("{:?}", tokens);
-                        }
-                        Err(errs) => {
-                            self.handle_errors(errs);
-                        }
-                    };
+                    if let Err(errors) = self.handle_input(s) {
+                        self.handle_errors(errors);
+                    }
                 }
             }
         }
         self.farewell();
+    }
+
+    fn handle_input(&self, input: &str) -> Result<(), Vec<Box<dyn errors::Error>>> {
+        let source = SourceObject::from_src(input);
+        let scanner = Scanner::new(source);
+        let tokens = scanner.tokenize()?;
+        let ast = Parser::new(tokens).expression();
+        println!("{:?}", ast);
+        Ok(())
     }
 
     fn handle_errors(&self, errors: Vec<Box<dyn errors::Error>>) {
@@ -69,7 +75,7 @@ impl Repl {
         if self.flags.debug {
             println!("This interpreter is running in DEBUG mode.");
         }
-        self.help();
+        println!("{}", HELP);
     }
 
     fn farewell(&self) {
@@ -82,6 +88,10 @@ impl Repl {
             HELP,
             sys::CONTACT_ADDRESS
         );
+    }
+
+    fn show_circuit(&self) {
+        eprintln!("This feature is not yet implemented.");
     }
 
     // An undocumented behavior of the repl

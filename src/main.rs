@@ -48,7 +48,7 @@ fn main() {
     {
         use cavy::errors;
         eprintln!("Warning: crash reporting is not fully implemented.");
-        panic::set_hook(Box::new(errors::panic::panic_hook));
+        panic::set_hook(Box::new(errors::panic_hook));
     }
 
     let yaml = load_yaml!("cli.yml");

@@ -1,3 +1,8 @@
+
+<div align="center">
+<img src="assets/cavies.svg" width=400 alt="Cavy logo: a capybara with pups."></img>
+</div>
+
 # Overview
 
 [![Build Status](https://travis-ci.com/mcncm/cavy-rs.svg?token=wTZePJvDpqqWnfcvqYkS&branch=master)](https://travis-ci.com/mcncm/cavy-rs)
