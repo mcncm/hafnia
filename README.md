@@ -34,7 +34,7 @@ some simple examples. These are also meant to teach the major points of
 departure of quantum mechanics from the classical intuition of most programmers.
 
 ## Quantum random number generation
-One of the main applications of quantum technologies that exists today is the
+One of the main applications of quantum technologies used today is the
 production of entropy with the strongest possible guarantees of _true physical
 randomness_. Below is some sample Cavy code implementing a simple one-byte QRNG.
 
@@ -50,10 +50,11 @@ imperative programming languages--especially Rust, whose declaration syntax I've
 taken to and shamelessly copied. There are a few novel features, though.
 
 The first is the `?` annotation, which denotes the following type as _linear_.
-Linear types exist in a few other mainstream languages, including Rust, Haskell,
-and Idris 2. They represent values that cannot be _cloned_ or _deleted_. In
-other words, they must be consumed in exactly one place. It turns out that, in a
-remarkable terminological coincidence (or perhaps not!), this is exactly the
+Linear types (or their weaker _affine_ cousins) exist in a few other languages,
+including Rust, Haskell, and the perhaps-less-mainstream Idris 2. They represent
+values that cannot be _cloned_ or _deleted_. In other words, they must be
+consumed in exactly one place. It turns out that, in a remarkable terminological
+coincidence (or is it?), this is exactly the
 [constraint](https://en.wikipedia.org/wiki/No-cloning_theorem) imposed on
 quantum states by the
 [linearity](https://en.wikipedia.org/wiki/Quantum_superposition) of quantum
@@ -74,17 +75,17 @@ which is something like a "quantum-parallel coin flip."
 Finally, we meet the `!` (read "of course" or "measurement") operator, which
 "delinearizes" the `?u8` to a `u8`. _One_ of the 256 wavefunction branches is
 chosen--at random, and according to the [Born
-rule](https://en.wikipedia.org/wiki/Born_rule)--as its concrete classical value.
-The use of `!` for "of course" is standard in the PL theory literature on linear
-typing, and I like its evocation of asserting a "concrete" classical value from
-an "indeterminate" (`?`) quantum state. However, we'll need to pick some other
-notation for our logical-not operator.
+rule](https://en.wikipedia.org/wiki/Born_rule)--as its classical value. The use
+of `!` for "of course" is standard in the PL theory literature on linear typing,
+and I like its evocation of asserting a concrete classical value from an
+"indeterminate" (`?`) quantum state. However, we've had to pick some other
+notation (namely, `~`) for our logical-not operator.
 
 ## Quantum interference
 
 Let's consider a slightly more comicated example, which will introduce another
 feature of quantum mechanics. In particular, we'll see how the `split` function
-differs from a coin flip.
+differs from a mere coin flip.
 
 ```cavy
 let q: ?bool = false;  // Declare a qubit.
@@ -96,26 +97,27 @@ print(!q);             // Write the "random" boolean to stdout.
 If acting on a qubit with `split` were like flipping a coin, This program's
 output trace would be a random bit, since a coin flipped twice still has equal
 odds of landing heads or tails. But quantum randomness is not like classical
-randomness. In fact, the output of this program is always `false`. When the second
-`split` is called, both the |0⟩ and
+randomness. In fact, the output of this program is always `false`. When the
+second `split` is called, both the |0⟩ and
 |1⟩ branches split in turn:
 
-              |0⟩
+              |0⟩  <------------- After line 1, above
              /   \
             /     \
            /       \
           /         \
-        |0⟩    +    |1⟩
+        |0⟩    +    |1⟩  <------- After line 2
         / \         / \
        /   \       /   \
-     |0⟩ + |1⟩ + |0⟩ - |1⟩
+     |0⟩ + |1⟩ + |0⟩ - |1⟩  <---- After line 3
 
-The laws of quantum mechanics dictate that there must be a minus sign, causing
-_interference_ between branches of the wavefunction, and annihilating the weight
-on |1⟩. Every call to `split` really _does_ split the wavefunction on the
-current branch, but the value-dependent signs cause some branches to be washed
-out: this is quantum interference, the fundamental property of quantum mechanics
-from which all the other "weirdness" follows.
+The [laws of quantum
+mechanics](https://en.wikipedia.org/wiki/Unitarity_(physics)) dictate that there
+must be a minus sign, causing _interference_ between branches of the
+wavefunction, and annihilating the weight on |1⟩. Every call to `split` really
+_does_ split the wavefunction on the current branch, but the value-dependent
+signs cause some branches to wash out: this is quantum interference, the
+fundamental property of from which all the other "weirdness" follows.
 
 ## Entanglement generation
 We can create an entangled pair like this:
@@ -127,7 +129,7 @@ let q2: ?bool = false;
 
 q1 = split(q1); // Our little register is now in the state |0⟩|0⟩ + |1⟩|0⟩.
 if q2 {         // On the branch where q0 is |1⟩...
-    q2 = ~q2;  // Invert q1.
+    q2 = ~q2;   // Invert q1.
 }               // Now we have a Bell pair, |0⟩|0⟩ + |1⟩|1⟩.
 
 // Read out the register!
@@ -135,7 +137,7 @@ c1 = !q1; print(c1);
 c2 = !q2; print(c2);
 ```
 
-This program's trace will be either `0\n0` `1\n1`.
+This program's trace will always be either `0\n0` `1\n1`.
 
 <!--
 ## Grover's algorithm
@@ -172,7 +174,7 @@ pycavy.backend = 'bf2'
 
 def qrandom():
     prog = pycavy.compile(""" 
-        print !split(qubit());
+        print(!split(false as ?bool));
     """)
     output = prog.run()
     return output[0]
@@ -214,8 +216,19 @@ reason is "hardware limitations." Since Cavy is a real language intended to run
 on real devices, features that we can't really use are of lower priority.
 
 ### QRAM
-In the examples above, we call `qalloc` to acquire a reference to some memory,
-which is indexed by an integer.
+In the examples above, there is nothing like "heap-allocated qubits." Indeed, we
+only have a small supply of qubits to draw from. If the hardware improves
+substantially, it will one day be possible to address qubits using a "quantum
+random-access memory," in which `?` types are indexed by other `?` types. It's
+an open question what the best syntax and semantics for QRAM would look like,
+but something _like_ the following would become possible:
+
+```
+let q: &?u8 = qalloc(2);  // "heap-allocate" two qubytes
+q[1] = ~q[1];
+...
+...
+```
 
 ### Freeing memory
 Up at the top, I showed you how to allocate qubits.

@@ -30,7 +30,4 @@ impl fmt::Display for Expr {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-}
+pub enum Stmt {}

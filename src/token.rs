@@ -20,7 +20,7 @@ pub enum Lexeme {
     StopStop, EqualEqual, TildeEqual,
 
     // single-character token types
-    Plus, Star, Bang, QuestionMark, Tilde, Comma, Semicolon,
+    Equal, Plus, Star, Bang, QuestionMark, Tilde, Comma, Semicolon,
 
     // delimiters
     LBracket, RBracket, LParen, RParen, LBrace, RBrace,

@@ -1,4 +1,3 @@
-use crate::errors;
 use crate::token::Lexeme::{Ident, Nat};
 use crate::token::{Lexeme, Location, Token, Unsigned};
 use lazy_static::lazy_static;
@@ -70,7 +69,7 @@ impl fmt::Display for ScanError {
     }
 }
 
-impl errors::Error for ScanError {}
+impl std::error::Error for ScanError {}
 
 pub struct SourceObject<'a> {
     pub code: Peekable<Chars<'a>>,
@@ -127,8 +126,10 @@ impl<'a> ScanHead<'a> {
         next
     }
 
+    /// Advance the scan head to the next occurrence of a specific (raw)
+    /// character, not ignoring whitespace.
     fn advance_to(&mut self, target: char) {
-        for ch in self {
+        while let Some(ch) = self.next_raw_char() {
             if ch == target {
                 break;
             }
@@ -163,7 +164,7 @@ pub struct Scanner<'a> {
     scan_head: ScanHead<'a>,
     token_buf: Vec<char>,
     tokens: Vec<Token>,
-    errors: Vec<Box<dyn errors::Error>>,
+    errors: Vec<Box<dyn std::error::Error>>,
 }
 
 // Adds a lexed token to a Scanner's `tokens` vector.
@@ -220,10 +221,13 @@ impl<'a> Scanner<'a> {
         loc
     }
 
-    pub fn tokenize(mut self) -> Result<Vec<Token>, Vec<Box<dyn errors::Error>>> {
-        // This macro adds a token to the `tokens` vector, consuming
-        // all the characters in the Scanner's `token_buf`.
-
+    /// This method, which consumes the `Scanner`, produces either a vector of
+    /// tokens or of representable errors that the caller is expected, in one
+    /// way or another, to display to the user.
+    pub fn tokenize(mut self) -> Result<Vec<Token>, Vec<Box<dyn std::error::Error>>> {
+        // The invariant for this loop is that we're beginning a new token on
+        // each iteration. However, there's no way to add an assertion for this
+        // condition while using `while let` syntax. This is probably fine for now.
         while let Some(ch) = self.next_char() {
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
@@ -232,6 +236,11 @@ impl<'a> Scanner<'a> {
                     push_token!(self, lexeme);
                     // Consume the second character and loop again.
                     self.scan_head.next_raw_char();
+                    continue;
+                } else if (ch, following) == ('/', '/') {
+                    // In a comment: proceed to the next line
+                    self.token_buf.pop(); // The buffer has a '/' in it.
+                    self.scan_head.advance_to_newline();
                     continue;
                 }
             }
@@ -328,7 +337,7 @@ mod tests {
             let scanner = Scanner::new(src);
             let tokens = scanner.tokenize().unwrap();
 
-            assert_eq!(tokens.len(), expected_tokens.len());
+            assert_eq!(tokens.len(), expected_tokens.len(), "expected same number of tokens.");
 
             let token_pairs = tokens
                 .into_iter()
@@ -336,12 +345,14 @@ mod tests {
                 .zip(expected_tokens);
 
             for (token, expected_token) in token_pairs {
-                assert_eq!(token, expected_token);
+                assert_eq!(token, expected_token, "tokens are not the same.");
             }
         };
     }
 
-    // Basic tests
+    //////////////////////////////////
+    // Basic tests: token detection //
+    //////////////////////////////////
 
     #[test]
     #[should_panic]
@@ -367,7 +378,9 @@ mod tests {
         lex_test!("+    +\n+\t\t\t+"; Plus, Plus, Plus, Plus);
     }
 
-    // Numeric tests
+    ///////////////////
+    // Numeric tests //
+    ///////////////////
 
     #[test]
     fn numbers_simple() {
@@ -417,7 +430,9 @@ mod tests {
         );
     }
 
-    // Identifier-related tests
+    //////////////////////////////
+    // Identifier-related tests //
+    //////////////////////////////
 
     #[test]
     fn ident_simple() {
@@ -448,5 +463,22 @@ mod tests {
     fn ident_keywords() {
         lex_test!("if else for let fn print true false";
                   If, Else, For, Let, Fn, Print, True, False);
+    }
+
+    //////////////
+    // Comments //
+    //////////////
+
+    #[test]
+    #[allow(unused_mut)]
+    fn empty_comment() {
+        lex_test!("// I do nothing!"; );
+    }
+
+    #[test]
+    fn comment_on_own_line() {
+        lex_test!("// now do other stuff\n1 + 2";
+                  Nat(1), Plus, Nat(2)
+        );
     }
 }

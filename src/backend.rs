@@ -1,11 +1,9 @@
-use crate::interpreter::CodeObject;
-
 pub struct Output {
     // TODO
 }
 
 pub trait Backend {
-    fn execute(&mut self, obj: &CodeObject) -> Output;
+    fn execute(&mut self) -> Output;
 }
 
 /// A backend that does nothing. When executing a code object, it simply returns
@@ -19,7 +17,7 @@ impl NullBackend {
 }
 
 impl Backend for NullBackend {
-    fn execute(&mut self, _obj: &CodeObject) -> Output {
+    fn execute(&mut self) -> Output {
         Output {}
     }
 }

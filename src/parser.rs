@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, Stmt};
 use crate::errors;
 use crate::token::{
     Lexeme::{self, *},
@@ -29,19 +29,25 @@ lazy_static! {
 #[derive(Debug)]
 pub struct ParseError {
     msg: &'static str,
-    tokens: Vec<Token>,
+    token: Option<Token>,
 }
 
 impl fmt::Display for ParseError {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parsing error [{}]: {}",
-              self.tokens[0].loc, self.msg
-        )
+        match &self.token {
+            Some(token) => {
+                write!(f, "Parsing error at \"{}\" [{}]: {}",
+                       token, token.loc, self.msg)
+            } ,
+            None => {
+                write!(f, "Parsing error: {}", self.msg)
+            }
+        }
     }
 }
 
-impl errors::Error for ParseError {}
+impl std::error::Error for ParseError {}
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
@@ -69,6 +75,36 @@ impl Parser {
         todo!();
     }
 
+    pub fn statement(&mut self) -> Result<Stmt, ParseError> {
+        match self.peek_lexeme() {
+            Some(Let) => self.decl_stmt(),
+            Some(If) => self.if_stmt(),
+            Some(For) => self.for_stmt(),
+            Some(LBrace) => self.block_stmt(),
+            _ => self.expr_stmt(),
+        }
+    }
+
+    fn decl_stmt(&mut self) -> Result<Stmt, ParseError> {
+        todo!();
+    }
+
+    fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
+        todo!();
+    }
+
+    fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        todo!();
+    }
+
+    fn block_stmt(&mut self) -> Result<Stmt, ParseError> {
+        todo!();
+    }
+
+    fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
+        todo!();
+    }
+
     pub fn expression(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.unary()?;
         self.precedence_climb(lhs, 0)
@@ -90,9 +126,10 @@ impl Parser {
         match self.peek_lexeme().unwrap() {
             Nat(_) | True | False => Ok(Expr::Literal(self.tokens.next().unwrap())),
             Ident(_) => Ok(Expr::Variable(self.tokens.next().unwrap())),
-            _ => {
-                todo!();
-            }
+            _ => Err(ParseError {
+                token: self.tokens.next(),
+                msg: "not a primary token.",
+            }),
         }
     }
 
@@ -115,6 +152,8 @@ impl Parser {
                             break;
                         }
                         rhs = self.precedence_climb(rhs, *inner_prec)?;
+                    } else {
+                        break;
                     }
                 }
                 lhs = Expr::BinOp {
@@ -166,6 +205,7 @@ mod tests {
                     test_s_expr! { *right, $right };
                 }
                 _ => {
+                    println!("ast: {}", $ast);
                     panic!("AST is not a BinOp!");
                 }
             }
@@ -178,6 +218,7 @@ mod tests {
                     test_s_expr! { *right, $right };
                 }
                 _ => {
+                    println!("ast: {}", $ast);
                     panic!("AST is not a UnOp!");
                 }
             }
@@ -192,13 +233,22 @@ mod tests {
                     assert_eq!(token.lexeme, $literal);
                 }
                 _ => {
-                    panic!("This should have been a literal or variable.");
+                    println!("ast: {}, expr: {}", $ast, $literal);
+                    panic!("AST is not a Literal or Variable!");
                 }
             }
         };
     }
 
     macro_rules! test_parser {
+        // If there's only a list of lexemes, just try to parse it!
+        ([$($lexeme:expr),+]) => {
+            let tokens = vec![$(token($lexeme)),+];
+            let mut parser = Parser::new(tokens);
+            parser.expression().unwrap();
+        };
+        // If a second arm is included, we'll try to match the parse tree
+        // against the S-expression it contains.
         ([$($lexeme:expr),+], $($s_expr:tt)+) => {
             let tokens = vec![$(token($lexeme)),+];
             let mut parser = Parser::new(tokens);
@@ -253,6 +303,8 @@ mod tests {
         };
     }
 
+    // As a sanity check that the test macros are working, make sure that we
+    // don't accept a different identifier.
     #[test]
     #[should_panic]
     fn single_var_2() {
@@ -263,7 +315,7 @@ mod tests {
     }
 
     ///////////////////////////////////////
-    // Unari operators: tildes and bangs //
+    // Unary operators: tildes and bangs //
     ///////////////////////////////////////
 
     #[test]
@@ -373,6 +425,12 @@ mod tests {
         }
     }
 
+    #[test]
+    #[should_panic]
+    fn plus_nonterminal() {
+        test_parser! { [Nat(1), Plus, Plus] }
+    }
+
     //////////////////////////////
     // Binary + unary operators //
     //////////////////////////////
@@ -400,6 +458,31 @@ mod tests {
             ({Plus}
              ({Plus} {Nat(1)} ({Bang} {Nat(2)}))
              {Nat(3)})
+        }
+    }
+
+    ///////////////////////////
+    // False-positive checks //
+    ///////////////////////////
+
+    // This shouldn't build a tree including the non-operator token `;`
+    #[test]
+    fn non_operator() {
+        test_parser! {
+            [Nat(1), Plus, Nat(2), Semicolon, Nat(4)],
+            ({Plus} {Nat(1)} {Nat(2)})
+        }
+    }
+
+    // Repeat the same thing, but with an actual operator, and show that we
+    // don't get a false-positive in this case.
+    #[test]
+    #[should_panic]
+    fn non_operator_sanity_check() {
+        test_parser! {
+            [Nat(1), Plus, Nat(2), Plus, Nat(3), Plus, Nat(4)],
+            ({Plus} {Nat(1)}
+             ({Plus} {Nat(2)} {Nat(3)}))
         }
     }
 }

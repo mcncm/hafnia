@@ -55,7 +55,7 @@ impl Repl {
         self.farewell();
     }
 
-    fn handle_input(&self, input: &str) -> Result<(), Vec<Box<dyn errors::Error>>> {
+    fn handle_input(&self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
         let source = SourceObject::from_src(input);
         let scanner = Scanner::new(source);
         let tokens = scanner.tokenize()?;
@@ -64,7 +64,7 @@ impl Repl {
         Ok(())
     }
 
-    fn handle_errors(&self, errors: Vec<Box<dyn errors::Error>>) {
+    fn handle_errors(&self, errors: Vec<Box<dyn std::error::Error>>) {
         for err in errors {
             eprintln!("{}", err);
         }
