@@ -1,0 +1,49 @@
+#!/usr/bin/env sh
+#
+# This hook is designed to run pre-commit checks only on staged code. This *may*
+# fail if you partially-stage files. See:
+#
+# https://stackoverflow.com/questions/41304610/run-tests-only-for-staged-files-git-stash-k-u-and-git-stash-pop-will-rais
+
+# Reverts to stable, if you weren't already on it. Makes no effort to restore
+# the toolchain you were previously using. Basically, this is because I'll
+# accept failure on nightly but not on stable.
+rustup default stable
+
+# Only validate *staged* changes; however, don't try if there hasn't been a
+# commit yet, since you can't stash anyway without one.
+if [ $(git rev-list --all --count) -ne 0 ]; then
+    pre_stash=$(git rev-parse refs/stash)
+    git stash push -k -u
+    post_stash=$(git rev-parse refs/stash)
+    if [ $pre_stash == $post_stash ]; then
+        echo "git-stash failed."
+        exit 2
+    fi
+fi
+
+# Reinstate stashed files, and before doing this, clean up any changed files.
+function pop_stash {
+    git reset --hard -q &&
+    git clean -df -q &&
+    git stash pop --index
+}
+
+# This function should run after each test, to exit gracefully if it failed.
+function fail_out {
+    pop_stash
+    exit 1
+}
+
+echo '+cargo test'
+cargo test || fail_out
+
+echo '+cargo clippy -- -D warnings'
+cargo clippy -- -D warnings || fail_out
+
+echo '+cargo fmt -- --check'
+cargo fmt -- --check || fail_out
+
+# If we've succeeded, we can safely clean up now, and don't have to wait for
+# post-commit.
+pop_stash
