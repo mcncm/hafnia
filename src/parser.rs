@@ -20,8 +20,10 @@ lazy_static! {
         let mut m = HashMap::new();
         m.insert(TildeEqual, Precedence(0, false));
         m.insert(EqualEqual, Precedence(0, false));
-        m.insert(Plus,       Precedence(1, false));
-        m.insert(Star,       Precedence(2, false));
+        m.insert(LAngle,     Precedence(1, false));
+        m.insert(RAngle,     Precedence(1, false));
+        m.insert(Plus,       Precedence(2, false));
+        m.insert(Star,       Precedence(3, false));
         m
     };
 }

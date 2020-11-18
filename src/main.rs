@@ -56,17 +56,27 @@ fn get_code(argmatches: &ArgMatches) -> Result<Option<String>, io::Error> {
 }
 
 fn main() {
-    #[cfg(not(debug_assertions))] // release build only
-    {
-        use cavy::errors;
-        eprintln!("Warning: crash reporting is not fully implemented.");
-        panic::set_hook(Box::new(errors::panic_hook));
-    }
-
     let yaml = load_yaml!("cli.yml");
     let argmatches = App::from(yaml).get_matches();
     let backend = get_backend(&argmatches);
     let flags = get_flags(&argmatches);
+
+    // Only emit debug messages if the program has *not* been built for the
+    // `release` profile, *and* the --debug flag has been passed.
+    #[cfg(not(debug_assertions))]
+    {
+        use cavy::errors;
+        panic::set_hook(Box::new(errors::panic_hook));
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        use cavy::errors;
+        if !flags.debug {
+            panic::set_hook(Box::new(errors::panic_hook));
+        }
+    }
+
     match get_code(&argmatches) {
         // A source file was given and read without error
         Ok(Some(_code)) => {

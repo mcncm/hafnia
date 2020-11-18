@@ -28,7 +28,7 @@ impl Allocator<Value> for QubitAllocator {
     fn alloc_one(&mut self) -> Value {
         let new_index = self.least_free;
         self.least_free += 1;
-        return Value::Q_Bool(new_index);
+        Value::Q_Bool(new_index)
     }
 
     fn free_one(&mut self, value: Value) {
@@ -109,20 +109,47 @@ impl Interpreter {
         op: &Token,
         right: &Expr,
     ) -> Result<Value, Vec<Box<dyn Error>>> {
-        use crate::token::Lexeme::*;
+        use crate::token::Lexeme;
+        use crate::values::Value::*;
         let left_val = self.evaluate(left)?;
         let right_val = self.evaluate(right)?;
         let val = match op.lexeme {
-            Plus => match (left_val, right_val) {
-                (Value::U8(x), Value::U8(y)) => Value::U8(x + y),
-                (Value::U16(x), Value::U16(y)) => Value::U16(x + y),
-                (Value::U32(x), Value::U32(y)) => Value::U32(x + y),
+            Lexeme::Plus => match (left_val, right_val) {
+                (U8(x), U8(y)) => U8(x + y),
+                (U16(x), U16(y)) => U16(x + y),
+                (U32(x), U32(y)) => U32(x + y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Star => match (left_val, right_val) {
-                (Value::U8(x), Value::U8(y)) => Value::U8(x * y),
-                (Value::U16(x), Value::U16(y)) => Value::U16(x * y),
-                (Value::U32(x), Value::U32(y)) => Value::U32(x * y),
+            Lexeme::Star => match (left_val, right_val) {
+                (U8(x), U8(y)) => U8(x * y),
+                (U16(x), U16(y)) => U16(x * y),
+                (U32(x), U32(y)) => U32(x * y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::LAngle => match (left_val, right_val) {
+                (U8(x), U8(y)) => Bool(x < y),
+                (U16(x), U16(y)) => Bool(x < y),
+                (U32(x), U32(y)) => Bool(x < y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::RAngle => match (left_val, right_val) {
+                (U8(x), U8(y)) => Bool(x > y),
+                (U16(x), U16(y)) => Bool(x > y),
+                (U32(x), U32(y)) => Bool(x > y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::EqualEqual => match (left_val, right_val) {
+                (Bool(x), Bool(y)) => Bool(x == y),
+                (U8(x), U8(y)) => Bool(x == y),
+                (U16(x), U16(y)) => Bool(x == y),
+                (U32(x), U32(y)) => Bool(x == y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::TildeEqual => match (left_val, right_val) {
+                (Bool(x), Bool(y)) => Bool(x != y),
+                (U8(x), U8(y)) => Bool(x != y),
+                (U16(x), U16(y)) => Bool(x != y),
+                (U32(x), U32(y)) => Bool(x != y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
             _ => {
@@ -222,6 +249,48 @@ mod tests {
     fn parens_right() {
         test_interpreter! {
             "2 * (3 + 4)"; U32(14)
+        }
+    }
+
+    #[test]
+    fn bool_simple() {
+        test_interpreter! {
+            "true"; Bool(true)
+        }
+    }
+
+    #[test]
+    fn bool_binop() {
+        test_interpreter! {
+            "true != false"; Bool(true)
+        }
+    }
+
+    #[test]
+    fn cmp_lt_simple() {
+        test_interpreter! {
+            "3 < 4"; Bool(true)
+        }
+    }
+
+    #[test]
+    fn cmp_gt_simple() {
+        test_interpreter! {
+            "3 > 4"; Bool(false)
+        }
+    }
+
+    #[test]
+    fn mixed_arith_eq() {
+        test_interpreter! {
+            "2 + 2 == 4"; Bool(true)
+        }
+    }
+
+    #[test]
+    fn mixed_complex() {
+        test_interpreter! {
+            "(2 + 2 < 2 * 1) == (false ~= true)"; Bool(false)
         }
     }
 }

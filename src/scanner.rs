@@ -43,6 +43,8 @@ lazy_static! {
         m.insert(')', Lexeme::RParen);
         m.insert('{', Lexeme::LBrace);
         m.insert('}', Lexeme::RBrace);
+        m.insert('<', Lexeme::LAngle);
+        m.insert('>', Lexeme::RAngle);
         m
     };
     static ref TCTOKENS: HashMap<(char, char), Lexeme> = {
@@ -367,7 +369,7 @@ mod tests {
     #[rustfmt::skip]
     fn single_character_tokens() {
         lex_test!("+ * ~ , ! ? ; [ ] ( ) { }";
-                  Plus, Star, Tilde, Comma, Bang, QuestionMark, Semicolon,
+                  Plus, Star, Tilde, Comma, Bang, Question, Semicolon,
                   LBracket, RBracket, LParen, RParen, LBrace, RBrace);
     }
 

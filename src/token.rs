@@ -23,7 +23,7 @@ pub enum Lexeme {
     Equal, Plus, Star, Bang, Question, Tilde, Comma, Semicolon, Colon,
 
     // delimiters
-    LBracket, RBracket, LParen, RParen, LBrace, RBrace,
+    LBracket, RBracket, LParen, RParen, LBrace, RBrace, LAngle, RAngle,
 }
 
 impl fmt::Display for Lexeme {
