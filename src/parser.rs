@@ -70,6 +70,20 @@ impl Parser {
         self.tokens.next();
     }
 
+    fn consume(&mut self, lexeme: Lexeme, msg: &'static str) -> Result<Token, ParseError> {
+        let token = self.tokens.next().ok_or(ParseError {
+            msg: "No token found",
+            token: None,
+        })?;
+        if token.lexeme == lexeme {
+            return Ok(token);
+        }
+        Err(ParseError {
+            msg,
+            token: Some(token),
+        })
+    }
+
     #[allow(unused_mut)]
     fn parse(mut self) -> Result<Expr, ParseError> {
         todo!();
@@ -126,6 +140,12 @@ impl Parser {
         match self.peek_lexeme().unwrap() {
             Nat(_) | True | False => Ok(Expr::Literal(self.tokens.next().unwrap())),
             Ident(_) => Ok(Expr::Variable(self.tokens.next().unwrap())),
+            LParen => {
+                self.forward();
+                let expr = self.expression();
+                self.consume(RParen, "Expected closing paren ')'")?;
+                Ok(Expr::Group(Box::new(expr?)))
+            }
             _ => Err(ParseError {
                 token: self.tokens.next(),
                 msg: "not a primary token.",

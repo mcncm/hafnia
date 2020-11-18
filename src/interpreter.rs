@@ -28,6 +28,7 @@ impl Interpreter {
             Variable(_) => {
                 todo!();
             }
+            Group(expr) => self.evaluate(expr),
         }
     }
 
@@ -158,5 +159,19 @@ mod tests {
         test_interpreter! {
             "2 * 3 * 4"; U32(24)
         };
+    }
+
+    #[test]
+    fn parens_left() {
+        test_interpreter! {
+            "(2 * 3) + 4"; U32(10)
+        }
+    }
+
+    #[test]
+    fn parens_right() {
+        test_interpreter! {
+            "2 * (3 + 4)"; U32(14)
+        }
     }
 }

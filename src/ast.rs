@@ -14,6 +14,7 @@ pub enum Expr {
     },
     Literal(Token),
     Variable(Token),
+    Group(Box<Expr>),
 }
 
 impl Expr {}
@@ -25,6 +26,7 @@ impl fmt::Display for Expr {
             Self::UnOp { op, right } => format!("({} {})", op, right),
             Self::Literal(token) => format!("{}", token),
             Self::Variable(token) => format!("{}", token),
+            Self::Group(expr) => format!("{}", expr),
         };
         write!(f, "{}", s_expr)
     }
