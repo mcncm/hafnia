@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["mcncm <cavy-lang-support@mit.edu>"]
 edition = "2018"
 build = "build.rs"
+exclude = ["assets"]
 
 [dependencies]
 lazy_static = "1.0"

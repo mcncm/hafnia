@@ -7,12 +7,24 @@ args:
       about: The source file to compile
       required: false
       index: 1
-  - debug:
-      short: d
-      long: debug
-      about: Runs the interpreter in debug mode
   - opt:
       short: O
       value_name: OPT
       about: Sets an optimization level [O0, O1, O2, or O3].
       required: false
+  - debug:
+      short: d
+      long: debug
+      about: Runs the compiler in debug mode
+  - typecheck:
+      long: typecheck
+      about: Stop the compiler at the type-checking phase
+      conflicts_with: parse
+      conflicts_with: tokenize
+  - parse:
+      long: parse
+      about: Stop the compiler at the parsing phase
+      conflicts_with: tokenize
+  - tokenize:
+      long: tokenize
+      about: Stop the compiler at the lexing phase

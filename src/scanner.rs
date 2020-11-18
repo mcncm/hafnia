@@ -36,6 +36,7 @@ lazy_static! {
         m.insert('!', Lexeme::Bang);
         m.insert('?', Lexeme::QuestionMark);
         m.insert(';', Lexeme::Semicolon);
+        m.insert(':', Lexeme::Colon);
         m.insert('[', Lexeme::LBracket);
         m.insert(']', Lexeme::RBracket);
         m.insert('(', Lexeme::LParen);
@@ -113,6 +114,8 @@ impl<'a> ScanHead<'a> {
         }
     }
 
+    /// Advance to the next source character, not ignoring whitespace. If there
+    /// is a character, return it.
     fn next_raw_char(&mut self) -> Option<char> {
         let next = self.src.code.next();
         if let Some(ch) = next {

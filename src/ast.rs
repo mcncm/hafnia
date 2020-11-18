@@ -1,7 +1,7 @@
 use crate::token::Token;
 use std::fmt;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Expr {
     BinOp {
         left: Box<Expr>,

@@ -15,7 +15,19 @@ fn get_backend(_argmatches: &ArgMatches) -> Box<dyn backend::Backend> {
 }
 
 fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
+    // Should we provide debug information?
     let debug = argmatches.is_present("debug");
+
+    // Where should we cut the pipeline short?
+    let mut phase = sys::CompilerPhase::Evaluate;
+    if argmatches.is_present("typecheck") {
+        phase = sys::CompilerPhase::Typecheck;
+    } else if argmatches.is_present("parse") {
+        phase = sys::CompilerPhase::Parse;
+    } else if argmatches.is_present("tokenize") {
+        phase = sys::CompilerPhase::Tokenize;
+    }
+
     // Should this fail silently?
     let opt = match argmatches.value_of("opt") {
         Some("1") => 1,
@@ -30,7 +42,7 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
         );
     }
 
-    sys::Flags { debug, opt }
+    sys::Flags { debug, opt, phase }
 }
 
 fn get_code(argmatches: &ArgMatches) -> Result<Option<String>, io::Error> {

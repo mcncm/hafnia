@@ -12,3 +12,4 @@ pub mod repl;
 pub mod scanner;
 pub mod sys;
 pub mod token;
+pub mod values;

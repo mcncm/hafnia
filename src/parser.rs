@@ -63,7 +63,7 @@ impl Parser {
     }
 
     fn peek_lexeme(&mut self) -> Option<&Lexeme> {
-        self.tokens.peek().map(|tok| &tok.lexeme)
+        self.tokens.peek().map(|token| &token.lexeme)
     }
 
     fn forward(&mut self) {

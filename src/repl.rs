@@ -36,6 +36,9 @@ impl Repl {
                 ":c" => {
                     self.show_circuit();
                 }
+                ":f" => {
+                    println!("{:?}", self.flags);
+                }
                 ":h" => {
                     self.help();
                 }
@@ -57,11 +60,33 @@ impl Repl {
 
     fn handle_input(&self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
         let source = SourceObject::from_src(input);
-        let scanner = Scanner::new(source);
-        let tokens = scanner.tokenize()?;
-        let ast = Parser::new(tokens).expression();
-        println!("{:?}", ast);
-        Ok(())
+
+        let tokens = Scanner::new(source).tokenize()?;
+        if self.flags.phase <= sys::CompilerPhase::Tokenize {
+            // I wonder if there’s another way to factor this code so that I
+            // don’t have to make these tests every time I handle input... Not
+            // that it’s actually a performance bottleneck.
+            println!("{:?}", tokens);
+            return Ok(());
+        }
+
+        let ast = Parser::new(tokens).expression().unwrap();
+        if self.flags.phase <= sys::CompilerPhase::Parse {
+            println!("{:?}", ast);
+            return Ok(());
+        }
+
+        if self.flags.phase <= sys::CompilerPhase::Typecheck {
+            todo!();
+        }
+
+        match self.interpreter.evaluate(&ast) {
+            Ok(value) => {
+                println!("{:?}", value);
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     fn handle_errors(&self, errors: Vec<Box<dyn std::error::Error>>) {
