@@ -2,7 +2,7 @@ use crate::ast::{Expr, Stmt};
 use crate::environment::Environment;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
-use crate::token::Token;
+use crate::token::{Lexeme, Token};
 use crate::values::Value;
 use std::error::Error;
 use std::{collections::HashSet, fmt};
@@ -61,22 +61,23 @@ impl Interpreter {
         }
     }
 
+    /////////////////////////
+    // Statement execution //
+    /////////////////////////
+
     #[rustfmt::skip]
     pub fn execute(&mut self, stmt: &Stmt) -> Result<(), Vec<Box<dyn Error>>> {
+        use crate::ast::Expr;
         use Stmt::*;
         match stmt {
             Print(expr) => {
                 println!("{:?}", self.evaluate(expr)?);
             },
+            Assn { lhs, rhs } => {
+                self.exec_assn(lhs, rhs)?;
+            },
             If { cond, then_branch, else_branch } => {
-                let cond_val = self.coevaluate(cond)?;
-                if cond_val.is_truthy() {
-                    self.execute(then_branch)?;
-                } else {
-                    if let Some(stmt) = else_branch {
-                        self.execute(stmt)?;
-                    }
-                }
+                self.exec_if(cond, then_branch, else_branch)?;
             },
             Block(stmts) => {
                 for stmt in stmts.iter() {
@@ -91,6 +92,37 @@ impl Interpreter {
         Ok(())
     }
 
+    #[rustfmt::skip]
+    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), Vec<Box<dyn Error>>> {
+        use {Lexeme::Ident, Expr::Variable};
+        if let Variable(Token { lexeme: Ident(name), loc: _ }) = lhs {
+            let rhs_val = self.evaluate(rhs)?;
+            self.env.insert(name.clone(), rhs_val);
+        } else {
+            panic!("Only support identifier lhs.");
+        }
+        Ok(())
+    }
+
+    fn exec_if(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Box<Stmt>>,
+    ) -> Result<(), Vec<Box<dyn Error>>> {
+        let cond_val = self.coevaluate(cond)?;
+        if cond_val.is_truthy() {
+            self.execute(then_branch)?;
+        } else if let Some(stmt) = else_branch {
+            self.execute(stmt)?;
+        }
+        Ok(())
+    }
+
+    ///////////////////////////
+    // Expression evaluation //
+    ///////////////////////////
+
     /// Evaluate an expression
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
         use Expr::*;
@@ -98,9 +130,7 @@ impl Interpreter {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
-            Variable(_) => {
-                todo!();
-            }
+            Variable(variable) => self.eval_variable(variable),
             Group(expr) => self.evaluate(expr),
         }
     }
@@ -116,6 +146,19 @@ impl Interpreter {
         }
     }
 
+    fn eval_variable(&mut self, variable: &Token) -> Result<Value, Vec<Box<dyn Error>>> {
+        use crate::token::Lexeme;
+        match &variable.lexeme {
+            Lexeme::Ident(name) => {
+                // About this unwrap: we will at some point in the (hopefully
+                // near) future track whether this operation is safe statically,
+                // and always know when there is a value in the environment.
+                let val = self.env.get(&name).unwrap();
+                Ok(*val)
+            }
+            _ => panic!("Invariant violation!"),
+        }
+    }
     fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
         use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;

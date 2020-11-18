@@ -32,6 +32,7 @@ lazy_static! {
         m.insert('+', Lexeme::Plus);
         m.insert('*', Lexeme::Star);
         m.insert('~', Lexeme::Tilde);
+        m.insert('=', Lexeme::Equal);
         m.insert(',', Lexeme::Comma);
         m.insert('!', Lexeme::Bang);
         m.insert('?', Lexeme::Question);

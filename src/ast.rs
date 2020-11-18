@@ -36,13 +36,15 @@ impl fmt::Display for Expr {
 pub enum Stmt {
     Print(Box<Expr>),
     Expr(Box<Expr>),
-    Block(Vec<Box<Stmt>>),
+    Block(Vec<Stmt>),
     Assn {
         // lvalues might not just be names! In particular, we would like to make
         // destructuring possible. The same is true of other contexts in which
         // lvalues appear, as in the bound expression in a for loop.
         lhs: Box<Expr>,
-        rhs: Vec<Expr>,
+        // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
+        // Stmt, it’s guaranteed to be a Block
+        rhs: Box<Expr>,
     },
     If {
         cond: Box<Expr>,

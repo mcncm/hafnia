@@ -24,7 +24,7 @@ impl fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
     // Base types

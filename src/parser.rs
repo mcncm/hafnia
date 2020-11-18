@@ -94,7 +94,7 @@ impl Parser {
     pub fn statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_lexeme() {
             Some(Print) => self.print_stmt(),
-            Some(Let) => self.declaration(),
+            Some(Let) => self.assn_stmt(),
             Some(If) => self.if_stmt(),
             Some(For) => self.for_stmt(),
             Some(LBrace) => self.block_stmt(),
@@ -106,6 +106,14 @@ impl Parser {
         // TODO Check for assignment
         // TODO Check for function definition
         self.statement()
+    }
+
+    fn assn_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.forward();
+        let lhs = Box::new(self.expression()?);
+        self.consume(Lexeme::Equal, "missing '=' in assignment")?;
+        let rhs = Box::new(self.expression()?);
+        Ok(Stmt::Assn { lhs, rhs })
     }
 
     fn print_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -153,7 +161,7 @@ impl Parser {
             if lexeme == &Lexeme::RBrace {
                 break;
             }
-            stmts.push(Box::new(self.declaration()?))
+            stmts.push(self.declaration()?)
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
         Ok(Stmt::Block(stmts))
@@ -298,7 +306,7 @@ mod tests {
                 }
                 _ => {
                     println!("ast: {}, expr: {}", $ast, $literal);
-                    panic!("AST is not a Literal or Variable!");
+                    panic!("AST is not a Literal or Ident!");
                 }
             }
         };
