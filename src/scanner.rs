@@ -34,7 +34,7 @@ lazy_static! {
         m.insert('~', Lexeme::Tilde);
         m.insert(',', Lexeme::Comma);
         m.insert('!', Lexeme::Bang);
-        m.insert('?', Lexeme::QuestionMark);
+        m.insert('?', Lexeme::Question);
         m.insert(';', Lexeme::Semicolon);
         m.insert(':', Lexeme::Colon);
         m.insert('[', Lexeme::LBracket);

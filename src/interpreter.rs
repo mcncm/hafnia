@@ -5,21 +5,64 @@ use crate::scanner::{ScanError, Scanner};
 use crate::token::Token;
 use crate::values::Value;
 use std::error::Error;
-use std::fmt;
+use std::{collections::HashSet, fmt};
+
+pub trait Allocator<T> {
+    fn alloc_one(&mut self) -> T;
+    fn free_one(&mut self, value: T);
+}
+
+#[derive(Default)]
+pub struct QubitAllocator {
+    least_free: usize,
+    freed: HashSet<usize>,
+}
+
+impl QubitAllocator {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Allocator<Value> for QubitAllocator {
+    fn alloc_one(&mut self) -> Value {
+        let new_index = self.least_free;
+        self.least_free += 1;
+        return Value::Q_Bool(new_index);
+    }
+
+    fn free_one(&mut self, value: Value) {
+        match value {
+            Value::Q_Bool(index) => {
+                // Insert it into the list of freed values, and panic if you’ve
+                // freed the element before.
+                if !self.freed.insert(index) {
+                    panic!();
+                }
+            }
+            _ => {
+                // This shouldn’t be possible.
+                panic!();
+            }
+        }
+    }
+}
 
 pub struct Interpreter {
-    env: Environment,
+    pub env: Environment,
+    pub qubit_allocator: Box<dyn Allocator<Value>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
             env: Environment::new(),
+            qubit_allocator: Box::new(QubitAllocator::new()),
         }
     }
 
     /// Evaluate an expression
-    pub fn evaluate(&self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
         use crate::ast::Expr::*;
         match expr {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
@@ -43,18 +86,25 @@ impl Interpreter {
         }
     }
 
-    fn eval_unop(&self, op: &Token, right: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
         use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;
         let val = match (&op.lexeme, right_val) {
             (Tilde, Value::Bool(x)) => Value::Bool(!x),
+            (Question, Value::Bool(x)) => {
+                let val = self.qubit_allocator.alloc_one();
+                if x {
+                    todo!();
+                }
+                val
+            }
             (_, _) => panic!("Violated a typing invariant"),
         };
         Ok(val)
     }
 
     fn eval_binop(
-        &self,
+        &mut self,
         left: &Expr,
         op: &Token,
         right: &Expr,

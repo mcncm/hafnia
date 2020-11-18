@@ -4,6 +4,7 @@
 
 pub mod ast;
 pub mod backend;
+pub mod circuit;
 pub mod environment;
 pub mod errors;
 pub mod interpreter;

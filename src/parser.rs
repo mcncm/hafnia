@@ -125,7 +125,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, ParseError> {
-        if let Some(Bang) | Some(Tilde) = self.peek_lexeme() {
+        if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.tokens.next().unwrap();
             let right = self.unary()?;
             return Ok(Expr::UnOp {

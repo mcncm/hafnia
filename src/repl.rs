@@ -58,7 +58,7 @@ impl Repl {
         self.farewell();
     }
 
-    fn handle_input(&self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
+    fn handle_input(&mut self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
         let source = SourceObject::from_src(input);
 
         let tokens = Scanner::new(source).tokenize()?;
@@ -116,7 +116,7 @@ impl Repl {
     }
 
     fn show_circuit(&self) {
-        eprintln!("This feature is not yet implemented.");
+        println!("{}", self.interpreter.env.circuit);
     }
 
     // An undocumented behavior of the repl
