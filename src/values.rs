@@ -39,3 +39,12 @@ pub enum Value {
     Q_U16([usize; 16]),
     Q_U32([usize; 32]),
 }
+
+impl Value {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Self::Bool(x) => *x,
+            _ => todo!(),
+        }
+    }
+}

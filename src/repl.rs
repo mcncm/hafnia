@@ -3,7 +3,7 @@ use crate::errors;
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceObject};
-use crate::sys;
+use crate::{ast::Stmt, sys};
 use std::fmt::Display;
 use std::io::{self, Write};
 
@@ -70,7 +70,7 @@ impl Repl {
             return Ok(());
         }
 
-        let ast = Parser::new(tokens).expression().unwrap();
+        let ast = Parser::new(tokens).declaration().unwrap();
         if self.flags.phase <= sys::CompilerPhase::Parse {
             println!("{:?}", ast);
             return Ok(());
@@ -80,12 +80,15 @@ impl Repl {
             todo!();
         }
 
-        match self.interpreter.evaluate(&ast) {
-            Ok(value) => {
-                println!("{:?}", value);
-                Ok(())
-            }
-            Err(err) => Err(err),
+        match ast {
+            Stmt::Expr(expr) => match self.interpreter.evaluate(&expr) {
+                Ok(value) => {
+                    println!("{:?}", value);
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
+            stmt => self.interpreter.execute(&stmt),
         }
     }
 

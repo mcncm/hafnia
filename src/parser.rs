@@ -93,7 +93,8 @@ impl Parser {
 
     pub fn statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_lexeme() {
-            Some(Let) => self.decl_stmt(),
+            Some(Print) => self.print_stmt(),
+            Some(Let) => self.declaration(),
             Some(If) => self.if_stmt(),
             Some(For) => self.for_stmt(),
             Some(LBrace) => self.block_stmt(),
@@ -101,12 +102,45 @@ impl Parser {
         }
     }
 
-    fn decl_stmt(&mut self) -> Result<Stmt, ParseError> {
-        todo!();
+    pub fn declaration(&mut self) -> Result<Stmt, ParseError> {
+        // TODO Check for assignment
+        // TODO Check for function definition
+        self.statement()
+    }
+
+    fn print_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.forward();
+        let expr = self.expression()?;
+        self.consume(Lexeme::Semicolon, "missing ';' after statement")?;
+        Ok(Stmt::Print(Box::new(expr)))
     }
 
     fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
-        todo!();
+        self.forward();
+        // Here we assume that
+        let cond = Box::new(self.expression()?);
+        self.consume(
+            Lexeme::LBrace,
+            "expected '{' opening direct branch of conditional.",
+        )?;
+        let then_branch = Box::new(self.block_stmt()?);
+        let else_branch = match self.peek_lexeme() {
+            Some(Lexeme::Else) => {
+                self.forward();
+                self.consume(
+                    Lexeme::LBrace,
+                    "expected '{' opening indirect branch of conditional.",
+                )?;
+                Some(Box::new(self.block_stmt()?))
+            }
+            _ => None,
+        };
+
+        Ok(Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -114,11 +148,19 @@ impl Parser {
     }
 
     fn block_stmt(&mut self) -> Result<Stmt, ParseError> {
-        todo!();
+        let mut stmts = vec![];
+        while let Some(lexeme) = self.peek_lexeme() {
+            if lexeme == &Lexeme::RBrace {
+                break;
+            }
+            stmts.push(Box::new(self.declaration()?))
+        }
+        self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
+        Ok(Stmt::Block(stmts))
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
-        todo!();
+        Ok(Stmt::Expr(Box::new(self.expression()?)))
     }
 
     pub fn expression(&mut self) -> Result<Expr, ParseError> {

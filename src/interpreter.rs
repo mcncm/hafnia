@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, Stmt};
 use crate::environment::Environment;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
@@ -61,9 +61,39 @@ impl Interpreter {
         }
     }
 
+    #[rustfmt::skip]
+    pub fn execute(&mut self, stmt: &Stmt) -> Result<(), Vec<Box<dyn Error>>> {
+        use Stmt::*;
+        match stmt {
+            Print(expr) => {
+                println!("{:?}", self.evaluate(expr)?);
+            },
+            If { cond, then_branch, else_branch } => {
+                let cond_val = self.coevaluate(cond)?;
+                if cond_val.is_truthy() {
+                    self.execute(then_branch)?;
+                } else {
+                    if let Some(stmt) = else_branch {
+                        self.execute(stmt)?;
+                    }
+                }
+            },
+            Block(stmts) => {
+                for stmt in stmts.iter() {
+                    self.execute(stmt)?;
+                }
+            },
+            stmt => {
+                println!("{:?}", stmt);
+                todo!();
+            }
+        }
+        Ok(())
+    }
+
     /// Evaluate an expression
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
-        use crate::ast::Expr::*;
+        use Expr::*;
         match expr {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
             UnOp { op, right } => self.eval_unop(op, right),
@@ -157,6 +187,11 @@ impl Interpreter {
             }
         };
         Ok(val)
+    }
+
+    pub fn coevaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+        // TODO
+        self.evaluate(expr)
     }
 
     pub fn interpret(&mut self, _input: &str) -> Result<(), Vec<Box<dyn Error>>> {
