@@ -1,7 +1,9 @@
+use crate::backend::{BackendSerializable, Qasm};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
 };
+use Gate::*;
 
 pub type Qubit = usize;
 /// These are gates from which most ordinary circuits will be built
@@ -13,8 +15,6 @@ pub enum Gate {
     Z(Qubit),
     CX { tgt: Qubit, ctrl: Qubit },
 }
-
-use Gate::*;
 
 impl Gate {
     fn qubits(&self) -> Vec<Qubit> {
@@ -79,6 +79,21 @@ impl Gate {
     }
 }
 
+impl BackendSerializable<Qasm> for Gate {
+    #[rustfmt::skip]
+    fn to_backend(&self) -> String {
+        match self {
+            X(tgt)           => format!("x q[{}];", tgt),
+            T { tgt, conj }  => format!("{} q[{}];",
+                                        if *conj { "tdg" } else { "t" },
+                                        tgt),
+            H(tgt)           => format!("h q[{}];", tgt),
+            Z(tgt)           => format!("z q[{}];", tgt),
+            CX { tgt, ctrl } => format!("cz q[{}], q[{}];", ctrl, tgt),
+        }
+    }
+}
+
 /// This is the main public circuit type
 #[derive(Default, Debug)]
 pub struct Circuit {
@@ -103,12 +118,32 @@ impl Circuit {
     }
 }
 
+impl BackendSerializable<Qasm> for Circuit {
+    fn to_backend(&self) -> String {
+        let declaration = {
+            let len = self.qubits.len();
+            if len > 0 {
+                format!("qubit q[{}];", self.qubits.len())
+            } else {
+                String::from("")
+            }
+        };
+        let gates = self
+            .circ_buf
+            .iter()
+            .map(|gate| gate.to_backend())
+            .collect::<Vec<String>>()
+            .join("\n");
+        format!(
+            "OPENQASM 3;\ninclude \"stdgates.inc\";\n{}\n{}",
+            declaration, gates
+        )
+    }
+}
+
 impl fmt::Display for Circuit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut repr = String::new();
-        for _ in 0..self.qubits.len() {
-            repr.push_str(".\n");
-        }
+        let repr = self.to_backend();
         write!(f, "{}", repr)
     }
 }

@@ -4,15 +4,10 @@ use std::panic;
 use std::path::Path;
 use std::process;
 
-use cavy::backend;
 use cavy::repl::Repl;
 use cavy::sys;
 
 use clap::{load_yaml, App, ArgMatches};
-
-fn get_backend(_argmatches: &ArgMatches) -> Box<dyn backend::Backend> {
-    Box::new(backend::NullBackend::new())
-}
 
 fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     // Should we provide debug information?
@@ -58,7 +53,6 @@ fn get_code(argmatches: &ArgMatches) -> Result<Option<String>, io::Error> {
 fn main() {
     let yaml = load_yaml!("cli.yml");
     let argmatches = App::from(yaml).get_matches();
-    let backend = get_backend(&argmatches);
     let flags = get_flags(&argmatches);
 
     // Only emit debug messages if the program has *not* been built for the
@@ -84,7 +78,7 @@ fn main() {
         }
         // A source file was not given; run a repl
         Ok(None) => {
-            let mut repl = Repl::new(backend, flags);
+            let mut repl = Repl::new(flags);
             repl.run();
         }
         // An error was encountered in reading a source file

@@ -15,15 +15,13 @@ const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
 pub struct Repl<'a> {
     interpreter: Interpreter<'a>,
-    backend: Box<dyn Backend>,
     flags: sys::Flags,
 }
 
 impl<'a> Repl<'a> {
-    pub fn new(backend: Box<dyn Backend>, flags: sys::Flags) -> Repl<'a> {
+    pub fn new(flags: sys::Flags) -> Repl<'a> {
         Repl {
             interpreter: Interpreter::new(),
-            backend,
             flags,
         }
     }
@@ -119,7 +117,7 @@ impl<'a> Repl<'a> {
     }
 
     fn show_circuit(&self) {
-        println!("{:?}", self.interpreter.circuit);
+        println!("{}", self.interpreter.circuit);
     }
 
     // An undocumented behavior of the repl

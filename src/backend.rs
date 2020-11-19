@@ -1,23 +1,27 @@
-pub struct Output {
-    // TODO
-}
-
 pub trait Backend {
-    fn execute(&mut self) -> Output;
+    type CodeObject;
 }
 
-/// A backend that does nothing. When executing a code object, it simply returns
-/// an empty output.
+pub trait BackendSerializable<T: Backend> {
+    fn to_backend(&self) -> T::CodeObject;
+}
+
+///////////////////////
+// Concrete Backends //
+///////////////////////
+
 pub struct NullBackend {}
+impl Backend for NullBackend {
+    type CodeObject = ();
+}
 
 impl NullBackend {
-    pub fn new() -> NullBackend {
-        NullBackend {}
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl Backend for NullBackend {
-    fn execute(&mut self) -> Output {
-        Output {}
-    }
+pub struct Qasm {}
+impl Backend for Qasm {
+    type CodeObject = String;
 }
