@@ -1,17 +1,16 @@
-use crate::circuit::Circuit;
-use crate::values::Value;
-use std::collections::HashMap;
+use crate::{circuit::Qubit, values::Value};
+use std::collections::{HashMap, HashSet};
 
 type Key = String;
 
 #[derive(Default)]
-pub struct Environment {
+pub struct Environment<'a> {
     pub values: HashMap<Key, Value>,
-    pub circuit: Circuit,
-    enclosing: Option<Box<Self>>,
+    pub controls: HashSet<Qubit>,
+    enclosing: Option<&'a Self>,
 }
 
-impl Environment {
+impl<'a> Environment<'a> {
     pub fn new() -> Self {
         Self::default()
     }

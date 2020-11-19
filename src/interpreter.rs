@@ -3,7 +3,10 @@ use crate::environment::Environment;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
-use crate::values::Value;
+use crate::{
+    circuit::{Circuit, Gate, Qubit},
+    values::Value,
+};
 use std::error::Error;
 use std::{collections::HashSet, fmt};
 
@@ -48,15 +51,17 @@ impl Allocator<Value> for QubitAllocator {
     }
 }
 
-pub struct Interpreter {
-    pub env: Environment,
+pub struct Interpreter<'a> {
+    pub env: Environment<'a>,
+    pub circuit: Circuit,
     pub qubit_allocator: Box<dyn Allocator<Value>>,
 }
 
-impl Interpreter {
+impl<'a> Interpreter<'a> {
     pub fn new() -> Self {
         Interpreter {
             env: Environment::new(),
+            circuit: Circuit::new(),
             qubit_allocator: Box::new(QubitAllocator::new()),
         }
     }
@@ -104,17 +109,40 @@ impl Interpreter {
         Ok(())
     }
 
+    #[rustfmt::skip]
     fn exec_if(
         &mut self,
         cond: &Expr,
         then_branch: &Stmt,
         else_branch: &Option<Box<Stmt>>,
     ) -> Result<(), Vec<Box<dyn Error>>> {
+        // TODO this is not yet proper coevaluation. Instead, `exec_if` should
+        // probably take cond_val as already computed, and this function should
+        // be passed into `coevaluate` as a parameter.
         let cond_val = self.coevaluate(cond)?;
-        if cond_val.is_truthy() {
-            self.execute(then_branch)?;
-        } else if let Some(stmt) = else_branch {
-            self.execute(stmt)?;
+        match cond_val {
+            Value::Q_Bool(u) => {
+                // TODO This demands abstraction! It’s really messy, and
+                // horrible obscures the structure of the problem. 
+                self.env.controls.insert(u);
+                self.execute(then_branch)?;
+                self.env.controls.remove(&u);
+                if let Some(else_branch) = else_branch {
+                    self.emit_gate(Gate::X(u));
+                    self.env.controls.insert(u);
+                    self.execute(else_branch)?;
+                    self.env.controls.remove(&u);
+                    self.emit_gate(Gate::X(u));
+                }
+            }
+            Value::Bool(_) => {
+                if cond_val.is_truthy() {
+                    self.execute(then_branch)?;
+                } else if let Some(stmt) = else_branch {
+                    self.execute(stmt)?;
+                }
+            }
+            _ => panic!("Violated a typing invariant"),
         }
         Ok(())
     }
@@ -159,15 +187,26 @@ impl Interpreter {
             _ => panic!("Invariant violation!"),
         }
     }
+
     fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+        use crate::circuit::Gate;
         use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;
         let val = match (&op.lexeme, right_val) {
             (Tilde, Value::Bool(x)) => Value::Bool(!x),
+            (Tilde, Value::Q_Bool(u)) => {
+                self.emit_gate(Gate::X(u));
+                Value::Q_Bool(u)
+            }
+
             (Question, Value::Bool(x)) => {
                 let val = self.qubit_allocator.alloc_one();
                 if x {
-                    todo!();
+                    if let Value::Q_Bool(u) = val {
+                        self.emit_gate(Gate::X(u));
+                    } else {
+                        unreachable!();
+                    }
                 }
                 val
             }
@@ -239,6 +278,20 @@ impl Interpreter {
 
     pub fn interpret(&mut self, _input: &str) -> Result<(), Vec<Box<dyn Error>>> {
         Ok(())
+    }
+
+    // pub fn with_control(&mut self, ctrl: Qubit, f: Box<dyn FnMut() -> ()>) {
+    //     self.env.controls.insert(ctrl);
+    //     f();
+    //     self.env.controls.remove(&ctrl);
+    // }
+
+    /////////////////////
+    // Code generation //
+    /////////////////////
+
+    pub fn emit_gate(&mut self, gate: Gate) {
+        self.circuit.push_back(gate, &self.env.controls);
     }
 }
 

@@ -13,14 +13,14 @@ const WELCOME: &str = "Welcome to the alpha version of cavy-rs!";
 const GOODBYE: &str = "Thanks for hacking with us!";
 const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
-pub struct Repl {
-    interpreter: Interpreter,
+pub struct Repl<'a> {
+    interpreter: Interpreter<'a>,
     backend: Box<dyn Backend>,
     flags: sys::Flags,
 }
 
-impl Repl {
-    pub fn new(backend: Box<dyn Backend>, flags: sys::Flags) -> Repl {
+impl<'a> Repl<'a> {
+    pub fn new(backend: Box<dyn Backend>, flags: sys::Flags) -> Repl<'a> {
         Repl {
             interpreter: Interpreter::new(),
             backend,
@@ -119,7 +119,7 @@ impl Repl {
     }
 
     fn show_circuit(&self) {
-        println!("{}", self.interpreter.env.circuit);
+        println!("{:?}", self.interpreter.circuit);
     }
 
     // An undocumented behavior of the repl

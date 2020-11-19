@@ -3,45 +3,86 @@ use std::{
     fmt,
 };
 
-type Qubit = usize;
-type NdArray = ();
-
-/// This is the common trait that any gate type must derive to be pushed to a
-/// backend. Making `Gate` a trait makes it possible to include some
-/// less-conventional operations like probabilistic gates.
-pub trait Gate {
-    fn qubits(&self) -> Vec<Qubit>;
-
-    fn to_matrix(&self) -> NdArray {
-        unimplemented!();
-    }
-}
-
+pub type Qubit = usize;
 /// These are gates from which most ordinary circuits will be built
-pub enum CommonGate {
+#[derive(Debug, Clone)]
+pub enum Gate {
     X(Qubit),
-    T(Qubit),
+    T { tgt: Qubit, conj: bool },
     H(Qubit),
     Z(Qubit),
-    CX(Qubit, Qubit),
+    CX { tgt: Qubit, ctrl: Qubit },
 }
 
-impl Gate for CommonGate {
+use Gate::*;
+
+impl Gate {
     fn qubits(&self) -> Vec<Qubit> {
         match self {
-            Self::X(qubit) => vec![*qubit],
-            Self::T(qubit) => vec![*qubit],
-            Self::H(qubit) => vec![*qubit],
-            Self::Z(qubit) => vec![*qubit],
-            Self::CX(control, target) => vec![*control, *target],
+            X(tgt) => vec![*tgt],
+            T { tgt, conj: _ } => vec![*tgt],
+            H(tgt) => vec![*tgt],
+            Z(tgt) => vec![*tgt],
+            CX { ctrl, tgt } => vec![*ctrl, *tgt],
         }
+    }
+
+    fn conjugate(self) -> Gate {
+        match self {
+            T { tgt, conj } => T { tgt, conj: !conj },
+            _ => self,
+        }
+    }
+
+    #[rustfmt::skip]
+    fn controlled_on(self, ctrl: Qubit) -> Vec<Gate> {
+        match self {
+            X(tgt) => vec![CX { ctrl, tgt }],
+            T { tgt: _, conj: _ } => todo!(),
+            H(_tgt) => todo!(),
+            Z(tgt) => vec![
+                Z(tgt),
+                CX { ctrl, tgt },
+                Z(tgt)
+            ],
+            // This is just applying a well-known identity for CCX.
+            CX { ctrl: inner_ctrl, tgt } => vec![
+                H(tgt),
+                CX { ctrl: inner_ctrl, tgt },
+                T { tgt, conj: true},
+                CX { ctrl, tgt },
+                T { tgt, conj: false },
+                CX { ctrl: inner_ctrl, tgt },
+                T { tgt, conj: true},
+                CX { ctrl, tgt },
+                T { tgt: inner_ctrl, conj: false },
+                T { tgt, conj: false },
+                CX { ctrl, tgt: inner_ctrl },
+                H(tgt),
+                T { tgt: ctrl, conj: false },
+                T { tgt: inner_ctrl, conj: true },
+                CX { ctrl, tgt: inner_ctrl },
+            ],
+        }
+    }
+
+    /// Control on multiple qubits
+    fn multi_controlled(self, ctrls: &HashSet<Qubit>) -> Vec<Gate> {
+        let mut inner_gates = vec![self];
+        for ctrl in ctrls.iter() {
+            inner_gates = inner_gates
+                .into_iter()
+                .flat_map(|gate| gate.controlled_on(*ctrl))
+                .collect::<Vec<Gate>>()
+        }
+        inner_gates
     }
 }
 
 /// This is the main public circuit type
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Circuit {
-    circ_buf: VecDeque<Box<dyn Gate>>,
+    circ_buf: VecDeque<Gate>,
     qubits: HashSet<Qubit>,
 }
 
@@ -50,9 +91,15 @@ impl Circuit {
         Self::default()
     }
 
-    pub fn push_back(&mut self, gate: Box<dyn Gate>) {
-        self.qubits.extend(gate.qubits());
-        self.circ_buf.push_back(gate);
+    /// This method embeds a gate into the circuit, controlled on the qubits
+    /// given in its `ctrls` argument.
+    pub fn push_back(&mut self, gate: Gate, ctrls: &HashSet<Qubit>) {
+        // self.circ_buf.push_back(gate);
+        let inner_gates = gate.multi_controlled(ctrls);
+        for inner_gate in inner_gates.into_iter() {
+            self.qubits.extend(inner_gate.qubits().iter());
+            self.circ_buf.push_back(inner_gate);
+        }
     }
 }
 

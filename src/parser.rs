@@ -113,6 +113,7 @@ impl Parser {
         let lhs = Box::new(self.expression()?);
         self.consume(Lexeme::Equal, "missing '=' in assignment")?;
         let rhs = Box::new(self.expression()?);
+        self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
         Ok(Stmt::Assn { lhs, rhs })
     }
 
