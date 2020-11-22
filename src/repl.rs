@@ -2,7 +2,7 @@ use crate::backend::Backend;
 use crate::errors;
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
-use crate::scanner::{Scanner, SourceObject};
+use crate::scanner::{Scanner, SourceCode};
 use crate::{ast::Stmt, sys};
 use std::fmt::Display;
 use std::io::{self, Write};
@@ -57,7 +57,7 @@ impl<'a> Repl<'a> {
     }
 
     fn handle_input(&mut self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
-        let source = SourceObject::from_src(input);
+        let source = SourceCode::from_src(input);
 
         let tokens = Scanner::new(source).tokenize()?;
         if self.flags.phase <= sys::CompilerPhase::Tokenize {
@@ -68,7 +68,7 @@ impl<'a> Repl<'a> {
             return Ok(());
         }
 
-        let ast = Parser::new(tokens).declaration().unwrap();
+        let ast = Parser::new(tokens).declaration().unwrap().unwrap();
         if self.flags.phase <= sys::CompilerPhase::Parse {
             println!("{:?}", ast);
             return Ok(());

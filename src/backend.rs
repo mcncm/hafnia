@@ -1,3 +1,10 @@
+/// In this module we outline the Backend api. This is pretty unstable for the
+/// time being, so don’t rely on it.
+
+/// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
+/// this is what Cirq supports.
+pub const QASM_VERSION: &'static str = "2.0";
+
 pub trait Backend {
     type CodeObject;
 }

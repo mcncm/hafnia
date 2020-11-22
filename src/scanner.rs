@@ -75,14 +75,14 @@ impl fmt::Display for ScanError {
 
 impl std::error::Error for ScanError {}
 
-pub struct SourceObject<'a> {
+pub struct SourceCode<'a> {
     pub code: Peekable<Chars<'a>>,
     // TODO: should replace this with a &Path or &PathBuf, but this leads to a lot
     // of lifetime wrangling I don't want to deal with right now.
     pub file: Option<String>,
 }
 
-impl<'a> SourceObject<'a> {
+impl<'a> SourceCode<'a> {
     pub fn from_src(src: &'a str) -> Self {
         Self {
             code: src.chars().peekable(),
@@ -92,14 +92,14 @@ impl<'a> SourceObject<'a> {
 }
 
 struct ScanHead<'a> {
-    src: SourceObject<'a>,
+    src: SourceCode<'a>,
     pub pos: usize,  // absolute position in source
     pub line: usize, // line number in source
     pub col: usize,  // column number in source
 }
 
 impl<'a> ScanHead<'a> {
-    fn new(src: SourceObject<'a>) -> Self {
+    fn new(src: SourceCode<'a>) -> Self {
         ScanHead {
             src,
             pos: 0,
@@ -185,7 +185,7 @@ macro_rules! push_token {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(src: SourceObject<'a>) -> Self {
+    pub fn new(src: SourceCode<'a>) -> Self {
         Scanner {
             scan_head: ScanHead::new(src),
             token_buf: vec![],
@@ -335,7 +335,7 @@ mod tests {
                 )*
             )?
 
-            let src = SourceObject {
+            let src = SourceCode {
                 code: $code.chars().peekable(),
                 file: None,
             };

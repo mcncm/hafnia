@@ -7,6 +7,11 @@ args:
       about: The source file to compile
       required: false
       index: 1
+  - OBJECT:
+      short: o
+      value_name: OBJECT
+      about: Place the output into <file>
+      required: false
   - opt:
       short: O
       value_name: OPT

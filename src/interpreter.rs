@@ -8,7 +8,12 @@ use crate::{
     values::Value,
 };
 use std::error::Error;
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, mem};
+
+/// Many of the methods of the Interpreter type return either a value or a
+/// vector of errors; let’s simplify writing that with a typedef. This should be
+/// an acceptable thing to do; it mimics io::Result.
+type Result<T> = std::result::Result<T, Vec<Box<dyn Error>>>;
 
 pub trait Allocator<T> {
     fn alloc_one(&mut self) -> T;
@@ -55,14 +60,25 @@ pub struct Interpreter<'a> {
     pub env: Environment<'a>,
     pub circuit: Circuit,
     pub qubit_allocator: Box<dyn Allocator<Value>>,
+    // This flag indicates whether code generation is currently covariant or
+    // contravariant. It’s an implementation detail, and I’m not sure I like the
+    // design of branching on a flag. I’m sure to think about this more, and
+    // this detail may not be permanent.
+    contra: bool,
+    // Another implementation detail of contravariant evaluation. This stack is
+    // allocated here so that lives long enough to push into it in a
+    // contravariant context.
+    contra_stack: Vec<Gate>,
 }
 
 impl<'a> Interpreter<'a> {
     pub fn new() -> Self {
-        Interpreter {
+        Self {
             env: Environment::new(),
             circuit: Circuit::new(),
             qubit_allocator: Box::new(QubitAllocator::new()),
+            contra: false,
+            contra_stack: vec![],
         }
     }
 
@@ -71,7 +87,7 @@ impl<'a> Interpreter<'a> {
     /////////////////////////
 
     #[rustfmt::skip]
-    pub fn execute(&mut self, stmt: &Stmt) -> Result<(), Vec<Box<dyn Error>>> {
+    pub fn execute(&mut self, stmt: &Stmt) -> Result<()> {
         use crate::ast::Expr;
         use Stmt::*;
         match stmt {
@@ -80,14 +96,6 @@ impl<'a> Interpreter<'a> {
             },
             Assn { lhs, rhs } => {
                 self.exec_assn(lhs, rhs)?;
-            },
-            If { cond, then_branch, else_branch } => {
-                self.exec_if(cond, then_branch, else_branch)?;
-            },
-            Block(stmts) => {
-                for stmt in stmts.iter() {
-                    self.execute(stmt)?;
-                }
             },
             stmt => {
                 println!("{:?}", stmt);
@@ -98,7 +106,7 @@ impl<'a> Interpreter<'a> {
     }
 
     #[rustfmt::skip]
-    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), Vec<Box<dyn Error>>> {
+    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<()> {
         use {Lexeme::Ident, Expr::Variable};
         if let Variable(Token { lexeme: Ident(name), loc: _ }) = lhs {
             let rhs_val = self.evaluate(rhs)?;
@@ -109,42 +117,77 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
+    fn eval_if(&mut self, cond: &Expr, then_branch: &Expr, else_branch: &Expr) -> Result<Value> {
+        // Note that `self` is passed as a parameter to the closure, rather than
+        // captured from the environment. The latter would violate the borrow
+        // checker rules by making a second mutable borrow.
+        //
+        // NOTE This may not be very idiomatic, and it’s not unlikely that a
+        // future refactoring will replace this pattern entirely.
+        self.coevaluate(cond, &mut |self_, cond_val| {
+            self_.eval_if_inner(&cond_val, then_branch, else_branch)
+        })
+    }
+
     #[rustfmt::skip]
-    fn exec_if(
+    fn eval_if_inner(
         &mut self,
-        cond: &Expr,
-        then_branch: &Stmt,
-        else_branch: &Option<Box<Stmt>>,
-    ) -> Result<(), Vec<Box<dyn Error>>> {
-        // TODO this is not yet proper coevaluation. Instead, `exec_if` should
-        // probably take cond_val as already computed, and this function should
-        // be passed into `coevaluate` as a parameter.
-        let cond_val = self.coevaluate(cond)?;
+        cond_val: &Value,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> Result<Value> {
         match cond_val {
+            // FIXME This is less than half of an implementation!
             Value::Q_Bool(u) => {
-                // TODO This demands abstraction! It’s really messy, and
-                // horrible obscures the structure of the problem. 
-                self.env.controls.insert(u);
-                self.execute(then_branch)?;
-                self.env.controls.remove(&u);
-                if let Some(else_branch) = else_branch {
-                    self.emit_gate(Gate::X(u));
-                    self.env.controls.insert(u);
-                    self.execute(else_branch)?;
-                    self.env.controls.remove(&u);
-                    self.emit_gate(Gate::X(u));
+                // Let’s not handle If *expressions* in the linear case just
+                // yet. I’m not really sure what the correct semantics are for
+                // something like:
+                //
+                // ```
+                // p = if q {
+                //   r
+                // } else {
+                //   s
+                // };
+                // ```
+                //
+                // where q, r, and s are all qubits. You could return an ancilla
+                // controlled r and s (controlled and anticontrolled,
+                // respectively, on q), but this seems to violate linearity.
+                // Maybe introducing a concept of borrowing would be a way to
+                // resolve this.
+                //
+                // FIXME In any case, this exclusion is terribly ad-hoc and
+                // should be enforced in some other way, if it *must* remain.
+                match (then_branch, else_branch) {
+                    (Expr::Block(_, Some(_)), _) => {
+                        unimplemented!();
+                    },
+                    (_, Expr::Block(_, Some(_))) => {
+                        unimplemented!();
+                    },
+                    _ => {}
                 }
-            }
+
+                // Now the implementation for the non-excluded cases. (We should
+                // actually spawn a new environment in the block, in which the
+                // extra control has been added. This is merely piling ad-hoc
+                // solution on ad-hoc solution.)
+                self.env.controls.insert(*u);
+                let val = self.evaluate(then_branch);
+                self.env.controls.remove(u);
+                val
+                // ...And ignore the else branch for now.
+            },
             Value::Bool(_) => {
                 if cond_val.is_truthy() {
-                    self.execute(then_branch)?;
-                } else if let Some(stmt) = else_branch {
-                    self.execute(stmt)?;
+                    self.evaluate(then_branch)
+                } else {
+                    self.evaluate(else_branch)
                 }
-            }
+            },
             _ => panic!("Violated a typing invariant"),
         }
-        Ok(())
     }
 
     ///////////////////////////
@@ -152,7 +195,7 @@ impl<'a> Interpreter<'a> {
     ///////////////////////////
 
     /// Evaluate an expression
-    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value> {
         use Expr::*;
         match expr {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
@@ -160,10 +203,24 @@ impl<'a> Interpreter<'a> {
             Literal(literal) => self.eval_literal(literal),
             Variable(variable) => self.eval_variable(variable),
             Group(expr) => self.evaluate(expr),
+            If {
+                cond,
+                then_branch,
+                else_branch,
+            } => self.eval_if(cond, then_branch, else_branch),
+            Block(stmts, expr) => {
+                for stmt in stmts.iter() {
+                    self.execute(stmt)?;
+                }
+                match expr {
+                    Some(expr) => self.evaluate(expr),
+                    None => Ok(Value::Unit),
+                }
+            }
         }
     }
 
-    fn eval_literal(&self, literal: &Token) -> Result<Value, Vec<Box<dyn Error>>> {
+    fn eval_literal(&self, literal: &Token) -> Result<Value> {
         use crate::token::Lexeme;
         // TODO
         match literal.lexeme {
@@ -174,7 +231,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_variable(&mut self, variable: &Token) -> Result<Value, Vec<Box<dyn Error>>> {
+    fn eval_variable(&mut self, variable: &Token) -> Result<Value> {
         use crate::token::Lexeme;
         match &variable.lexeme {
             Lexeme::Ident(name) => {
@@ -188,14 +245,14 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
+    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value> {
         use crate::circuit::Gate;
         use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;
         let val = match (&op.lexeme, right_val) {
             (Tilde, Value::Bool(x)) => Value::Bool(!x),
             (Tilde, Value::Q_Bool(u)) => {
-                self.emit_gate(Gate::X(u));
+                self.compile_gate(Gate::X(u));
                 Value::Q_Bool(u)
             }
 
@@ -203,7 +260,7 @@ impl<'a> Interpreter<'a> {
                 let val = self.qubit_allocator.alloc_one();
                 if x {
                     if let Value::Q_Bool(u) = val {
-                        self.emit_gate(Gate::X(u));
+                        self.compile_gate(Gate::X(u));
                     } else {
                         unreachable!();
                     }
@@ -215,12 +272,7 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    fn eval_binop(
-        &mut self,
-        left: &Expr,
-        op: &Token,
-        right: &Expr,
-    ) -> Result<Value, Vec<Box<dyn Error>>> {
+    fn eval_binop(&mut self, left: &Expr, op: &Token, right: &Expr) -> Result<Value> {
         use crate::token::Lexeme;
         use crate::values::Value::*;
         let left_val = self.evaluate(left)?;
@@ -271,39 +323,69 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    pub fn coevaluate(&mut self, expr: &Expr) -> Result<Value, Vec<Box<dyn Error>>> {
-        // TODO
-        self.evaluate(expr)
+    /// "Contravariant evaluation", the core logic of the control-flow blocks.
+    /// This expresses any evaluation that takes place in a locally-transformed
+    /// basis.
+    ///
+    /// TODO This design feels non-idiomatic. I should really think about how to
+    /// simplify it, if possible.
+    pub fn coevaluate<'b>(
+        &'b mut self,
+        expr: &Expr,
+        func: &mut dyn FnMut(&mut Interpreter, Value) -> Result<Value>,
+    ) -> Result<Value> {
+        // We should have an invariant here that `self.contra_stack` is empty at
+        // *this* point. We should verify that the error propatation operator
+        // `?` below doesn't break this.
+        self.contra = true;
+        let basis = self.evaluate(expr)?;
+        self.contra = false;
+        // Run the callback
+        let val = func(self, basis)?;
+        // Pop the stack to uncompute.
+        while let Some(gate) = self.contra_stack.pop() {
+            self.emit_gate(gate);
+        }
+        // `self.contra_stack` is once again empty.
+        Ok(val)
     }
 
-    pub fn interpret(&mut self, _input: &str) -> Result<(), Vec<Box<dyn Error>>> {
+    pub fn interpret(&mut self, _input: &str) -> Result<()> {
         Ok(())
     }
-
-    // pub fn with_control(&mut self, ctrl: Qubit, f: Box<dyn FnMut() -> ()>) {
-    //     self.env.controls.insert(ctrl);
-    //     f();
-    //     self.env.controls.remove(&ctrl);
-    // }
 
     /////////////////////
     // Code generation //
     /////////////////////
 
-    pub fn emit_gate(&mut self, gate: Gate) {
-        self.circuit.push_back(gate, &self.env.controls);
+    fn compile_gate(&mut self, gate: Gate) {
+        let inner_gates = gate.controlled_on(&self.env.controls);
+        for inner_gate in inner_gates.into_iter() {
+            self.emit_gate(inner_gate);
+        }
     }
-}
 
-pub struct CodeObject {
-    // TODO
+    /// This function should be called to insert a bare gate into the circuit.
+    ///
+    /// TODO Consider making this function take a wrapper type around Gate to
+    /// ensure that it isn’t called in place to `compile_gate`.
+    ///
+    /// TODO I’d also like, instead of testing for a state flag, to do some kind
+    /// of dynamic dispatch. Unfortunately this turns out to be pretty difficult
+    /// in this context.
+    fn emit_gate(&mut self, gate: Gate) {
+        if self.contra {
+            self.contra_stack.push(gate.clone().conjugate());
+        }
+        self.circuit.push_back(gate);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser::Parser;
-    use crate::scanner::SourceObject;
+    use crate::scanner::SourceCode;
     use crate::token::{Lexeme, Location};
     use crate::values::Value;
 
@@ -324,7 +406,7 @@ mod tests {
         ($code:expr ; $tok:ident$(($($arg:expr),+))?) => {
             let expected_value = Value::$tok $(($($arg),+))?;
 
-            let src = SourceObject {
+            let src = SourceCode {
                 code: $code.chars().peekable(),
                 file: None,
             };

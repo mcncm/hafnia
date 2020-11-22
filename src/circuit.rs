@@ -1,4 +1,4 @@
-use crate::backend::{BackendSerializable, Qasm};
+use crate::backend::{BackendSerializable, Qasm, QASM_VERSION};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
@@ -17,7 +17,7 @@ pub enum Gate {
 }
 
 impl Gate {
-    fn qubits(&self) -> Vec<Qubit> {
+    pub fn qubits(&self) -> Vec<Qubit> {
         match self {
             X(tgt) => vec![*tgt],
             T { tgt, conj: _ } => vec![*tgt],
@@ -27,7 +27,7 @@ impl Gate {
         }
     }
 
-    fn conjugate(self) -> Gate {
+    pub fn conjugate(self) -> Gate {
         match self {
             T { tgt, conj } => T { tgt, conj: !conj },
             _ => self,
@@ -35,7 +35,7 @@ impl Gate {
     }
 
     #[rustfmt::skip]
-    fn controlled_on(self, ctrl: Qubit) -> Vec<Gate> {
+    fn controlled_on_one(self, ctrl: Qubit) -> Vec<Gate> {
         match self {
             X(tgt) => vec![CX { ctrl, tgt }],
             T { tgt: _, conj: _ } => todo!(),
@@ -67,12 +67,12 @@ impl Gate {
     }
 
     /// Control on multiple qubits
-    fn multi_controlled(self, ctrls: &HashSet<Qubit>) -> Vec<Gate> {
+    pub fn controlled_on(self, ctrls: &HashSet<Qubit>) -> Vec<Gate> {
         let mut inner_gates = vec![self];
         for ctrl in ctrls.iter() {
             inner_gates = inner_gates
                 .into_iter()
-                .flat_map(|gate| gate.controlled_on(*ctrl))
+                .flat_map(|gate| gate.controlled_on_one(*ctrl))
                 .collect::<Vec<Gate>>()
         }
         inner_gates
@@ -89,7 +89,7 @@ impl BackendSerializable<Qasm> for Gate {
                                         tgt),
             H(tgt)           => format!("h q[{}];", tgt),
             Z(tgt)           => format!("z q[{}];", tgt),
-            CX { tgt, ctrl } => format!("cz q[{}], q[{}];", ctrl, tgt),
+            CX { tgt, ctrl } => format!("cx q[{}], q[{}];", ctrl, tgt),
         }
     }
 }
@@ -106,15 +106,9 @@ impl Circuit {
         Self::default()
     }
 
-    /// This method embeds a gate into the circuit, controlled on the qubits
-    /// given in its `ctrls` argument.
-    pub fn push_back(&mut self, gate: Gate, ctrls: &HashSet<Qubit>) {
-        // self.circ_buf.push_back(gate);
-        let inner_gates = gate.multi_controlled(ctrls);
-        for inner_gate in inner_gates.into_iter() {
-            self.qubits.extend(inner_gate.qubits().iter());
-            self.circ_buf.push_back(inner_gate);
-        }
+    pub fn push_back(&mut self, gate: Gate) {
+        self.qubits.extend(gate.qubits().iter());
+        self.circ_buf.push_back(gate);
     }
 }
 
@@ -123,7 +117,7 @@ impl BackendSerializable<Qasm> for Circuit {
         let declaration = {
             let len = self.qubits.len();
             if len > 0 {
-                format!("qubit q[{}];", self.qubits.len())
+                format!("qreg q[{}];", self.qubits.len())
             } else {
                 String::from("")
             }
@@ -135,8 +129,8 @@ impl BackendSerializable<Qasm> for Circuit {
             .collect::<Vec<String>>()
             .join("\n");
         format!(
-            "OPENQASM 3;\ninclude \"stdgates.inc\";\n{}\n{}",
-            declaration, gates
+            "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}",
+            QASM_VERSION, declaration, gates
         )
     }
 }

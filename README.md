@@ -26,12 +26,13 @@ libraries. Many of them are perfectly nice, though. I just wanted one with
 Cavy's features!
 
 **All the examples below are written as though the implementation were complete,
-which it is not. Only some of these things actually work.**
+which it is not. Only some of these things actually work, and they’re not
+documented yet.**
 
 # Examples
-Cavy is a small language, so we can get the gist of it by looking at
-some simple examples. These are also meant to teach the major points of
-departure of quantum mechanics from the classical intuition of most programmers.
+Cavy is a small language, so we can get the gist of it by looking at some simple
+examples. These are also meant to teach the major points of departure of quantum
+mechanics from the classical intuition of most programmers.
 
 ## Quantum random number generation
 One of the main applications of quantum technologies used today is the
@@ -155,114 +156,22 @@ mem <- qalloc(n);
 
 # Installation
 
-## On your laptop
-Simply clone the repository, `cd` to the Cavy directory, and run `$ cargo build
---release && cargo install --path .`. It should build and run on Rust stable,
-beta, and nightly, and on Linux, OS X, and Windows.
+## On your personal computer
+You can build and install a Cavy binary with Cargo. Clone the repository, `cd`
+to the Cavy directory, and run `$ cargo build --release && cargo install --path .`.
+Make sure that `~/.cargo/bin` is in your `PATH` variable. It should build and
+run on Rust stable, beta, and nightly, and on Linux, OS X, and Windows.
 
 ## For your quantum computing infrastructure
 Please email `cavy` dash `lang` dash `support` at `mit` dot `edu`.
 
-<!--
-# Programming Cavy
+# Interfacing with other languages
 
-## Calling Cavy from Python
-
-```python
-import pycavy
-pycavy.backend = 'bf2'
-
-def qrandom():
-    prog = pycavy.compile(""" 
-        print(!split(false as ?bool));
-    """)
-    output = prog.run()
-    return output[0]
-```
-
-## The REPL environment
-
-Cavy's real knockout feature is its REPL. Here's the same example from above, run
-at a command line! By executing quantum programs lazily, we can create an illusion
-of interactive programming
-
-```
-$ cavy
-
-Welcome to the alpha version of this repl and language.
-We hope that you enjoy your stay.
-You can type ':q' to quit, and ':h' for help.
-
-ψ⟩ 4 * 3             // calculator stuff
-12
-ψ⟩ q <- qubit()      // quantum stuff: execution is deferred until...
-ψ⟩ q <- split(q) 
-ψ⟩ r <- !q           // ...NOW!
-ψ⟩ print r
-1
-ψ⟩ r + 4             // Now it's just a cvalue
-5
-ψ⟩ :q
-Thanks for hacking with us!
-```
-
--->
-
-<!--
-# Future development
-There are a lot lot of features I'd like to incorporate into Cavy which are
-currently unimplemented. Each of them is missing for a reason. Often, that
-reason is "hardware limitations." Since Cavy is a real language intended to run
-on real devices, features that we can't really use are of lower priority.
-
-### QRAM
-In the examples above, there is nothing like "heap-allocated qubits." Indeed, we
-only have a small supply of qubits to draw from. If the hardware improves
-substantially, it will one day be possible to address qubits using a "quantum
-random-access memory," in which `?` types are indexed by other `?` types. It's
-an open question what the best syntax and semantics for QRAM would look like,
-but something _like_ the following would become possible:
-
-```
-let q: &?u8 = qalloc(2);  // "heap-allocate" two qubytes
-q[1] = ~q[1];
-...
-...
-```
-
-### Freeing memory
-Up at the top, I showed you how to allocate qubits.
-
-### Feedback
-It's currently impossible for qubit operations to depend on classical values
-that cannot be determined at compile time. This is due to the technical
-challenge of fast feedback--within the qubit coherence time--between a classical
-computer and a quantum coprocessor. The difficulty of doing this is lower in
-trapped-ion systems, which enjoy rather long coherence times, but as I don't
-work with these systems, feedback has taken a back seat.
-
-The other reason for its absence is that the my compile targets don't support
-it. Only a few labs actually do this in-house, and they generally don't run
-programs defined in QASM or Cirq when they do.
-
-### Random circuits
-There are interesting tricks you can play if you're allowed to apply quantum
-gates stochastically. There's no reason not to include this feature, and I
-probably will in a future version.
--->
-
-<!--
-# Thanks
-I'm no programming languages expert, so I had to learn how to do this by first
-emulating others. In particular, I want to acknowledge Bob Nystrom, whose book
-[Crafting Interpreters](https://craftinginterpreters.com/) I used as a guide in
-the early stages. Cavy's surface syntax is not quite the same as its _Lox_
-language, and--more saliently--the semantics of quantum operations in Cavy is
-totally foreign to it. However, much of the language's lexing and parsing
-backbone comes _straight_ from this book, down to the names and structure of
-many functions. I _highly_ recommend reading this book if you want to learn how
-to write a practical programming language, and to give Bob money for it.
--->
+## Python
+You can call the Cavy compiler from Python through
+[pycavy](https://github.com/mcncm/pycavy) wrapper, which provides utility
+functions for loading compiling Cavy programs as Cirq and Qiskit circuits, LaTeX
+diagrams, and so on.
 
 # Contributing
 If you discover a bug, please open an issue and/or email `cavy` dash `lang` dash

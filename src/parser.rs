@@ -72,6 +72,15 @@ impl Parser {
         self.tokens.next();
     }
 
+    /// Consumes the parser, generating a list of statements
+    pub fn parse(mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut stmts = vec![];
+        while let Some(stmt) = self.declaration()? {
+            stmts.push(stmt);
+        }
+        Ok(stmts)
+    }
+
     fn consume(&mut self, lexeme: Lexeme, msg: &'static str) -> Result<Token, ParseError> {
         let token = self.tokens.next().ok_or(ParseError {
             msg: "No token found",
@@ -86,23 +95,23 @@ impl Parser {
         })
     }
 
-    #[allow(unused_mut)]
-    fn parse(mut self) -> Result<Expr, ParseError> {
-        todo!();
-    }
-
-    pub fn statement(&mut self) -> Result<Stmt, ParseError> {
-        match self.peek_lexeme() {
+    pub fn statement(&mut self) -> Result<Option<Stmt>, ParseError> {
+        let stmt = match self.peek_lexeme() {
             Some(Print) => self.print_stmt(),
             Some(Let) => self.assn_stmt(),
-            Some(If) => self.if_stmt(),
             Some(For) => self.for_stmt(),
-            Some(LBrace) => self.block_stmt(),
+            None => {
+                return Ok(None);
+            }
             _ => self.expr_stmt(),
+        };
+        match stmt {
+            Ok(stmt) => Ok(Some(stmt)),
+            Err(err) => Err(err),
         }
     }
 
-    pub fn declaration(&mut self) -> Result<Stmt, ParseError> {
+    pub fn declaration(&mut self) -> Result<Option<Stmt>, ParseError> {
         // TODO Check for assignment
         // TODO Check for function definition
         self.statement()
@@ -124,7 +133,7 @@ impl Parser {
         Ok(Stmt::Print(Box::new(expr)))
     }
 
-    fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn if_expr(&mut self) -> Result<Expr, ParseError> {
         self.forward();
         // Here we assume that
         let cond = Box::new(self.expression()?);
@@ -132,20 +141,15 @@ impl Parser {
             Lexeme::LBrace,
             "expected '{' opening direct branch of conditional.",
         )?;
-        let then_branch = Box::new(self.block_stmt()?);
-        let else_branch = match self.peek_lexeme() {
-            Some(Lexeme::Else) => {
-                self.forward();
-                self.consume(
-                    Lexeme::LBrace,
-                    "expected '{' opening indirect branch of conditional.",
-                )?;
-                Some(Box::new(self.block_stmt()?))
-            }
-            _ => None,
-        };
+        let then_branch = Box::new(self.block_expr()?);
+        self.consume(Lexeme::Else, "expected 'else' in conditional expression")?;
+        self.consume(
+            Lexeme::LBrace,
+            "expected '{' opening indirect branch of conditional.",
+        )?;
+        let else_branch = Box::new(self.block_expr()?);
 
-        Ok(Stmt::If {
+        Ok(Expr::If {
             cond,
             then_branch,
             else_branch,
@@ -156,16 +160,31 @@ impl Parser {
         todo!();
     }
 
-    fn block_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn block_expr(&mut self) -> Result<Expr, ParseError> {
         let mut stmts = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
             if lexeme == &Lexeme::RBrace {
                 break;
             }
-            stmts.push(self.declaration()?)
+            stmts.push(self.declaration()?.unwrap())
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
-        Ok(Stmt::Block(stmts))
+
+        // The final expression of the block: we’ll handle this for now by
+        // saying that if the final statement is an expression statement,
+        // remove it and use it as the final value.
+        let mut final_expr = None;
+        match stmts.pop() {
+            Some(Stmt::Expr(expr)) => {
+                final_expr = Some(expr);
+            }
+            Some(stmt) => {
+                // Put it back
+                stmts.push(stmt);
+            }
+            None => {}
+        }
+        Ok(Expr::Block(stmts, final_expr))
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -173,8 +192,15 @@ impl Parser {
     }
 
     pub fn expression(&mut self) -> Result<Expr, ParseError> {
-        let lhs = self.unary()?;
-        self.precedence_climb(lhs, 0)
+        match self.peek_lexeme() {
+            Some(Lexeme::If) => self.if_expr(),
+            Some(Lexeme::LBrace) => self.block_expr(),
+            Some(_) => {
+                let lhs = self.unary()?;
+                self.precedence_climb(lhs, 0)
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn unary(&mut self) -> Result<Expr, ParseError> {

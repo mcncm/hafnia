@@ -1,7 +1,7 @@
 use crate::token::Token;
 use std::fmt;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum Expr {
     BinOp {
         left: Box<Expr>,
@@ -15,6 +15,12 @@ pub enum Expr {
     Literal(Token),
     Variable(Token),
     Group(Box<Expr>),
+    Block(Vec<Stmt>, Option<Box<Expr>>),
+    If {
+        cond: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
 }
 
 impl Expr {}
@@ -27,6 +33,19 @@ impl fmt::Display for Expr {
             Self::Literal(token) => format!("{}", token),
             Self::Variable(token) => format!("{}", token),
             Self::Group(expr) => format!("{}", expr),
+            Self::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => format!("(if {} {} {})", cond, then_branch, else_branch),
+            Self::Block(stmts, expr) => match expr {
+                Some(expr) => {
+                    format!("(block {:?} {})", stmts, *expr)
+                }
+                None => {
+                    format!("(block {:?})", stmts)
+                }
+            },
         };
         write!(f, "{}", s_expr)
     }
@@ -36,7 +55,6 @@ impl fmt::Display for Expr {
 pub enum Stmt {
     Print(Box<Expr>),
     Expr(Box<Expr>),
-    Block(Vec<Stmt>),
     Assn {
         // lvalues might not just be names! In particular, we would like to make
         // destructuring possible. The same is true of other contexts in which
@@ -45,11 +63,6 @@ pub enum Stmt {
         // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
         // Stmt, it’s guaranteed to be a Block
         rhs: Box<Expr>,
-    },
-    If {
-        cond: Box<Expr>,
-        then_branch: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>,
     },
     For {
         bind: Box<Expr>,

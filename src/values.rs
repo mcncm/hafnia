@@ -27,6 +27,8 @@ impl std::error::Error for TypeError {}
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
+    Unit,
+
     // Base types
     Bool(bool),
     U8(u8),
