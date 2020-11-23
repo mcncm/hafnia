@@ -1,5 +1,8 @@
 use crate::token::Lexeme::{Ident, Nat};
-use crate::token::{Lexeme, Location, Token, Unsigned};
+use crate::{
+    errors::ErrorBuf,
+    token::{Lexeme, Location, Token, Unsigned},
+};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt;
@@ -170,7 +173,7 @@ pub struct Scanner<'a> {
     scan_head: ScanHead<'a>,
     token_buf: Vec<char>,
     tokens: Vec<Token>,
-    errors: Vec<Box<dyn std::error::Error>>,
+    errors: ErrorBuf,
 }
 
 // Adds a lexed token to a Scanner's `tokens` vector.
@@ -190,7 +193,7 @@ impl<'a> Scanner<'a> {
             scan_head: ScanHead::new(src),
             token_buf: vec![],
             tokens: vec![],
-            errors: vec![],
+            errors: ErrorBuf::new(),
         }
     }
 
@@ -230,7 +233,7 @@ impl<'a> Scanner<'a> {
     /// This method, which consumes the `Scanner`, produces either a vector of
     /// tokens or of representable errors that the caller is expected, in one
     /// way or another, to display to the user.
-    pub fn tokenize(mut self) -> Result<Vec<Token>, Vec<Box<dyn std::error::Error>>> {
+    pub fn tokenize(mut self) -> Result<Vec<Token>, ErrorBuf> {
         // The invariant for this loop is that we're beginning a new token on
         // each iteration. However, there's no way to add an assertion for this
         // condition while using `while let` syntax. This is probably fine for now.

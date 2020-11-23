@@ -1,5 +1,6 @@
 use crate::ast::{Expr, Stmt};
 use crate::environment::Environment;
+use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
@@ -7,13 +8,7 @@ use crate::{
     circuit::{Circuit, Gate, Qubit},
     values::Value,
 };
-use std::error::Error;
 use std::{collections::HashSet, fmt, mem};
-
-/// Many of the methods of the Interpreter type return either a value or a
-/// vector of errors; let’s simplify writing that with a typedef. This should be
-/// an acceptable thing to do; it mimics io::Result.
-type Result<T> = std::result::Result<T, Vec<Box<dyn Error>>>;
 
 pub trait Allocator<T> {
     fn alloc_one(&mut self) -> T;
@@ -87,7 +82,7 @@ impl<'a> Interpreter<'a> {
     /////////////////////////
 
     #[rustfmt::skip]
-    pub fn execute(&mut self, stmt: &Stmt) -> Result<()> {
+    pub fn execute(&mut self, stmt: &Stmt) -> Result<(), ErrorBuf> {
         use crate::ast::Expr;
         use Stmt::*;
         match stmt {
@@ -106,7 +101,7 @@ impl<'a> Interpreter<'a> {
     }
 
     #[rustfmt::skip]
-    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<()> {
+    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), ErrorBuf> {
         use {Lexeme::Ident, Expr::Variable};
         if let Variable(Token { lexeme: Ident(name), loc: _ }) = lhs {
             let rhs_val = self.evaluate(rhs)?;
@@ -117,7 +112,12 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn eval_if(&mut self, cond: &Expr, then_branch: &Expr, else_branch: &Expr) -> Result<Value> {
+    fn eval_if(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> Result<Value, ErrorBuf> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
         // checker rules by making a second mutable borrow.
@@ -135,7 +135,7 @@ impl<'a> Interpreter<'a> {
         cond_val: &Value,
         then_branch: &Expr,
         else_branch: &Expr,
-    ) -> Result<Value> {
+    ) -> Result<Value, ErrorBuf> {
         match cond_val {
             // FIXME This is less than half of an implementation!
             Value::Q_Bool(u) => {
@@ -195,7 +195,7 @@ impl<'a> Interpreter<'a> {
     ///////////////////////////
 
     /// Evaluate an expression
-    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value> {
+    pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, ErrorBuf> {
         use Expr::*;
         match expr {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
@@ -220,7 +220,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_literal(&self, literal: &Token) -> Result<Value> {
+    fn eval_literal(&self, literal: &Token) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
         // TODO
         match literal.lexeme {
@@ -231,7 +231,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_variable(&mut self, variable: &Token) -> Result<Value> {
+    fn eval_variable(&mut self, variable: &Token) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
         match &variable.lexeme {
             Lexeme::Ident(name) => {
@@ -245,7 +245,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value> {
+    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {
         use crate::circuit::Gate;
         use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;
@@ -272,7 +272,7 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    fn eval_binop(&mut self, left: &Expr, op: &Token, right: &Expr) -> Result<Value> {
+    fn eval_binop(&mut self, left: &Expr, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
         use crate::values::Value::*;
         let left_val = self.evaluate(left)?;
@@ -332,8 +332,8 @@ impl<'a> Interpreter<'a> {
     pub fn coevaluate<'b>(
         &'b mut self,
         expr: &Expr,
-        func: &mut dyn FnMut(&mut Interpreter, Value) -> Result<Value>,
-    ) -> Result<Value> {
+        func: &mut dyn FnMut(&mut Interpreter, Value) -> Result<Value, ErrorBuf>,
+    ) -> Result<Value, ErrorBuf> {
         // We should have an invariant here that `self.contra_stack` is empty at
         // *this* point. We should verify that the error propatation operator
         // `?` below doesn't break this.
@@ -350,7 +350,7 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    pub fn interpret(&mut self, _input: &str) -> Result<()> {
+    pub fn interpret(&mut self, _input: &str) -> Result<(), ErrorBuf> {
         Ok(())
     }
 

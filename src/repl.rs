@@ -1,5 +1,5 @@
 use crate::backend::Backend;
-use crate::errors;
+use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceCode};
@@ -56,7 +56,7 @@ impl<'a> Repl<'a> {
         self.farewell();
     }
 
-    fn handle_input(&mut self, input: &str) -> Result<(), Vec<Box<dyn std::error::Error>>> {
+    fn handle_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
         let source = SourceCode::from_src(input);
 
         let tokens = Scanner::new(source).tokenize()?;
@@ -68,9 +68,10 @@ impl<'a> Repl<'a> {
             return Ok(());
         }
 
-        let ast = Parser::new(tokens).declaration().unwrap().unwrap();
+        let stmts = Parser::new(tokens).parse()?;
+
         if self.flags.phase <= sys::CompilerPhase::Parse {
-            println!("{:?}", ast);
+            println!("{:?}", stmts);
             return Ok(());
         }
 
@@ -78,22 +79,26 @@ impl<'a> Repl<'a> {
             todo!();
         }
 
-        match ast {
-            Stmt::Expr(expr) => match self.interpreter.evaluate(&expr) {
-                Ok(value) => {
-                    println!("{:?}", value);
-                    Ok(())
+        let len = stmts.len();
+        for (n, stmt) in stmts.iter().enumerate() {
+            match stmt {
+                Stmt::Expr(expr) => {
+                    let value = self.interpreter.evaluate(&expr)?;
+                    // Print the value of the final *expression* only
+                    if n == len - 1 {
+                        println!("{:?}", value);
+                    };
                 }
-                Err(err) => Err(err),
-            },
-            stmt => self.interpreter.execute(&stmt),
+                stmt => {
+                    self.interpreter.execute(&stmt)?;
+                }
+            }
         }
+        Ok(())
     }
 
-    fn handle_errors(&self, errors: Vec<Box<dyn std::error::Error>>) {
-        for err in errors {
-            eprintln!("{}", err);
-        }
+    fn handle_errors(&self, errors: ErrorBuf) {
+        eprintln!("{}", errors);
     }
 
     fn greet(&self) {

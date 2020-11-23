@@ -3,7 +3,7 @@
 
 /// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
 /// this is what Cirq supports.
-pub const QASM_VERSION: &'static str = "2.0";
+pub const QASM_VERSION: &str = "2.0";
 
 pub trait Backend {
     type CodeObject;

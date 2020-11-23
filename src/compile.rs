@@ -1,5 +1,6 @@
 use crate::{
     backend::BackendSerializable,
+    errors::Result,
     interpreter::Interpreter,
     parser::Parser,
     scanner::{Scanner, SourceCode},
@@ -7,7 +8,7 @@ use crate::{
 };
 use std::{error::Error, path::PathBuf};
 
-pub fn compile(src: (String, String), _flags: Flags) -> Result<String, Vec<Box<dyn Error>>> {
+pub fn compile(src: (String, String), _flags: Flags) -> Result<String> {
     let src = SourceCode {
         code: src.1.chars().peekable(),
         file: Some(src.0),

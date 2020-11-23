@@ -4,6 +4,7 @@ use crate::token::{
     Lexeme::{self, *},
     Location, Token,
 };
+use errors::ErrorBuf;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt;
@@ -53,14 +54,14 @@ impl std::error::Error for ParseError {}
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
-    errors: Vec<ParseError>,
+    errors: ErrorBuf,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
-            errors: vec![],
+            errors: ErrorBuf::new(),
         }
     }
 
@@ -73,19 +74,23 @@ impl Parser {
     }
 
     /// Consumes the parser, generating a list of statements
-    pub fn parse(mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub fn parse(mut self) -> Result<Vec<Stmt>, ErrorBuf> {
         let mut stmts = vec![];
-        while let Some(stmt) = self.declaration()? {
-            stmts.push(stmt);
+        match self.declaration() {
+            Some(Ok(stmt)) => stmts.push(stmt),
+            Some(Err(err)) => self.errors.push(Box::new(err)),
+            None => {}
         }
-        Ok(stmts)
+
+        if self.errors.is_empty() {
+            Ok(stmts)
+        } else {
+            Err(self.errors)
+        }
     }
 
     fn consume(&mut self, lexeme: Lexeme, msg: &'static str) -> Result<Token, ParseError> {
-        let token = self.tokens.next().ok_or(ParseError {
-            msg: "No token found",
-            token: None,
-        })?;
+        let token = self.tokens.next().ok_or(ParseError { msg, token: None })?;
         if token.lexeme == lexeme {
             return Ok(token);
         }
@@ -95,23 +100,23 @@ impl Parser {
         })
     }
 
-    pub fn statement(&mut self) -> Result<Option<Stmt>, ParseError> {
+    pub fn statement(&mut self) -> Option<Result<Stmt, ParseError>> {
         let stmt = match self.peek_lexeme() {
             Some(Print) => self.print_stmt(),
             Some(Let) => self.assn_stmt(),
             Some(For) => self.for_stmt(),
             None => {
-                return Ok(None);
+                return None;
             }
             _ => self.expr_stmt(),
         };
         match stmt {
-            Ok(stmt) => Ok(Some(stmt)),
-            Err(err) => Err(err),
+            Ok(stmt) => Some(Ok(stmt)),
+            Err(err) => Some(Err(err)),
         }
     }
 
-    pub fn declaration(&mut self) -> Result<Option<Stmt>, ParseError> {
+    pub fn declaration(&mut self) -> Option<Result<Stmt, ParseError>> {
         // TODO Check for assignment
         // TODO Check for function definition
         self.statement()
@@ -166,7 +171,10 @@ impl Parser {
             if lexeme == &Lexeme::RBrace {
                 break;
             }
-            stmts.push(self.declaration()?.unwrap())
+            // Unwrap: should be safe because we cheked already that there is
+            // another lexeme, so we should get either some declaration or an
+            // error.
+            stmts.push(self.declaration().unwrap()?);
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
 
