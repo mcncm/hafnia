@@ -11,6 +11,9 @@ use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+/// The maximum allowed number of arguments to a function
+const MAX_ARGS: usize = 64;
+
 /// Operator precedence: the first field is the scalar precedence; the second is
 /// its right associativity.
 struct Precedence(u8, bool);
@@ -65,8 +68,23 @@ impl Parser {
         }
     }
 
+    /// Check the next lexeme
     fn peek_lexeme(&mut self) -> Option<&Lexeme> {
         self.tokens.peek().map(|token| &token.lexeme)
+    }
+
+    /// Check for a lexeme and, if it matches, advance.
+    fn match_lexeme(&mut self, lexeme: Lexeme) -> bool {
+        if let Some(actual) = self.tokens.peek() {
+            if actual.lexeme == lexeme {
+                self.forward();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
     fn forward(&mut self) {
@@ -90,7 +108,10 @@ impl Parser {
     }
 
     fn consume(&mut self, lexeme: Lexeme, msg: &'static str) -> Result<Token, ParseError> {
-        let token = self.tokens.next().ok_or(ParseError { msg, token: None })?;
+        let token = self.tokens.next().ok_or(ParseError {
+            msg: "unexpected EOF",
+            token: None,
+        })?;
         if token.lexeme == lexeme {
             return Ok(token);
         }
@@ -100,6 +121,24 @@ impl Parser {
         })
     }
 
+    /// Because identifiers have a parameter, we can’t use the regular `consume`
+    /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
+    fn consume_ident(&mut self) -> Result<Token, ParseError> {
+        // TODO This unwrap isn’t safe; you could be at EOF
+        let token = self.tokens.next().ok_or(ParseError {
+            msg: "unexpected EOF",
+            token: None,
+        })?;
+        match token.lexeme {
+            Lexeme::Ident(_) => Ok(token),
+            _ => Err(ParseError {
+                msg: "expected identifier.",
+                token: Some(token),
+            }),
+        }
+    }
+
+    // TODO Need to clean up `statement` and `declaration`.
     pub fn statement(&mut self) -> Option<Result<Stmt, ParseError>> {
         let stmt = match self.peek_lexeme() {
             Some(Print) => self.print_stmt(),
@@ -117,9 +156,32 @@ impl Parser {
     }
 
     pub fn declaration(&mut self) -> Option<Result<Stmt, ParseError>> {
-        // TODO Check for assignment
-        // TODO Check for function definition
+        // TODO Check for assignment (currently in `self.statement`)
+        if self.match_lexeme(Lexeme::Fn) {
+            return Some(self.function_definition());
+        }
         self.statement()
+    }
+
+    fn function_definition(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.consume_ident()?;
+        let mut params = vec![];
+        self.consume(
+            Lexeme::LParen,
+            "expected '(' at beginning of function parameters.",
+        )?;
+        if self.peek_lexeme() != Some(&Lexeme::RParen) {
+            loop {
+                params.push(self.consume_ident()?);
+                if !self.match_lexeme(Lexeme::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(Lexeme::RParen, "expected closing ')' after parameters.")?;
+        self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
+        let body = Box::new(self.block_expr()?);
+        Ok(Stmt::Fn { name, params, body })
     }
 
     fn assn_stmt(&mut self) -> Result<Stmt, ParseError> {

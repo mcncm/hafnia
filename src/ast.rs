@@ -1,7 +1,7 @@
 use crate::token::Token;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     BinOp {
         left: Box<Expr>,
@@ -20,6 +20,14 @@ pub enum Expr {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
+    },
+    Call {
+        // For the time being, functions are not values, so the callee is not an
+        // expression, but just a name. Arguments should also be expressions,
+        // but they are currently also just identifiers.
+        callee: Box<Token>,
+        args: Vec<Token>,
+        paren: Token,
     },
 }
 
@@ -46,12 +54,19 @@ impl fmt::Display for Expr {
                     format!("(block {:?})", stmts)
                 }
             },
+            Self::Call {
+                callee,
+                args,
+                paren: _,
+            } => {
+                format!("({} {:?})", callee, args)
+            }
         };
         write!(f, "{}", s_expr)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Print(Box<Expr>),
     Expr(Box<Expr>),
@@ -63,6 +78,11 @@ pub enum Stmt {
         // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
         // Stmt, it’s guaranteed to be a Block
         rhs: Box<Expr>,
+    },
+    Fn {
+        name: Token,
+        params: Vec<Token>,
+        body: Box<Expr>,
     },
     For {
         bind: Box<Expr>,

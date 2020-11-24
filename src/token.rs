@@ -30,6 +30,7 @@ impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let repr = match self {
             Self::Ident(s) => s.clone(),
+            Self::Fn => "fn".to_owned(),
             Self::Nat(nat) => format!("{}", nat),
             Self::StopStop => "..".to_owned(),
             Self::EqualEqual => "==".to_owned(),
@@ -38,13 +39,15 @@ impl fmt::Display for Lexeme {
             Self::Star => "*".to_owned(),
             Self::Bang => "!".to_owned(),
             Self::Tilde => "~".to_owned(),
+            Self::LParen => "(".to_owned(),
+            Self::RParen => ")".to_owned(),
             _ => "?".to_string(),
         };
         write!(f, "{}", repr)
     }
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct Location {
     pub pos: usize,  // starting position in source file
     pub line: usize, // line number in source file
@@ -61,7 +64,7 @@ impl fmt::Display for Location {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Token {
     pub lexeme: Lexeme,
     pub loc: Location,

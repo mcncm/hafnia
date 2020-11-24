@@ -1,12 +1,12 @@
 use crate::ast::{Expr, Stmt};
-use crate::environment::Environment;
+use crate::environment::{Environment, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
 use crate::{
     circuit::{Circuit, Gate, Qubit},
-    values::Value,
+    values::{self, Func, Value},
 };
 use std::{collections::HashSet, fmt, mem};
 
@@ -92,6 +92,8 @@ impl<'a> Interpreter<'a> {
             Assn { lhs, rhs } => {
                 self.exec_assn(lhs, rhs)?;
             },
+            // Function definition
+            Fn { name, params, body } => self.exec_fn(name, params, body)?,
             stmt => {
                 println!("{:?}", stmt);
                 todo!();
@@ -105,10 +107,45 @@ impl<'a> Interpreter<'a> {
         use {Lexeme::Ident, Expr::Variable};
         if let Variable(Token { lexeme: Ident(name), loc: _ }) = lhs {
             let rhs_val = self.evaluate(rhs)?;
-            self.env.insert(name.clone(), rhs_val);
+            self.env.insert(name.clone(), Nameable::Value(rhs_val));
         } else {
             panic!("Only support identifier lhs.");
         }
+        Ok(())
+    }
+
+    /// Calling this function is how Cavy functions are defined. This has some
+    /// weird consequences. One is that in nested functions, or functions
+    /// defined in loops, they are redefined every time they are encountered. I
+    /// think function definitions should maybe be resolved at some *earlier*
+    /// time, before evaluation.
+    fn exec_fn(
+        &mut self,
+        name: &Token,
+        params: &Vec<Token>,
+        body: &Box<Expr>,
+    ) -> Result<(), ErrorBuf> {
+        let name = match &name.lexeme {
+            Lexeme::Ident(name) => name.clone(),
+            _ => unreachable!(),
+        };
+        let params = params
+            .into_iter()
+            .map(|param| match &param.lexeme {
+                Lexeme::Ident(param_name) => param_name.clone(),
+                _ => unreachable!(),
+            })
+            .collect::<Vec<String>>();
+        let body = Box::new(*body.clone());
+
+        self.env.insert(
+            name,
+            Nameable::Func(values::Func {
+                params,
+                body: body.clone(),
+            }),
+        );
+
         Ok(())
     }
 
@@ -217,6 +254,11 @@ impl<'a> Interpreter<'a> {
                     None => Ok(Value::Unit),
                 }
             }
+            Call {
+                callee,
+                args,
+                paren: _,
+            } => self.eval_call(callee, args),
         }
     }
 
@@ -239,7 +281,12 @@ impl<'a> Interpreter<'a> {
                 // near) future track whether this operation is safe statically,
                 // and always know when there is a value in the environment.
                 let val = self.env.get(&name).unwrap();
-                Ok(*val)
+                match val {
+                    Nameable::Value(val) => Ok(*val),
+                    // In the near-term this should just be an error; in the
+                    // long term, there should be first-class functions.
+                    _ => unimplemented!(),
+                }
             }
             _ => panic!("Invariant violation!"),
         }
@@ -321,6 +368,13 @@ impl<'a> Interpreter<'a> {
             }
         };
         Ok(val)
+    }
+
+    fn eval_call(&mut self, _callee: &Token, _args: &Vec<Token>) -> Result<Value, ErrorBuf> {
+        // TODO this is really *not correct*: arguments should be coevaluated.
+        // Because I don’t want to deal with that just yet, I’m accepting only
+        // identifier arguments.
+        todo!();
     }
 
     /// "Contravariant evaluation", the core logic of the control-flow blocks.

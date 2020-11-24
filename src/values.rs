@@ -1,4 +1,4 @@
-use crate::token::Token;
+use crate::{ast::Expr, token::Token};
 use std::fmt;
 
 #[derive(Debug)]
@@ -49,4 +49,12 @@ impl Value {
             _ => todo!(),
         }
     }
+}
+
+/// Functions: I’ll keep this in this file for now, but note that functions are
+/// not first-class in this language, at least for the time being, as this would
+/// introduce a bit of extra complexity.
+pub struct Func {
+    pub params: Vec<String>,
+    pub body: Box<Expr>,
 }
