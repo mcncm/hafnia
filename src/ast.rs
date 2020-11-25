@@ -26,7 +26,7 @@ pub enum Expr {
         // expression, but just a name. Arguments should also be expressions,
         // but they are currently also just identifiers.
         callee: Box<Token>,
-        args: Vec<Token>,
+        args: Vec<Expr>,
         paren: Token,
     },
 }

@@ -282,7 +282,40 @@ impl Parser {
                 right: Box::new(right),
             });
         }
-        self.primary()
+        self.call()
+    }
+
+    #[rustfmt::skip]
+    fn call(&mut self) -> Result<Expr, ParseError> {
+        let head = self.primary()?;
+        if self.match_lexeme(LParen) {
+            if let Expr::Variable(Token { lexeme: Ident(name), loc }) = head {
+                self.finish_call(Token { lexeme: Ident(name), loc })
+            } else {
+                Ok(head)
+            }
+        } else {
+            Ok(head)
+        }
+    }
+
+    #[inline(always)]
+    fn finish_call(&mut self, callee: Token) -> Result<Expr, ParseError> {
+        let mut args = vec![];
+        if self.peek_lexeme() != Some(&RParen) {
+            loop {
+                args.push(self.expression()?);
+                if !self.match_lexeme(Comma) {
+                    break;
+                }
+            }
+        }
+        let paren = self.consume(RParen, "Expected closing paren ')'")?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args,
+            paren,
+        })
     }
 
     fn primary(&mut self) -> Result<Expr, ParseError> {

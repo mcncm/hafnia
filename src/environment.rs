@@ -4,7 +4,7 @@ use crate::{
 };
 use std::collections::{HashMap, HashSet};
 
-type Key = String;
+pub type Key = String;
 
 /// The type of thing that an environment can hold; namely, a value or a
 /// function.
@@ -70,17 +70,23 @@ impl Environment {
     //////////////////
 
     /// Push an environment onto the stack.
-    pub fn open_scope(&mut self) {
+    pub fn open_scope(
+        &mut self,
+        values: Option<HashMap<Key, Nameable>>,
+        controls: Option<HashSet<Qubit>>,
+    ) {
+        let values = values.unwrap_or(HashMap::new());
+        let controls = controls.unwrap_or(HashSet::new());
+
         let new_store = Box::new(EnvNode {
-            values: HashMap::new(),
-            controls: HashSet::new(),
+            values,
+            controls,
             enclosing: self.store.take(),
         });
 
         self.store = Some(new_store);
     }
 
-    /// This function behaves slightly differenly from that of an ordinary
     /// stack: there is always at least on environment, and `pop_env` simply
     /// returns `None` if only the root environment is left.
     pub fn close_scope(&mut self) {

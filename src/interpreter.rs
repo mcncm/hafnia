@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Stmt};
-use crate::environment::{Environment, Nameable};
+use crate::environment::{Environment, Key, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
@@ -8,7 +8,10 @@ use crate::{
     circuit::{Circuit, Gate, Qubit},
     values::{self, Func, Value},
 };
-use std::{collections::HashSet, fmt, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt, mem,
+};
 
 pub trait Allocator<T> {
     fn alloc_one(&mut self) -> T;
@@ -193,18 +196,22 @@ impl Interpreter {
                     (_, Expr::Block(_, Some(_))) => {
                         unimplemented!();
                     },
-                    _ => {}
+                    (Expr::Block(then_body, None), Expr::Block(_, None)) => {
+                        // Now the implementation for the non-excluded cases. (We should
+                        // actually spawn a new environment in the block, in which the
+                        // extra control has been added. This is merely piling ad-hoc
+                        // solution on ad-hoc solution.)
+                        let mut controls = HashSet::new();
+                        controls.insert(*u);
+                        let val = self.eval_block(then_body, &None, None, Some(controls));
+                        val
+                        // ...And ignore the else branch for now.
+                    }
+                     _ => {
+                         unimplemented!();
+                     }
                 }
 
-                // Now the implementation for the non-excluded cases. (We should
-                // actually spawn a new environment in the block, in which the
-                // extra control has been added. This is merely piling ad-hoc
-                // solution on ad-hoc solution.)
-                self.env.insert_control(*u);
-                let val = self.evaluate(then_branch);
-                self.env.remove_control(*u);
-                val
-                // ...And ignore the else branch for now.
             },
             Value::Bool(_) => {
                 if cond_val.is_truthy() {
@@ -235,7 +242,7 @@ impl Interpreter {
                 then_branch,
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
-            Block(stmts, expr) => self.eval_block(stmts, expr),
+            Block(stmts, expr) => self.eval_block(stmts, expr, None, None),
             Call {
                 callee,
                 args,
@@ -244,17 +251,31 @@ impl Interpreter {
         }
     }
 
-    fn eval_block(&mut self, stmts: &[Stmt], expr: &Option<Box<Expr>>) -> Result<Value, ErrorBuf> {
-        self.env.open_scope();
+    fn eval_block(
+        &mut self,
+        stmts: &[Stmt],
+        expr: &Option<Box<Expr>>,
+        bindings: Option<HashMap<Key, Nameable>>,
+        controls: Option<HashSet<Qubit>>,
+    ) -> Result<Value, ErrorBuf> {
+        self.env.open_scope(bindings, controls);
+        let val = self.eval_block_inner(stmts, expr);
+        self.env.close_scope();
+        val
+    }
+
+    fn eval_block_inner(
+        &mut self,
+        stmts: &[Stmt],
+        expr: &Option<Box<Expr>>,
+    ) -> Result<Value, ErrorBuf> {
         for stmt in stmts.iter() {
             self.execute(stmt)?;
         }
-        let val = match expr {
+        match expr {
             Some(expr) => self.evaluate(expr),
             None => Ok(Value::Unit),
-        };
-        self.env.close_scope();
-        val
+        }
     }
 
     fn eval_literal(&self, literal: &Token) -> Result<Value, ErrorBuf> {
@@ -365,11 +386,51 @@ impl Interpreter {
         Ok(val)
     }
 
-    fn eval_call(&mut self, _callee: &Token, _args: &[Token]) -> Result<Value, ErrorBuf> {
-        // TODO this is really *not correct*: arguments should be coevaluated.
-        // Because I don’t want to deal with that just yet, I’m accepting only
-        // identifier arguments.
-        todo!();
+    fn eval_call(&mut self, callee: &Token, args: &[Expr]) -> Result<Value, ErrorBuf> {
+        let callee = match callee {
+            Token {
+                lexeme: Lexeme::Ident(id),
+                loc: _,
+            } => id,
+            _ => panic!("Violated a typing invariant"),
+        };
+
+        let args: Vec<Value> = args.iter().map(|arg| self.evaluate(arg).unwrap()).collect();
+
+        let func = match self.env.get(callee) {
+            None => unreachable!(), // An earlier typing pass can eliminate this case
+            Some(Nameable::Value(_)) => todo!(), // Should return an error
+
+            // FIXME Ownership gets a little ugly here; let’s save ourself a
+            // little trouble for now, although this clone *could* be quite
+            // expensive.
+            Some(Nameable::Func(func)) => (*func).clone(),
+        };
+
+        if args.len() != func.params.len() {
+            todo!(); // Should also return an error
+        }
+
+        // TODO this is really *not correct*: arguments should be
+        // coevaluated. Because I don’t want to deal with that just yet, I’m
+        // accepting only identifier arguments.
+        //
+        // Actually, on second though, should they be? Maybe there should
+        // really be a distinction between passing by value and passing by
+        // reference.
+        //
+        // FIXME unwrap for testing
+        let bindings: HashMap<Key, Nameable> = func
+            .params
+            .iter()
+            .zip(args.into_iter())
+            .map(|(key, val)| (key.clone(), Nameable::Value(val)))
+            .collect();
+        let val = match &*func.body {
+            Expr::Block(body, expr) => self.eval_block(&body, &expr, Some(bindings), None),
+            _ => unreachable!(),
+        };
+        val
     }
 
     /// "Contravariant evaluation", the core logic of the control-flow blocks.
