@@ -51,8 +51,8 @@ impl Allocator<Value> for QubitAllocator {
     }
 }
 
-pub struct Interpreter<'a> {
-    pub env: Environment<'a>,
+pub struct Interpreter {
+    pub env: Environment,
     pub circuit: Circuit,
     pub qubit_allocator: Box<dyn Allocator<Value>>,
     // This flag indicates whether code generation is currently covariant or
@@ -66,7 +66,7 @@ pub struct Interpreter<'a> {
     contra_stack: Vec<Gate>,
 }
 
-impl<'a> Interpreter<'a> {
+impl Interpreter {
     pub fn new() -> Self {
         Self {
             env: Environment::new(),
@@ -119,32 +119,22 @@ impl<'a> Interpreter<'a> {
     /// defined in loops, they are redefined every time they are encountered. I
     /// think function definitions should maybe be resolved at some *earlier*
     /// time, before evaluation.
-    fn exec_fn(
-        &mut self,
-        name: &Token,
-        params: &Vec<Token>,
-        body: &Box<Expr>,
-    ) -> Result<(), ErrorBuf> {
+    fn exec_fn(&mut self, name: &Token, params: &[Token], body: &Expr) -> Result<(), ErrorBuf> {
         let name = match &name.lexeme {
             Lexeme::Ident(name) => name.clone(),
             _ => unreachable!(),
         };
         let params = params
-            .into_iter()
+            .iter()
             .map(|param| match &param.lexeme {
                 Lexeme::Ident(param_name) => param_name.clone(),
                 _ => unreachable!(),
             })
             .collect::<Vec<String>>();
-        let body = Box::new(*body.clone());
+        let body = Box::new(body.clone());
 
-        self.env.insert(
-            name,
-            Nameable::Func(values::Func {
-                params,
-                body: body.clone(),
-            }),
-        );
+        self.env
+            .insert(name, Nameable::Func(values::Func { params, body }));
 
         Ok(())
     }
@@ -210,9 +200,9 @@ impl<'a> Interpreter<'a> {
                 // actually spawn a new environment in the block, in which the
                 // extra control has been added. This is merely piling ad-hoc
                 // solution on ad-hoc solution.)
-                self.env.controls.insert(*u);
+                self.env.insert_control(*u);
                 let val = self.evaluate(then_branch);
-                self.env.controls.remove(u);
+                self.env.remove_control(*u);
                 val
                 // ...And ignore the else branch for now.
             },
@@ -245,21 +235,26 @@ impl<'a> Interpreter<'a> {
                 then_branch,
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
-            Block(stmts, expr) => {
-                for stmt in stmts.iter() {
-                    self.execute(stmt)?;
-                }
-                match expr {
-                    Some(expr) => self.evaluate(expr),
-                    None => Ok(Value::Unit),
-                }
-            }
+            Block(stmts, expr) => self.eval_block(stmts, expr),
             Call {
                 callee,
                 args,
                 paren: _,
             } => self.eval_call(callee, args),
         }
+    }
+
+    fn eval_block(&mut self, stmts: &[Stmt], expr: &Option<Box<Expr>>) -> Result<Value, ErrorBuf> {
+        self.env.open_scope();
+        for stmt in stmts.iter() {
+            self.execute(stmt)?;
+        }
+        let val = match expr {
+            Some(expr) => self.evaluate(expr),
+            None => Ok(Value::Unit),
+        };
+        self.env.close_scope();
+        val
     }
 
     fn eval_literal(&self, literal: &Token) -> Result<Value, ErrorBuf> {
@@ -370,7 +365,7 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    fn eval_call(&mut self, _callee: &Token, _args: &Vec<Token>) -> Result<Value, ErrorBuf> {
+    fn eval_call(&mut self, _callee: &Token, _args: &[Token]) -> Result<Value, ErrorBuf> {
         // TODO this is really *not correct*: arguments should be coevaluated.
         // Because I don’t want to deal with that just yet, I’m accepting only
         // identifier arguments.
@@ -413,7 +408,7 @@ impl<'a> Interpreter<'a> {
     /////////////////////
 
     fn compile_gate(&mut self, gate: Gate) {
-        let inner_gates = gate.controlled_on(&self.env.controls);
+        let inner_gates = gate.controlled_on(self.env.controls());
         for inner_gate in inner_gates.into_iter() {
             self.emit_gate(inner_gate);
         }

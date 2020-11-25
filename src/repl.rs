@@ -13,13 +13,13 @@ const WELCOME: &str = "Welcome to the alpha version of cavy-rs!";
 const GOODBYE: &str = "Thanks for hacking with us!";
 const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
-pub struct Repl<'a> {
-    interpreter: Interpreter<'a>,
+pub struct Repl {
+    interpreter: Interpreter,
     flags: sys::Flags,
 }
 
-impl<'a> Repl<'a> {
-    pub fn new(flags: sys::Flags) -> Repl<'a> {
+impl Repl {
+    pub fn new(flags: sys::Flags) -> Repl {
         Repl {
             interpreter: Interpreter::new(),
             flags,
