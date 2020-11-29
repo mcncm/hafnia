@@ -302,7 +302,7 @@ impl Interpreter {
                 // and always know when there is a value in the environment.
                 let val = self.env.get(&name).unwrap();
                 match val {
-                    Nameable::Value(val) => Ok(*val),
+                    Nameable::Value(val) => Ok(val),
                     // In the near-term this should just be an error; in the
                     // long term, there should be first-class functions.
                     _ => unimplemented!(),

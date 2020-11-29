@@ -11,7 +11,7 @@ pub type Key = String;
 /// The type of thing that an environment can hold; namely, a value or a
 /// function.
 /// TODO think of a better name than `Nameable`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Nameable {
     Value(Value),
     Func(Rc<dyn Func>),
@@ -44,15 +44,31 @@ impl EnvNode {
         }
     }
 
-    /// Note that this method may mutate `self` if we enforce linearity at
-    /// "runtime."
-    pub fn get(&mut self, k: &str) -> Option<&Nameable> {
+    /// This method may mutate `self` if we enforce linearity at
+    /// "runtime," which is the approach currently taken.
+    pub fn get(&mut self, k: &str) -> Option<Nameable> {
+        self.ancestor_containing(k).map(|node| node.get_inner(k))
+    }
+
+    /// Get a value from this environment, assuming that it is *already known*
+    /// to reside in this environment. This function shouldn’t be called
+    /// externally, and is just an implementation detail of `get`.
+    #[inline(always)]
+    fn get_inner(&mut self, k: &str) -> Nameable {
         // This unwrap is safe because any ancestor is returned by
         // `ancestor_containing` is guaranteed to contain the value.
-        let ancestor = self.ancestor_containing(k);
-        // println!("{:?}", ancestor.as_ref().unwrap().values);
-
-        ancestor.map(|node| node.values.get(k).unwrap())
+        let val = self.values.get(k).unwrap().clone();
+        // NOTE When--and if--we move to fully static typechecking, this will
+        // become unnecessary, and it will be removed.
+        match val {
+            Nameable::Func(_) => {}
+            Nameable::Value(val) => {
+                if val.is_linear() {
+                    self.values.remove(k);
+                }
+            }
+        }
+        val
     }
 }
 pub struct Environment {
@@ -61,7 +77,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Creates an empty enbironment
+    /// Creates an empty environment
     pub fn new() -> Self {
         Self {
             store: Some(Box::new(EnvNode::default())),
@@ -118,7 +134,7 @@ impl Environment {
 
     /// Note that this method may mutate `self` if we enforce linearity at
     /// "runtime."
-    pub fn get(&mut self, k: &str) -> Option<&Nameable> {
+    pub fn get(&mut self, k: &str) -> Option<Nameable> {
         self.store.as_mut().unwrap().get(k)
     }
 

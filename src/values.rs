@@ -49,4 +49,26 @@ impl Value {
             _ => todo!(),
         }
     }
+
+    /// Indicates whether a value can be used only once.
+    ///
+    /// NOTE This function is marked for removal when--and if--we move to static
+    /// type-checking.
+    #[rustfmt::skip]
+    pub fn is_linear(&self) -> bool {
+        use Value::*;
+        match self {
+            Unit        => false,
+
+            Bool(_)     => false,
+            U8(_)       => false,
+            U16(_)      => false,
+            U32(_)      => false,
+
+            Q_Bool(_)   => true,
+            Q_U8(_)     => true,
+            Q_U16(_)    => true,
+            Q_U32(_)    => true,
+        }
+    }
 }
