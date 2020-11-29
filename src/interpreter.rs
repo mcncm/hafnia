@@ -453,9 +453,9 @@ impl Interpreter {
         // We should have an invariant here that `self.contra_stack` is empty at
         // *this* point. We should verify that the error propatation operator
         // `?` below doesn't break this.
-        self.contra = true;
+        self.set_contra(true);
         let basis = self.evaluate(expr)?;
-        self.contra = false;
+        self.set_contra(false);
         // Run the callback
         let val = func(self, basis)?;
         // Pop the stack to uncompute.
@@ -464,6 +464,13 @@ impl Interpreter {
         }
         // `self.contra_stack` is once again empty.
         Ok(val)
+    }
+
+    /// Sets flags for contravariant evaluation. An implementation detail of the
+    /// `coevaluate` method.
+    fn set_contra(&mut self, contra: bool) {
+        self.contra = contra;
+        self.env.moving = !contra;
     }
 
     pub fn interpret(&mut self, _input: &str) -> Result<(), ErrorBuf> {

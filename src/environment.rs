@@ -46,15 +46,19 @@ impl EnvNode {
 
     /// This method may mutate `self` if we enforce linearity at
     /// "runtime," which is the approach currently taken.
-    pub fn get(&mut self, k: &str) -> Option<Nameable> {
-        self.ancestor_containing(k).map(|node| node.get_inner(k))
+    ///
+    /// `moving` is a flag that indicates whether linear values should be moved
+    /// out of the node when accessed.
+    pub fn get(&mut self, k: &str, moving: bool) -> Option<Nameable> {
+        self.ancestor_containing(k)
+            .map(|node| node.get_inner(k, moving))
     }
 
     /// Get a value from this environment, assuming that it is *already known*
     /// to reside in this environment. This function shouldn’t be called
     /// externally, and is just an implementation detail of `get`.
     #[inline(always)]
-    fn get_inner(&mut self, k: &str) -> Nameable {
+    fn get_inner(&mut self, k: &str, moving: bool) -> Nameable {
         // This unwrap is safe because any ancestor is returned by
         // `ancestor_containing` is guaranteed to contain the value.
         let val = self.values.get(k).unwrap().clone();
@@ -63,7 +67,7 @@ impl EnvNode {
         match val {
             Nameable::Func(_) => {}
             Nameable::Value(val) => {
-                if val.is_linear() {
+                if moving & val.is_linear() {
                     self.values.remove(k);
                 }
             }
@@ -71,9 +75,16 @@ impl EnvNode {
         val
     }
 }
+
+/// This struct is the public environment interface seen by the compiler.
+///
+/// The public field `moving` indicates whether accessed values are moved out of
+/// the environment if they are linear. This stands to be removed in the future
+/// if we replace dynamic linearity checking with a separate compiler pass.
 pub struct Environment {
     // It is an invariant of this data structure that `store` never None.
     store: Option<Box<EnvNode>>,
+    pub moving: bool,
 }
 
 impl Environment {
@@ -81,6 +92,7 @@ impl Environment {
     pub fn new() -> Self {
         Self {
             store: Some(Box::new(EnvNode::default())),
+            moving: true,
         }
     }
 
@@ -107,7 +119,6 @@ impl Environment {
     ) {
         let values = values.unwrap_or_default();
         let controls = controls.unwrap_or_default();
-
         let new_store = Box::new(EnvNode {
             values,
             controls,
@@ -135,7 +146,7 @@ impl Environment {
     /// Note that this method may mutate `self` if we enforce linearity at
     /// "runtime."
     pub fn get(&mut self, k: &str) -> Option<Nameable> {
-        self.store.as_mut().unwrap().get(k)
+        self.store.as_mut().unwrap().get(k, self.moving)
     }
 
     /// Add a control in the current scope
