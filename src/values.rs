@@ -50,12 +50,3 @@ impl Value {
         }
     }
 }
-
-/// Functions: I’ll keep this in this file for now, but note that functions are
-/// not first-class in this language, at least for the time being, as this would
-/// introduce a bit of extra complexity.
-#[derive(Debug, Clone)]
-pub struct Func {
-    pub params: Vec<String>,
-    pub body: Box<Expr>,
-}

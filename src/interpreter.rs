@@ -6,11 +6,13 @@ use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
 use crate::{
     circuit::{Circuit, Gate, Qubit},
-    values::{self, Func, Value},
+    functions::{Func, UserFunc},
+    values::{self, Value},
 };
 use std::{
     collections::{HashMap, HashSet},
     fmt, mem,
+    rc::Rc,
 };
 
 pub trait Allocator<T> {
@@ -72,7 +74,7 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         Self {
-            env: Environment::new(),
+            env: Environment::base(),
             circuit: Circuit::new(),
             qubit_allocator: Box::new(QubitAllocator::new()),
             contra: false,
@@ -137,7 +139,7 @@ impl Interpreter {
         let body = Box::new(body.clone());
 
         self.env
-            .insert(name, Nameable::Func(values::Func { params, body }));
+            .insert(name, Nameable::Func(Rc::new(UserFunc { params, body })));
 
         Ok(())
     }
@@ -203,8 +205,7 @@ impl Interpreter {
                         // solution on ad-hoc solution.)
                         let mut controls = HashSet::new();
                         controls.insert(*u);
-                        let val = self.eval_block(then_body, &None, None, Some(controls));
-                        val
+                        self.eval_block(then_body, &None, None, Some(controls))
                         // ...And ignore the else branch for now.
                     }
                      _ => {
@@ -251,7 +252,10 @@ impl Interpreter {
         }
     }
 
-    fn eval_block(
+    /// NOTE This function is only public because it’s used by user-defined
+    /// functions. It’s not clearly something that *should* be exposed as part
+    /// of the compiler API.
+    pub fn eval_block(
         &mut self,
         stmts: &[Stmt],
         expr: &Option<Box<Expr>>,
@@ -404,33 +408,35 @@ impl Interpreter {
             // FIXME Ownership gets a little ugly here; let’s save ourself a
             // little trouble for now, although this clone *could* be quite
             // expensive.
-            Some(Nameable::Func(func)) => (*func).clone(),
+            Some(Nameable::Func(func)) => func.clone(),
         };
 
-        if args.len() != func.params.len() {
-            todo!(); // Should also return an error
-        }
+        func.call(self, &args)
 
-        // TODO this is really *not correct*: arguments should be
-        // coevaluated. Because I don’t want to deal with that just yet, I’m
-        // accepting only identifier arguments.
-        //
-        // Actually, on second though, should they be? Maybe there should
-        // really be a distinction between passing by value and passing by
-        // reference.
-        //
-        // FIXME unwrap for testing
-        let bindings: HashMap<Key, Nameable> = func
-            .params
-            .iter()
-            .zip(args.into_iter())
-            .map(|(key, val)| (key.clone(), Nameable::Value(val)))
-            .collect();
-        let val = match &*func.body {
-            Expr::Block(body, expr) => self.eval_block(&body, &expr, Some(bindings), None),
-            _ => unreachable!(),
-        };
-        val
+        // if args.len() != func.params.len() {
+        //     todo!(); // Should also return an error
+        // }
+
+        // // TODO this is really *not correct*: arguments should be
+        // // coevaluated. Because I don’t want to deal with that just yet, I’m
+        // // accepting only identifier arguments.
+        // //
+        // // Actually, on second though, should they be? Maybe there should
+        // // really be a distinction between passing by value and passing by
+        // // reference.
+        // //
+        // // FIXME unwrap for testing
+        // let bindings: HashMap<Key, Nameable> = func
+        //     .params
+        //     .iter()
+        //     .zip(args.into_iter())
+        //     .map(|(key, val)| (key.clone(), Nameable::Value(val)))
+        //     .collect();
+
+        // match &*func.body {
+        //     Expr::Block(body, expr) => self.eval_block(&body, &expr, Some(bindings), None),
+        //     _ => unreachable!(),
+        // }
     }
 
     /// "Contravariant evaluation", the core logic of the control-flow blocks.
@@ -468,7 +474,12 @@ impl Interpreter {
     // Code generation //
     /////////////////////
 
-    fn compile_gate(&mut self, gate: Gate) {
+    /// Generate code for a (non-elementary) gate.
+    ///
+    /// NOTE Like `eval_block`, this function is only public because it’s used
+    /// by user-defined functions. It’s not clearly something that *should* be
+    /// exposed as part of the compiler API.
+    pub fn compile_gate(&mut self, gate: Gate) {
         let inner_gates = gate.controlled_on(self.env.controls());
         for inner_gate in inner_gates.into_iter() {
             self.emit_gate(inner_gate);

@@ -1,8 +1,10 @@
-use crate::{
-    circuit::Qubit,
-    values::{Func, Value},
+use crate::functions::builtins::BUILTINS;
+use crate::{circuit::Qubit, functions::Func, values::Value};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
 };
-use std::collections::{HashMap, HashSet};
 
 pub type Key = String;
 
@@ -12,7 +14,7 @@ pub type Key = String;
 #[derive(Debug)]
 pub enum Nameable {
     Value(Value),
-    Func(Func),
+    Func(Rc<dyn Func>),
 }
 
 /// Our environments are just linked lists, with the caveat that they are never empty.
@@ -59,10 +61,22 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Creates an empty enbironment
     pub fn new() -> Self {
         Self {
             store: Some(Box::new(EnvNode::default())),
         }
+    }
+
+    /// Creates an environment with builtin functions included. This should only
+    /// be called once, so I’m not very worried about the cost of cloning.
+    /// Nevertheless, You might want to think about cleaner ways of doing this.
+    pub fn base() -> Self {
+        let mut env = Self::new();
+        for (name, func) in BUILTINS.iter() {
+            env.insert(name.to_string(), Nameable::Func(Rc::new(func.clone())));
+        }
+        env
     }
 
     //////////////////
@@ -75,8 +89,8 @@ impl Environment {
         values: Option<HashMap<Key, Nameable>>,
         controls: Option<HashSet<Qubit>>,
     ) {
-        let values = values.unwrap_or(HashMap::new());
-        let controls = controls.unwrap_or(HashSet::new());
+        let values = values.unwrap_or_default();
+        let controls = controls.unwrap_or_default();
 
         let new_store = Box::new(EnvNode {
             values,
