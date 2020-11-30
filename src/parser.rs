@@ -55,6 +55,13 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+/// A generic binary enum (which for some reason isn't in the standard library.
+/// In this module it's used when returning either an expression or a statement.
+pub enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
     errors: ErrorBuf,
@@ -94,10 +101,14 @@ impl Parser {
     /// Consumes the parser, generating a list of statements
     pub fn parse(mut self) -> Result<Vec<Stmt>, ErrorBuf> {
         let mut stmts = vec![];
-        match self.declaration() {
-            Some(Ok(stmt)) => stmts.push(stmt),
-            Some(Err(err)) => self.errors.push(Box::new(err)),
-            None => {}
+        loop {
+            match self.declaration() {
+                Ok(Some(stmt)) => stmts.push(stmt),
+                Err(err) => self.errors.push(Box::new(err)),
+                Ok(None) => {
+                    break;
+                }
+            }
         }
 
         if self.errors.is_empty() {
@@ -138,29 +149,42 @@ impl Parser {
         }
     }
 
-    // TODO Need to clean up `statement` and `declaration`.
-    pub fn statement(&mut self) -> Option<Result<Stmt, ParseError>> {
-        let stmt = match self.peek_lexeme() {
-            Some(Print) => self.print_stmt(),
-            Some(Let) => self.assn_stmt(),
-            Some(For) => self.for_stmt(),
-            None => {
-                return None;
-            }
-            _ => self.expr_stmt(),
-        };
-        match stmt {
-            Ok(stmt) => Some(Ok(stmt)),
-            Err(err) => Some(Err(err)),
+    /// A declaration, which is either a definition or a statement
+    pub fn declaration(&mut self) -> Result<Option<Stmt>, ParseError> {
+        // TODO Check for assignment (currently in `self.statement`)
+        if self.match_lexeme(Lexeme::Fn) {
+            Ok(Some(self.function_definition()?))
+        } else {
+            self.statement()
         }
     }
 
-    pub fn declaration(&mut self) -> Option<Result<Stmt, ParseError>> {
-        // TODO Check for assignment (currently in `self.statement`)
-        if self.match_lexeme(Lexeme::Fn) {
-            return Some(self.function_definition());
+    /// Produces a statement
+    pub fn statement(&mut self) -> Result<Option<Stmt>, ParseError> {
+        match self.stmt_or_expr() {
+            Ok(Some(Either::Left(stmt))) => Ok(Some(stmt)),
+            Ok(Some(Either::Right(expr))) => {
+                // If we got an expression, return an expression statement
+                if expr.requires_semicolon() {
+                    self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
+                }
+                Ok(Some(Stmt::Expr(Box::new(expr))))
+            }
+            // Any other combination of Some/None, Ok/Err: propagate it
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
         }
-        self.statement()
+    }
+
+    /// Produces either a statement or a (bare) expression.
+    pub fn stmt_or_expr(&mut self) -> Result<Option<Either<Stmt, Expr>>, ParseError> {
+        match self.peek_lexeme() {
+            Some(Print) => Ok(Some(Either::Left(self.print_stmt()?))),
+            Some(Let) => Ok(Some(Either::Left(self.assn_stmt()?))),
+            Some(For) => Ok(Some(Either::Left(self.for_stmt()?))),
+            None => Ok(None),
+            _ => Ok(Some(Either::Right(self.expression()?))),
+        }
     }
 
     fn function_definition(&mut self) -> Result<Stmt, ParseError> {
@@ -229,6 +253,7 @@ impl Parser {
 
     fn block_expr(&mut self) -> Result<Expr, ParseError> {
         let mut stmts = vec![];
+        let mut final_expr = None;
         while let Some(lexeme) = self.peek_lexeme() {
             if lexeme == &Lexeme::RBrace {
                 break;
@@ -236,29 +261,23 @@ impl Parser {
             // Unwrap: should be safe because we cheked already that there is
             // another lexeme, so we should get either some declaration or an
             // error.
-            stmts.push(self.declaration().unwrap()?);
+            match self.stmt_or_expr()?.unwrap() {
+                Either::Left(stmt) => {
+                    stmts.push(stmt);
+                }
+                Either::Right(expr) => {
+                    final_expr = Some(expr);
+                }
+            }
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
-
-        // The final expression of the block: we’ll handle this for now by
-        // saying that if the final statement is an expression statement,
-        // remove it and use it as the final value.
-        let mut final_expr = None;
-        match stmts.pop() {
-            Some(Stmt::Expr(expr)) => {
-                final_expr = Some(expr);
-            }
-            Some(stmt) => {
-                // Put it back
-                stmts.push(stmt);
-            }
-            None => {}
-        }
-        Ok(Expr::Block(stmts, final_expr))
+        Ok(Expr::Block(stmts, final_expr.map(|expr| Box::new(expr))))
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
-        Ok(Stmt::Expr(Box::new(self.expression()?)))
+        let res = Stmt::Expr(Box::new(self.expression()?));
+        self.consume(Lexeme::Semicolon, "missing ';' after expression statement!")?;
+        Ok(res)
     }
 
     pub fn expression(&mut self) -> Result<Expr, ParseError> {

@@ -99,6 +99,10 @@ impl Interpreter {
             },
             // Function definition
             Fn { name, params, body } => self.exec_fn(name, params, body)?,
+            // Expression statement
+            Expr(expr) => {
+                self.evaluate(expr)?;
+            }
             stmt => {
                 println!("{:?}", stmt);
                 todo!();
@@ -191,26 +195,20 @@ impl Interpreter {
                 //
                 // FIXME In any case, this exclusion is terribly ad-hoc and
                 // should be enforced in some other way, if it *must* remain.
-                match (then_branch, else_branch) {
-                    (Expr::Block(_, Some(_)), _) => {
-                        unimplemented!();
-                    },
-                    (_, Expr::Block(_, Some(_))) => {
-                        unimplemented!();
-                    },
-                    (Expr::Block(then_body, None), Expr::Block(_, None)) => {
+                match then_branch {
+                    Expr::Block(then_body, then_expr) => {
                         // Now the implementation for the non-excluded cases. (We should
                         // actually spawn a new environment in the block, in which the
                         // extra control has been added. This is merely piling ad-hoc
                         // solution on ad-hoc solution.)
                         let mut controls = HashSet::new();
                         controls.insert(*u);
-                        self.eval_block(then_body, &None, None, Some(controls))
+                        self.eval_block(then_body, then_expr, None, Some(controls))
                         // ...And ignore the else branch for now.
                     }
-                     _ => {
-                         unimplemented!();
-                     }
+                    _ => {
+                         unreachable!();
+                    }
                 }
 
             },
@@ -487,7 +485,7 @@ impl Interpreter {
     /// by user-defined functions. It’s not clearly something that *should* be
     /// exposed as part of the compiler API.
     pub fn compile_gate(&mut self, gate: Gate) {
-        let inner_gates = gate.controlled_on(self.env.controls());
+        let inner_gates = gate.controlled_on(&self.env.controls());
         for inner_gate in inner_gates.into_iter() {
             self.emit_gate(inner_gate);
         }

@@ -2,7 +2,7 @@ use crate::functions::builtins::BUILTINS;
 use crate::{circuit::Qubit, functions::Func, values::Value};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{hash_set::Union, HashMap, HashSet},
     rc::Rc,
 };
 
@@ -21,8 +21,8 @@ pub enum Nameable {
 #[derive(Default)]
 struct EnvNode {
     pub values: HashMap<Key, Nameable>,
-    pub controls: HashSet<Qubit>,
     pub enclosing: Option<Box<EnvNode>>,
+    controls: HashSet<Qubit>,
 }
 
 impl EnvNode {
@@ -73,6 +73,29 @@ impl EnvNode {
             }
         }
         val
+    }
+
+    /// Get a reference to all the controlled qubits in this scope
+    ///
+    /// TODO Figure out how to return a Union<&Qubit, _> instead of allocating.
+    /// What is the second type parameter?
+    pub fn all_controls(&self) -> HashSet<Qubit> {
+        match &self.enclosing {
+            Some(node) => node
+                .all_controls()
+                .union(&self.controls)
+                .map(|u| *u) // copy the values: not ideal
+                .collect(),
+            None => self.controls.clone(),
+        }
+    }
+
+    fn insert_control(&mut self, qubit: Qubit) -> bool {
+        self.controls.insert(qubit)
+    }
+
+    fn remove_control(&mut self, qubit: &Qubit) -> bool {
+        self.controls.remove(qubit)
     }
 }
 
@@ -151,16 +174,16 @@ impl Environment {
 
     /// Add a control in the current scope
     pub fn insert_control(&mut self, qubit: Qubit) -> bool {
-        self.store.as_mut().unwrap().controls.insert(qubit)
+        self.store.as_mut().unwrap().insert_control(qubit)
     }
 
     // this method shouldn’t be necessary; controls should be associated with a
     // scope, and disappear when it ends.
     pub fn remove_control(&mut self, qubit: Qubit) -> bool {
-        self.store.as_mut().unwrap().controls.remove(&qubit)
+        self.store.as_mut().unwrap().remove_control(&qubit)
     }
 
-    pub fn controls(&self) -> &HashSet<Qubit> {
-        &self.store.as_ref().unwrap().controls
+    pub fn controls(&self) -> HashSet<Qubit> {
+        self.store.as_ref().unwrap().all_controls()
     }
 }

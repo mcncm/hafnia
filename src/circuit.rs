@@ -129,7 +129,7 @@ impl BackendSerializable<Qasm> for Circuit {
             .collect::<Vec<String>>()
             .join("\n");
         format!(
-            "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}",
+            "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}\n",
             QASM_VERSION, declaration, gates
         )
     }

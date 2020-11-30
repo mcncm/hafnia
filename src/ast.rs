@@ -31,7 +31,34 @@ pub enum Expr {
     },
 }
 
-impl Expr {}
+impl Expr {
+    /// Some expressions require semicolons when used in expression statements.
+    pub fn requires_semicolon(&self) -> bool {
+        use Expr::*;
+        match self {
+            BinOp {
+                left: _,
+                op: _,
+                right: _,
+            } => true,
+            UnOp { op: _, right: _ } => true,
+            Literal(_) => true,
+            Variable(_) => true,
+            Group(_) => true,
+            Block(_, _) => false,
+            If {
+                cond: _,
+                then_branch: _,
+                else_branch: _,
+            } => false,
+            Call {
+                callee: _,
+                args: _,
+                paren: _,
+            } => true,
+        }
+    }
+}
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
