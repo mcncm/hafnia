@@ -844,4 +844,15 @@ mod tests {
         }
         test_program(prog, gates)
     }
+
+    #[test]
+    fn meas_results_copyable() {
+        let prog = r#"
+        let n = split(?false);
+        let m = !n;
+        let m2 = m;
+        let m3 = m;
+        "#;
+        test_program(prog, vec![H(0), M(0)])
+    }
 }

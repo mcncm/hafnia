@@ -121,7 +121,7 @@ pub mod builtins {
                         if $meas {
                             // For now, the measurement operator simply returns
                             // the unit type, rather than a measured value.
-                            Ok(Value::Unit)
+                            Ok(Value::Measured(Box::new(Value::Q_Bool(qb))))
                         } else {
                             Ok(Value::Q_Bool(qb))
                         }
@@ -133,7 +133,7 @@ pub mod builtins {
                             interp.compile_gate(Gate::$gate(*qb))
                         }
                         if $meas {
-                            Ok(Value::Unit)
+                            Ok(Value::Measured(Box::new(Value::$typ(qbs))))
                         } else {
                             Ok(Value::$typ(qbs))
                         }

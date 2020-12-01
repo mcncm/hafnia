@@ -23,6 +23,9 @@ pub enum Value {
 
     // Composite types
     Array(types::Type, usize, Vec<Value>),
+
+    // Measured value
+    Measured(Box<Value>),
 }
 
 impl Value {
@@ -59,6 +62,8 @@ impl Value {
             Q_U32(_) => T_Q_U32,
 
             Array(ty, sz, _) => T_Array(Box::new(ty.clone()), *sz),
+
+            Measured(val) => T_Measured(Box::new(val.type_of())),
         }
     }
 }
@@ -120,6 +125,9 @@ pub mod types {
 
         // Struct
         T_Struct(HashMap<String, Type>),
+
+        // Type of measured value
+        T_Measured(Box<Type>),
     }
 
     impl Type {
@@ -150,6 +158,8 @@ pub mod types {
                 T_Struct(members) => StructuralDiscipline {
                     linear: members.values().any(|val| val.discipline().linear),
                 },
+
+                T_Measured(_) =>    StructuralDiscipline { linear: false },
             }
         }
 
