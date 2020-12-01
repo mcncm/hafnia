@@ -7,7 +7,7 @@ use Gate::*;
 
 pub type Qubit = usize;
 /// These are gates from which most ordinary circuits will be built
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
     X(Qubit),
     T { tgt: Qubit, conj: bool },
@@ -97,8 +97,8 @@ impl BackendSerializable<Qasm> for Gate {
 /// This is the main public circuit type
 #[derive(Default, Debug)]
 pub struct Circuit {
-    circ_buf: VecDeque<Gate>,
-    qubits: HashSet<Qubit>,
+    pub circ_buf: VecDeque<Gate>,
+    pub qubits: HashSet<Qubit>,
 }
 
 impl Circuit {

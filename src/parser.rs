@@ -271,7 +271,7 @@ impl Parser {
             }
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
-        Ok(Expr::Block(stmts, final_expr.map(|expr| Box::new(expr))))
+        Ok(Expr::Block(stmts, final_expr.map(Box::new)))
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {

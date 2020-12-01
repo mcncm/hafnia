@@ -1,0 +1,8 @@
+let x = ?false;
+let y = ?false;
+let z = ?false;
+if z {
+  if y {
+    let x = ~x;
+  } else {}
+} else {}

@@ -17,10 +17,40 @@ pub enum Nameable {
     Func(Rc<dyn Func>),
 }
 
+/// Essentially an alias for Option that's supposed to represent something that
+/// may or may not have been moved. It’s not a true alias, though, because it
+/// should really be a different type to avoid confusion within the nest of
+/// `get` methods that return Options.
+pub enum Moveable<T> {
+    There(T),
+    Moved,
+}
+
+impl<T> Default for Moveable<T> {
+    fn default() -> Self {
+        Moveable::Moved
+    }
+}
+
+impl<T> Into<Option<T>> for Moveable<T> {
+    fn into(self) -> Option<T> {
+        match self {
+            Moveable::There(v) => Some(v),
+            Moveable::Moved => None,
+        }
+    }
+}
+
+impl<T> Moveable<T> {
+    pub fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+}
+
 /// Our environments are just linked lists, with the caveat that they are never empty.
 #[derive(Default)]
 struct EnvNode {
-    pub values: HashMap<Key, Nameable>,
+    pub values: HashMap<Key, Moveable<Nameable>>,
     pub enclosing: Option<Box<EnvNode>>,
     controls: HashSet<Qubit>,
 }
@@ -38,9 +68,15 @@ impl EnvNode {
     }
 
     pub fn insert(&mut self, k: Key, v: Nameable) -> Option<Nameable> {
-        match self.ancestor_containing(&k) {
+        use Moveable::*;
+        let v = There(v);
+        let prev = match self.ancestor_containing(&k) {
             None => self.values.insert(k, v),
             Some(node) => node.values.insert(k, v),
+        };
+        match prev {
+            Some(There(val)) => Some(val),
+            _ => None,
         }
     }
 
@@ -51,28 +87,24 @@ impl EnvNode {
     /// out of the node when accessed.
     pub fn get(&mut self, k: &str, moving: bool) -> Option<Nameable> {
         self.ancestor_containing(k)
-            .map(|node| node.get_inner(k, moving))
+            .and_then(|node| node.get_inner(k, moving))
     }
 
     /// Get a value from this environment, assuming that it is *already known*
     /// to reside in this environment. This function shouldn’t be called
     /// externally, and is just an implementation detail of `get`.
     #[inline(always)]
-    fn get_inner(&mut self, k: &str, moving: bool) -> Nameable {
+    fn get_inner(&mut self, k: &str, moving: bool) -> Option<Nameable> {
+        use Moveable::*;
+        use Nameable::*;
         // This unwrap is safe because any ancestor is returned by
-        // `ancestor_containing` is guaranteed to contain the value.
-        let val = self.values.get(k).unwrap().clone();
-        // NOTE When--and if--we move to fully static typechecking, this will
-        // become unnecessary, and it will be removed.
+        // `ancestor_containing` is guaranteed to contain the key.
+        let val = self.values.get_mut(k).unwrap();
         match val {
-            Nameable::Func(_) => {}
-            Nameable::Value(val) => {
-                if moving & val.is_linear() {
-                    self.values.remove(k);
-                }
-            }
+            There(Value(v)) if moving & v.is_linear() => val.take().into(),
+            There(x) => Some(x.clone()),
+            Moved => None,
         }
-        val
     }
 
     /// Get a reference to all the controlled qubits in this scope
@@ -84,7 +116,7 @@ impl EnvNode {
             Some(node) => node
                 .all_controls()
                 .union(&self.controls)
-                .map(|u| *u) // copy the values: not ideal
+                .copied() // Awkward copy that shouldn’t really be necessary
                 .collect(),
             None => self.controls.clone(),
         }
@@ -140,7 +172,11 @@ impl Environment {
         values: Option<HashMap<Key, Nameable>>,
         controls: Option<HashSet<Qubit>>,
     ) {
-        let values = values.unwrap_or_default();
+        let values = values
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(key, value)| (key, Moveable::There(value)))
+            .collect();
         let controls = controls.unwrap_or_default();
         let new_store = Box::new(EnvNode {
             values,

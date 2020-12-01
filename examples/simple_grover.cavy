@@ -1,0 +1,27 @@
+// These two qubits' combined state space forms the database
+// that we're going to search over
+let x = split(?false);
+let y = split(?false);
+
+// Target state is 11
+fn oracle() {
+    if x {
+        // Flip the phase of this qubit:
+        // apply a Z gate
+        let y = flip(y);
+    }
+    // Awkwardly still required
+    else {}
+}
+
+fn diffuse() {
+    let x = ~x;
+    if split(~x) {
+        let y = ~y;
+    }
+    // Awkwardly still required
+    else {}
+}
+
+oracle();
+diffuse();

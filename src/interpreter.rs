@@ -510,6 +510,7 @@ impl Interpreter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::circuit::Gate::*;
     use crate::parser::Parser;
     use crate::scanner::SourceCode;
     use crate::token::{Lexeme, Location};
@@ -543,6 +544,28 @@ mod tests {
 
             assert_eq!(expected_value, actual_value.unwrap());
         };
+    }
+
+    fn test_program(prog: &'static str, expected_gates: Vec<Gate>) {
+        let src = SourceCode {
+            code: prog.chars().peekable(),
+            file: None,
+        };
+
+        let tokens = Scanner::new(src).tokenize().unwrap();
+        let stmts = Parser::new(tokens).parse().unwrap();
+        let mut interp = Interpreter::new();
+        for stmt in stmts.into_iter() {
+            interp.execute(&stmt).unwrap();
+        }
+
+        // TODO not necessarily the same length
+        let empirical_gates = interp.circuit.circ_buf;
+        assert_eq!(expected_gates.len(), empirical_gates.len());
+        let pairs = empirical_gates.iter().zip(expected_gates);
+        for (expected, actual) in pairs {
+            assert_eq!(expected, &actual)
+        }
     }
 
     ///////////////////
@@ -631,5 +654,77 @@ mod tests {
         test_interpreter! {
             "(2 + 2 < 2 * 1) == (false ~= true)"; Bool(false)
         }
+    }
+
+    //////////////
+    // Programs //
+    //////////////
+
+    #[test]
+    fn simple_program() {
+        test_program("let x = ?true;", vec![X(0)]);
+    }
+
+    #[test]
+    fn single_cnot() {
+        let prog = r#"
+        let x = ?false;
+        let y = ?false;
+        if y {
+            let x = ~x;
+        }
+        // Awkwardly still required
+        else { }
+        "#;
+        test_program(prog, vec![CX { ctrl: 1, tgt: 0 }]);
+    }
+
+    #[test]
+    fn simple_function() {
+        let prog = r#"
+        let x = ?false;
+        fn inv(y) {
+            let y = ~y;
+        } 
+        inv(x);
+        "#;
+        test_program(prog, vec![X(0)]);
+    }
+
+    #[test]
+    fn simple_function_with_capture() {
+        let prog = r#"
+        let x = ?false;
+        fn inv() {
+            let x = ~x;
+        } 
+        inv();
+        "#;
+        test_program(prog, vec![X(0)]);
+    }
+
+    #[test]
+    fn simple_function_multiple_statements() {
+        let prog = r#"
+        let x = ?false;
+        fn inv(y) {
+            let y = ~y;
+            let y = ~y;
+        } 
+        inv(x);
+        "#;
+        test_program(prog, vec![X(0), X(0)]);
+    }
+
+    #[test]
+    fn simple_function_with_return() {
+        let prog = r#"
+        let x = ?false;
+        fn inv(y) {
+            ~y
+        } 
+        let x = inv(x);
+        "#;
+        test_program(prog, vec![X(0)]);
     }
 }
