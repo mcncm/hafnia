@@ -47,7 +47,7 @@ impl Func for UserFunc {
             .params
             .iter()
             .zip(args.iter())
-            .map(|(key, val)| (key.clone(), Nameable::Value(*val)))
+            .map(|(key, val)| (key.clone(), Nameable::Value(val.clone())))
             .collect();
 
         match &*self.body {
