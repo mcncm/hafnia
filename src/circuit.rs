@@ -98,7 +98,7 @@ impl BackendSerializable<Qasm> for Gate {
 #[derive(Default, Debug)]
 pub struct Circuit {
     pub circ_buf: VecDeque<Gate>,
-    pub qubits: HashSet<Qubit>,
+    pub max_qubit: Option<usize>,
 }
 
 impl Circuit {
@@ -107,7 +107,13 @@ impl Circuit {
     }
 
     pub fn push_back(&mut self, gate: Gate) {
-        self.qubits.extend(gate.qubits().iter());
+        use std::cmp;
+        // This unwrap is safe as long as all gates act on *some* qubit.
+        let max_in_gate = *gate.qubits().iter().max().unwrap();
+        self.max_qubit = match self.max_qubit {
+            Some(u) => Some(cmp::max(u, max_in_gate)),
+            None => Some(max_in_gate),
+        };
         self.circ_buf.push_back(gate);
     }
 }
@@ -115,9 +121,8 @@ impl Circuit {
 impl BackendSerializable<Qasm> for Circuit {
     fn to_backend(&self) -> String {
         let declaration = {
-            let len = self.qubits.len();
-            if len > 0 {
-                format!("qreg q[{}];", self.qubits.len())
+            if let Some(u) = self.max_qubit {
+                format!("qreg q[{}];", u + 1)
             } else {
                 String::from("")
             }

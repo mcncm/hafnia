@@ -11,6 +11,7 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    convert::TryInto,
     fmt, mem,
     rc::Rc,
 };
@@ -65,8 +66,8 @@ impl QubitAllocator {
         Value::Q_Bool(self.alloc(1)[0])
     }
 
-    pub fn free_q_bool(&mut self, qubit: Value) {
-        match qubit {
+    pub fn free_q_bool(&mut self, val: Value) {
+        match val {
             Value::Q_Bool(index) => {
                 self.free(index);
             }
@@ -74,6 +75,18 @@ impl QubitAllocator {
                 panic!();
             }
         }
+    }
+
+    pub fn alloc_q_u8(&mut self) -> Value {
+        Value::Q_U8(self.alloc(8).try_into().unwrap())
+    }
+
+    pub fn alloc_q_u16(&mut self) -> Value {
+        Value::Q_U16(self.alloc(16).try_into().unwrap())
+    }
+
+    pub fn alloc_q_u32(&mut self) -> Value {
+        Value::Q_U32(self.alloc(32).try_into().unwrap())
     }
 }
 
@@ -354,17 +367,48 @@ impl Interpreter {
                 val
             }
 
-            // (Question, Value::U8(x)) => {
-            //     let val = self.qubit_allocator.alloc_one();
-            //     if x {
-            //         if let Value::Q_Bool(u) = val {
-            //             self.compile_gate(Gate::X(u));
-            //         } else {
-            //             unreachable!();
-            //         }
-            //     }
-            //     val
-            // }
+            (Question, Value::U8(x)) => {
+                let val = self.qubit_allocator.alloc_q_u8();
+                if let Value::Q_U8(qbs) = val {
+                    for (i, qb) in qbs.iter().enumerate() {
+                        if x & (1 << i) != 0 {
+                            self.compile_gate(Gate::X(*qb))
+                        }
+                    }
+                } else {
+                    unreachable!();
+                }
+                val
+            }
+
+            (Question, Value::U16(x)) => {
+                let val = self.qubit_allocator.alloc_q_u16();
+                if let Value::Q_U16(qbs) = val {
+                    for (i, qb) in qbs.iter().enumerate() {
+                        if x & (1 << i) != 0 {
+                            self.compile_gate(Gate::X(*qb))
+                        }
+                    }
+                } else {
+                    unreachable!();
+                }
+                val
+            }
+
+            (Question, Value::U32(x)) => {
+                let val = self.qubit_allocator.alloc_q_u32();
+                if let Value::Q_U32(qbs) = val {
+                    for (i, qb) in qbs.iter().enumerate() {
+                        if x & (1 << i) != 0 {
+                            self.compile_gate(Gate::X(*qb))
+                        }
+                    }
+                } else {
+                    unreachable!();
+                }
+                val
+            }
+
             (_, _) => panic!("Violated a typing invariant"),
         };
         Ok(val)

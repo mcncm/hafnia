@@ -24,6 +24,10 @@ impl fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+/// The enum of all the cavy types, comprising the unit type booleans, integers
+/// of several sizes, and the quantized counterparts of these types. The
+/// quantized integer types are all little-endian by default. In future versions
+/// of the compiler, it may be possible to specify the endianness of the backend.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
