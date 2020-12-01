@@ -9,7 +9,7 @@ use std::io::{self, Write};
 
 const UNICODE_PROMPT: &str = "ψ⟩ ";
 const ASCII_PROMPT: &str = "> ";
-const WELCOME: &str = "Welcome to the alpha version of cavy-rs!";
+const WELCOME: &str = "Welcome to the alpha version of the Cavy repl!";
 const GOODBYE: &str = "Thanks for hacking with us!";
 const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 

@@ -14,6 +14,8 @@ pub enum Gate {
     H(Qubit),
     Z(Qubit),
     CX { tgt: Qubit, ctrl: Qubit },
+    // Measurement "gate"
+    M(Qubit),
 }
 
 impl Gate {
@@ -24,6 +26,7 @@ impl Gate {
             H(tgt) => vec![*tgt],
             Z(tgt) => vec![*tgt],
             CX { ctrl, tgt } => vec![*ctrl, *tgt],
+            M(tgt) => vec![*tgt],
         }
     }
 
@@ -63,6 +66,7 @@ impl Gate {
                 T { tgt: inner_ctrl, conj: true },
                 CX { ctrl, tgt: inner_ctrl },
             ],
+            M(_) => todo!(),
         }
     }
 
@@ -90,6 +94,7 @@ impl BackendSerializable<Qasm> for Gate {
             H(tgt)           => format!("h q[{}];", tgt),
             Z(tgt)           => format!("z q[{}];", tgt),
             CX { tgt, ctrl } => format!("cx q[{}], q[{}];", ctrl, tgt),
+            M(tgt)           => format!("measure q[{}] -> c[{}];", tgt, tgt)
         }
     }
 }
@@ -121,8 +126,9 @@ impl Circuit {
 impl BackendSerializable<Qasm> for Circuit {
     fn to_backend(&self) -> String {
         let declaration = {
-            if let Some(u) = self.max_qubit {
-                format!("qreg q[{}];", u + 1)
+            if let Some(max_qubit) = self.max_qubit {
+                let qubits = max_qubit + 1;
+                format!("qreg q[{}];\ncreg c[{}]", qubits, qubits)
             } else {
                 String::from("")
             }

@@ -363,14 +363,14 @@ impl Interpreter {
                             msg: format!("the variable `{}` has been moved.", name),
                             token: Some(variable.clone()),
                         };
-                        return Err(ErrorBuf(vec![Box::new(err)]));
+                        Err(ErrorBuf(vec![Box::new(err)]))
                     }
                     None => {
                         let err = InterpreterError {
                             msg: format!("the name `{}` is unbound.", name),
                             token: Some(variable.clone()),
                         };
-                        return Err(ErrorBuf(vec![Box::new(err)]));
+                        Err(ErrorBuf(vec![Box::new(err)]))
                     }
                     // In the near-term this should just be an error; in the
                     // long term, there should be first-class functions.
@@ -444,6 +444,32 @@ impl Interpreter {
                     unreachable!();
                 }
                 val
+            }
+
+            (Bang, Value::Q_Bool(qb)) => {
+                self.compile_gate(Gate::M(qb));
+                Value::Unit
+            }
+
+            (Bang, Value::Q_U8(qbs)) => {
+                for qb in qbs.iter() {
+                    self.compile_gate(Gate::M(*qb));
+                }
+                Value::Unit
+            }
+
+            (Bang, Value::Q_U16(qbs)) => {
+                for qb in qbs.iter() {
+                    self.compile_gate(Gate::M(*qb));
+                }
+                Value::Unit
+            }
+
+            (Bang, Value::Q_U32(qbs)) => {
+                for qb in qbs.iter() {
+                    self.compile_gate(Gate::M(*qb));
+                }
+                Value::Unit
             }
 
             (_, _) => panic!("Violated a typing invariant"),
@@ -823,5 +849,14 @@ mod tests {
         let x = ?147;
         "#;
         test_program(prog, vec![X(0), X(1), X(4), X(7)])
+    }
+
+    #[test]
+    fn simple_measurement() {
+        let prog = r#"
+        let x = ?true;
+        !x;
+        "#;
+        test_program(prog, vec![X(0), M(0)])
     }
 }
