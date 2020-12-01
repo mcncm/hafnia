@@ -43,7 +43,7 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.token {
             Some(token) => {
-                write!(f, "Parsing error at \"{}\" [{}]: {}",
+                write!(f, "Parsing error at `{}` [{}]: {}",
                        token, token.loc, self.msg)
             } ,
             None => {

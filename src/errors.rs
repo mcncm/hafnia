@@ -15,7 +15,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 /// it’s actually recursive, and an `ErrorBuf` of `ErrorBuf`s might be
 /// nonsensical. I could break the recursion by implementing my own Error type
 /// for `ErrorBuf` instead of the standard library one.
-pub struct ErrorBuf(Vec<Box<dyn Error>>);
+pub struct ErrorBuf(pub Vec<Box<dyn Error>>);
 
 impl ErrorBuf {
     pub fn new() -> Self {
@@ -53,24 +53,9 @@ impl Error for ErrorBuf {
         None
     }
 
-    // fn type_id(&self, _: private::Internal) -> std::any::TypeId
-    // where
-    //     Self: 'static,
-    // {
-    //     std::any::TypeId::of::<Self>()
-    // }
-
-    // fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
-    //     None
-    // }
-
     fn description(&self) -> &str {
         "description() is deprecated; use Display"
     }
-
-    // fn cause(&self) -> Option<&dyn Error> {
-    //     std::error.source()
-    // }
 }
 
 /// This is custom panic handler that logs system state on an unexpected crash.

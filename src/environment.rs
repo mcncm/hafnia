@@ -85,25 +85,25 @@ impl EnvNode {
     ///
     /// `moving` is a flag that indicates whether linear values should be moved
     /// out of the node when accessed.
-    pub fn get(&mut self, k: &str, moving: bool) -> Option<Nameable> {
+    pub fn get(&mut self, k: &str, moving: bool) -> Option<Moveable<Nameable>> {
         self.ancestor_containing(k)
-            .and_then(|node| node.get_inner(k, moving))
+            .map(|node| node.get_inner(k, moving))
     }
 
     /// Get a value from this environment, assuming that it is *already known*
     /// to reside in this environment. This function shouldn’t be called
     /// externally, and is just an implementation detail of `get`.
     #[inline(always)]
-    fn get_inner(&mut self, k: &str, moving: bool) -> Option<Nameable> {
+    fn get_inner(&mut self, k: &str, moving: bool) -> Moveable<Nameable> {
         use Moveable::*;
         use Nameable::*;
-        // This unwrap is safe because any ancestor is returned by
+        // This unwrap is safe because any ancestor returned by
         // `ancestor_containing` is guaranteed to contain the key.
         let val = self.values.get_mut(k).unwrap();
         match val {
-            There(Value(v)) if moving & v.is_linear() => val.take().into(),
-            There(x) => Some(x.clone()),
-            Moved => None,
+            There(Value(v)) if moving & v.is_linear() => val.take(),
+            There(x) => There(x.clone()),
+            Moved => Moved,
         }
     }
 
@@ -204,7 +204,7 @@ impl Environment {
 
     /// Note that this method may mutate `self` if we enforce linearity at
     /// "runtime."
-    pub fn get(&mut self, k: &str) -> Option<Nameable> {
+    pub fn get(&mut self, k: &str) -> Option<Moveable<Nameable>> {
         self.store.as_mut().unwrap().get(k, self.moving)
     }
 

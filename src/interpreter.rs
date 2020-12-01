@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Stmt};
-use crate::environment::{Environment, Key, Nameable};
+use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
 use crate::scanner::{ScanError, Scanner};
@@ -89,6 +89,29 @@ impl QubitAllocator {
         Value::Q_U32(self.alloc(32).try_into().unwrap())
     }
 }
+
+#[derive(Debug)]
+pub struct InterpreterError {
+    msg: String,
+    token: Option<Token>,
+}
+
+impl fmt::Display for InterpreterError {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.token {
+            Some(token) => {
+                write!(f, "Interpreter error at `{}` [{}]: {}",
+                       token, token.loc, self.msg)
+            } ,
+            None => {
+                write!(f, "Interpreter error: {}", self.msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for InterpreterError {}
 
 pub struct Interpreter {
     pub env: Environment,
@@ -327,14 +350,28 @@ impl Interpreter {
 
     fn eval_variable(&mut self, variable: &Token) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
+        use Moveable::*;
         match &variable.lexeme {
             Lexeme::Ident(name) => {
                 // About this unwrap: we will at some point in the (hopefully
                 // near) future track whether this operation is safe statically,
                 // and always know when there is a value in the environment.
-                let val = self.env.get(&name).unwrap();
-                match val {
-                    Nameable::Value(val) => Ok(val),
+                match self.env.get(&name) {
+                    Some(There(Nameable::Value(val))) => Ok(val),
+                    Some(Moved) => {
+                        let err = InterpreterError {
+                            msg: format!("the variable `{}` has been moved.", name),
+                            token: Some(variable.clone()),
+                        };
+                        return Err(ErrorBuf(vec![Box::new(err)]));
+                    }
+                    None => {
+                        let err = InterpreterError {
+                            msg: format!("the name `{}` is unbound.", name),
+                            token: Some(variable.clone()),
+                        };
+                        return Err(ErrorBuf(vec![Box::new(err)]));
+                    }
                     // In the near-term this should just be an error; in the
                     // long term, there should be first-class functions.
                     _ => unimplemented!(),
@@ -478,12 +515,12 @@ impl Interpreter {
 
         let func = match self.env.get(callee) {
             None => unreachable!(), // An earlier typing pass can eliminate this case
-            Some(Nameable::Value(_)) => todo!(), // Should return an error
-
+            Some(Moveable::There(Nameable::Value(_))) => todo!(), // Should return an error
+            Some(Moveable::Moved) => todo!(), // Should return a different error
             // FIXME Ownership gets a little ugly here; let’s save ourself a
             // little trouble for now, although this clone *could* be quite
             // expensive.
-            Some(Nameable::Func(func)) => func.clone(),
+            Some(Moveable::There(Nameable::Func(func))) => func.clone(),
         };
 
         func.call(self, &args)
@@ -778,5 +815,13 @@ mod tests {
         let x = inv(x);
         "#;
         test_program(prog, vec![X(0)]);
+    }
+
+    #[test]
+    fn quantum_integer() {
+        let prog = r#"
+        let x = ?147;
+        "#;
+        test_program(prog, vec![X(0), X(1), X(4), X(7)])
     }
 }
