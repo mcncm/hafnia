@@ -376,10 +376,18 @@ impl Interpreter {
         let right_val = self.evaluate(right)?;
         let val = match (&op.lexeme, right_val) {
             (Tilde, Value::Bool(x)) => Value::Bool(!x),
-            (Tilde, Value::Q_Bool(u)) => {
-                self.compile_gate(Gate::X(u));
-                Value::Q_Bool(u)
-            }
+
+            // NOTE: or-patterns syntax is experimental, so we must use this
+            // more verbose syntax until it is stabilized.
+            (Tilde, val @ Value::Q_Bool(_))
+            | (Tilde, val @ Value::Q_U8(_))
+            | (Tilde, val @ Value::Q_U16(_))
+            | (Tilde, val @ Value::Q_U32(_)) => crate::functions::builtins::not(self, &[val])?,
+
+            (Bang, val @ Value::Q_Bool(_))
+            | (Bang, val @ Value::Q_U8(_))
+            | (Bang, val @ Value::Q_U16(_))
+            | (Bang, val @ Value::Q_U32(_)) => crate::functions::builtins::measure(self, &[val])?,
 
             (Question, Value::Bool(x)) => {
                 let val = self.qubit_allocator.alloc_q_bool();
@@ -433,32 +441,6 @@ impl Interpreter {
                     unreachable!();
                 }
                 val
-            }
-
-            (Bang, Value::Q_Bool(qb)) => {
-                self.compile_gate(Gate::M(qb));
-                Value::Unit
-            }
-
-            (Bang, Value::Q_U8(qbs)) => {
-                for qb in qbs.iter() {
-                    self.compile_gate(Gate::M(*qb));
-                }
-                Value::Unit
-            }
-
-            (Bang, Value::Q_U16(qbs)) => {
-                for qb in qbs.iter() {
-                    self.compile_gate(Gate::M(*qb));
-                }
-                Value::Unit
-            }
-
-            (Bang, Value::Q_U32(qbs)) => {
-                for qb in qbs.iter() {
-                    self.compile_gate(Gate::M(*qb));
-                }
-                Value::Unit
             }
 
             (_, _) => panic!("Violated a typing invariant"),
@@ -845,5 +827,21 @@ mod tests {
         !x;
         "#;
         test_program(prog, vec![X(0), M(0)])
+    }
+
+    #[test]
+    fn bitwise_boradcast() {
+        let prog = r#"
+        let x = split(?0);
+        !x;
+        "#;
+        let mut gates = vec![];
+        for i in 0..32 {
+            gates.push(H(i));
+        }
+        for i in 0..32 {
+            gates.push(M(i));
+        }
+        test_program(prog, gates)
     }
 }

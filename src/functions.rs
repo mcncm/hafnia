@@ -65,7 +65,9 @@ pub mod builtins {
 
     lazy_static! {
         /// The table of builtin functions, the implementations of which are
-        /// given below
+        /// given below. Note that although `not` and `measure` are defined as builtin
+        /// functions, they aren't bound to names here, since they are honored with the
+        /// special `~` and `!` operators.
         #[rustfmt::skip]
         pub static ref BUILTINS: HashMap<&'static str, Builtin> = {
             let mut m = HashMap::new();
@@ -101,21 +103,51 @@ pub mod builtins {
     // Builtin function implementations //
     //////////////////////////////////////
 
-    /// This macro builds a function that applies a single gate to a qubit.
+    /// This macro builds a function that bitwise-broadcasts a single gate.
     macro_rules! gate_function {
-        ($name:ident, $gate:ident) => {
-            fn $name(interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        ($name:ident, $gate:ident, $meas:expr; $($typ:ident),+) => {
+            pub fn $name(interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
                 match args[0] {
-                    Value::Q_Bool(u) => {
-                        interp.compile_gate(Gate::$gate(u));
-                        Ok(Value::Q_Bool(u))
+
+                    // Q_Bool must be handled separately--at least for the time
+                    // being--because its structure differs form the Q_UXX
+                    // values: rather than containing a `[usize; 1]`, it contains a `usize`.
+                    Value::Q_Bool(qb) => {
+                        interp.compile_gate(Gate::$gate(qb));
+
+                        // We add a special condition for the return value.
+                        // Because $meas is a constant, the branch will be
+                        // eliminated and impose no runtime cost.
+                        if $meas {
+                            // For now, the measurement operator simply returns
+                            // the unit type, rather than a measured value.
+                            Ok(Value::Unit)
+                        } else {
+                            Ok(Value::Q_Bool(qb))
+                        }
                     }
+
+                    $(
+                        Value::$typ(qbs) => {
+                        for qb in qbs.iter() {
+                            interp.compile_gate(Gate::$gate(*qb))
+                        }
+                        if $meas {
+                            Ok(Value::Unit)
+                        } else {
+                            Ok(Value::$typ(qbs))
+                        }
+                    }
+                    ),+
+
                     _ => todo!(),
                 }
             }
         };
     }
 
-    gate_function![flip, Z];
-    gate_function![split, H];
+    gate_function![not, X, false; Q_U8, Q_U16, Q_U32];
+    gate_function![flip, Z, false; Q_U8, Q_U16, Q_U32];
+    gate_function![split, H, false; Q_U8, Q_U16, Q_U32];
+    gate_function![measure, M, true; Q_U8, Q_U16, Q_U32];
 }

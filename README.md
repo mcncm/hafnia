@@ -42,7 +42,7 @@ randomness_. Below is some sample Cavy code implementing a simple one-byte QRNG.
 ```cavy
 let q: ?u8 = 0;  // Declare a "qubyte" unsigned int, deterministically initialized to 0.
 q = split(q);    // Split the wavefunction into 256 branches of equal weight.
-r = !q;          // Consume the ?u8, and bind its measured value to a u8.
+r = !q;          // Consume the ?u8 and bind its measured value to a u8.
 print(r);        // Write the random int to stdout.
 ```
 
@@ -160,8 +160,9 @@ mem <- qalloc(n);
 You can build and install a Cavy binary with Cargo. Clone the repository, `cd`
 to the Cavy directory, and run `$ cargo build --release && cargo install --path
 .`. Make sure that `~/.cargo/bin` is in your `PATH` variable. It should build
-and run on Rust stable, beta, and nightly, and on Linux, OS X, and Windows. Cavy
-currently requires rustc >= 1.48.0.
+and run on Rust stable, beta, and nightly, and on Linux, MacOS, and Windows. I
+don’t anticipate any architecture-dependence, but am curious to know if it builds
+and runs on aarch64. Cavy currently requires rustc >= 1.48.0.
 
 ## For your quantum computing infrastructure
 Please email `cavy` dash `lang` dash `support` at `mit` dot `edu`.
