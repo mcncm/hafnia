@@ -233,13 +233,15 @@ impl Parser {
             "expected '{' opening direct branch of conditional.",
         )?;
         let then_branch = Box::new(self.block_expr()?);
-        self.consume(Lexeme::Else, "expected 'else' in conditional expression")?;
-        self.consume(
-            Lexeme::LBrace,
-            "expected '{' opening indirect branch of conditional.",
-        )?;
-        let else_branch = Box::new(self.block_expr()?);
 
+        let mut else_branch = None;
+        if self.match_lexeme(Lexeme::Else) {
+            self.consume(
+                Lexeme::LBrace,
+                "expected '{' opening indirect branch of conditional.",
+            )?;
+            else_branch = Some(Box::new(self.block_expr()?));
+        }
         Ok(Expr::If {
             cond,
             then_branch,

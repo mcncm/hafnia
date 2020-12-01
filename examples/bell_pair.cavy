@@ -3,5 +3,3 @@ let y = ?false;
 if y {
    let x = ~x;
 }
-// Awkwardly still required for now
-else {}

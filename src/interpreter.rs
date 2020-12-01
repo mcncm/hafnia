@@ -209,7 +209,7 @@ impl Interpreter {
         &mut self,
         cond: &Expr,
         then_branch: &Expr,
-        else_branch: &Expr,
+        else_branch: &Option<Box<Expr>>,
     ) -> Result<Value, ErrorBuf> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
@@ -227,44 +227,31 @@ impl Interpreter {
         &mut self,
         cond_val: &Value,
         then_branch: &Expr,
-        else_branch: &Expr,
+        else_branch: &Option<Box<Expr>>,
     ) -> Result<Value, ErrorBuf> {
+        use Expr::Block;
         match cond_val {
             // FIXME This is less than half of an implementation!
             Value::Q_Bool(u) => {
-                // Let’s not handle If *expressions* in the linear case just
-                // yet. I’m not really sure what the correct semantics are for
-                // something like:
-                //
-                // ```
-                // p = if q {
-                //   r
-                // } else {
-                //   s
-                // };
-                // ```
-                //
-                // where q, r, and s are all qubits. You could return an ancilla
-                // controlled r and s (controlled and anticontrolled,
-                // respectively, on q), but this seems to violate linearity.
-                // Maybe introducing a concept of borrowing would be a way to
-                // resolve this.
-                //
-                // FIXME In any case, this exclusion is terribly ad-hoc and
-                // should be enforced in some other way, if it *must* remain.
-                match then_branch {
-                    Expr::Block(then_body, then_expr) => {
+                // FIXME This is far from a proper and complete solution to the
+                // evaluation of If expressions. For one thing, they’re
+                // dynamically typed: the return values are not guaranteed to be
+                // the same type, and it might only fail contingently at
+                // runtime. Also, there isn’t as strong of a distinction between
+                // If statements and If expressions as feels appropriate.
+                match (then_branch, else_branch) {
+                    (Block(then_body, None), None) => {
                         // Now the implementation for the non-excluded cases. (We should
                         // actually spawn a new environment in the block, in which the
                         // extra control has been added. This is merely piling ad-hoc
                         // solution on ad-hoc solution.)
                         let mut controls = HashSet::new();
                         controls.insert(*u);
-                        self.eval_block(then_body, then_expr, None, Some(controls))
+                        self.eval_block(then_body, &None, None, Some(controls))
                         // ...And ignore the else branch for now.
                     }
                     _ => {
-                         unreachable!();
+                         todo!();
                     }
                 }
 
@@ -272,8 +259,10 @@ impl Interpreter {
             Value::Bool(_) => {
                 if cond_val.is_truthy() {
                     self.evaluate(then_branch)
-                } else {
+                } else if let Some(else_branch) = else_branch {
                     self.evaluate(else_branch)
+                } else {
+                    Ok(Value::Unit)
                 }
             },
             _ => panic!("Violated a typing invariant"),
@@ -788,8 +777,6 @@ mod tests {
         if y {
             let x = ~x;
         }
-        // Awkwardly still required
-        else { }
         "#;
         test_program(prog, vec![CX { ctrl: 1, tgt: 0 }]);
     }

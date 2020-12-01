@@ -10,8 +10,6 @@ fn oracle() {
         // apply a Z gate
         let y = flip(y);
     }
-    // Awkwardly still required
-    else {}
 }
 
 fn diffuse() {
@@ -19,8 +17,6 @@ fn diffuse() {
     if split(~x) {
         let y = ~y;
     }
-    // Awkwardly still required
-    else {}
 }
 
 oracle();

@@ -19,7 +19,7 @@ pub enum Expr {
     If {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
-        else_branch: Box<Expr>,
+        else_branch: Option<Box<Expr>>,
     },
     Call {
         // For the time being, functions are not values, so the callee is not an
@@ -72,7 +72,7 @@ impl fmt::Display for Expr {
                 cond,
                 then_branch,
                 else_branch,
-            } => format!("(if {} {} {})", cond, then_branch, else_branch),
+            } => format!("(if {} {} {:#?})", cond, then_branch, else_branch),
             Self::Block(stmts, expr) => match expr {
                 Some(expr) => {
                     format!("(block {:?} {})", stmts, *expr)

@@ -158,9 +158,10 @@ mem <- qalloc(n);
 
 ## On your personal computer
 You can build and install a Cavy binary with Cargo. Clone the repository, `cd`
-to the Cavy directory, and run `$ cargo build --release && cargo install --path .`.
-Make sure that `~/.cargo/bin` is in your `PATH` variable. It should build and
-run on Rust stable, beta, and nightly, and on Linux, OS X, and Windows.
+to the Cavy directory, and run `$ cargo build --release && cargo install --path
+.`. Make sure that `~/.cargo/bin` is in your `PATH` variable. It should build
+and run on Rust stable, beta, and nightly, and on Linux, OS X, and Windows. Cavy
+currently requires rustc >= 1.48.0.
 
 ## For your quantum computing infrastructure
 Please email `cavy` dash `lang` dash `support` at `mit` dot `edu`.

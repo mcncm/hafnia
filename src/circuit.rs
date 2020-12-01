@@ -128,7 +128,7 @@ impl BackendSerializable<Qasm> for Circuit {
         let declaration = {
             if let Some(max_qubit) = self.max_qubit {
                 let qubits = max_qubit + 1;
-                format!("qreg q[{}];\ncreg c[{}]", qubits, qubits)
+                format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
             } else {
                 String::from("")
             }
