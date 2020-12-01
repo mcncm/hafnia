@@ -16,40 +16,61 @@ use std::{
 };
 
 pub trait Allocator<T> {
-    fn alloc_one(&mut self) -> T;
-    fn free_one(&mut self, value: T);
+    fn alloc(&mut self, n: usize) -> Vec<T>;
+
+    // This signature maybe ought to be `... -> Result<usize, Error>` or
+    // something. We’ll see how it does for now.
+    fn free(&mut self, addr: usize);
 }
 
+/// The default (and currently only) allocator used by the Interpreter. The
+/// implementation does not try to be clever: allocations are only ever
+/// performed after the greatest qubit yet allocated. This means that qubits are
+/// never reused, which is a sound policy to begin with, especially as we know
+/// nothing about the reinitialization capability of the target hardware.
+///
+/// # Examples
+/// ```
+/// # use cavy::values::Value;
+/// # use cavy::interpreter::QubitAllocator;
+/// let mut allocator = QubitAllocator::new();
+/// let qb0 = allocator.alloc_q_bool();
+/// let qb1 = allocator.alloc_q_bool();
+/// assert_eq!(qb0, Value::Q_Bool(0));
+/// assert_eq!(qb1, Value::Q_Bool(1));
+/// ```
 #[derive(Default)]
 pub struct QubitAllocator {
     least_free: usize,
-    freed: HashSet<usize>,
+}
+
+impl Allocator<Qubit> for QubitAllocator {
+    fn alloc(&mut self, n: usize) -> Vec<Qubit> {
+        let end = self.least_free + n;
+        let qubits = (self.least_free..end).collect();
+        self.least_free = end;
+        qubits
+    }
+
+    /// Yes, this is a no-op.
+    fn free(&mut self, _addr: usize) {}
 }
 
 impl QubitAllocator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
-}
 
-impl Allocator<Value> for QubitAllocator {
-    fn alloc_one(&mut self) -> Value {
-        let new_index = self.least_free;
-        self.least_free += 1;
-        Value::Q_Bool(new_index)
+    pub fn alloc_q_bool(&mut self) -> Value {
+        Value::Q_Bool(self.alloc(1)[0])
     }
 
-    fn free_one(&mut self, value: Value) {
-        match value {
+    pub fn free_q_bool(&mut self, qubit: Value) {
+        match qubit {
             Value::Q_Bool(index) => {
-                // Insert it into the list of freed values, and panic if you’ve
-                // freed the element before.
-                if !self.freed.insert(index) {
-                    panic!();
-                }
+                self.free(index);
             }
             _ => {
-                // This shouldn’t be possible.
                 panic!();
             }
         }
@@ -59,7 +80,7 @@ impl Allocator<Value> for QubitAllocator {
 pub struct Interpreter {
     pub env: Environment,
     pub circuit: Circuit,
-    pub qubit_allocator: Box<dyn Allocator<Value>>,
+    pub qubit_allocator: QubitAllocator,
     // This flag indicates whether code generation is currently covariant or
     // contravariant. It’s an implementation detail, and I’m not sure I like the
     // design of branching on a flag. I’m sure to think about this more, and
@@ -76,7 +97,7 @@ impl Interpreter {
         Self {
             env: Environment::base(),
             circuit: Circuit::new(),
-            qubit_allocator: Box::new(QubitAllocator::new()),
+            qubit_allocator: QubitAllocator::new(),
             contra: false,
             contra_stack: vec![],
         }
@@ -322,7 +343,7 @@ impl Interpreter {
             }
 
             (Question, Value::Bool(x)) => {
-                let val = self.qubit_allocator.alloc_one();
+                let val = self.qubit_allocator.alloc_q_bool();
                 if x {
                     if let Value::Q_Bool(u) = val {
                         self.compile_gate(Gate::X(u));
@@ -332,6 +353,18 @@ impl Interpreter {
                 }
                 val
             }
+
+            // (Question, Value::U8(x)) => {
+            //     let val = self.qubit_allocator.alloc_one();
+            //     if x {
+            //         if let Value::Q_Bool(u) = val {
+            //             self.compile_gate(Gate::X(u));
+            //         } else {
+            //             unreachable!();
+            //         }
+            //     }
+            //     val
+            // }
             (_, _) => panic!("Violated a typing invariant"),
         };
         Ok(val)
@@ -410,31 +443,6 @@ impl Interpreter {
         };
 
         func.call(self, &args)
-
-        // if args.len() != func.params.len() {
-        //     todo!(); // Should also return an error
-        // }
-
-        // // TODO this is really *not correct*: arguments should be
-        // // coevaluated. Because I don’t want to deal with that just yet, I’m
-        // // accepting only identifier arguments.
-        // //
-        // // Actually, on second though, should they be? Maybe there should
-        // // really be a distinction between passing by value and passing by
-        // // reference.
-        // //
-        // // FIXME unwrap for testing
-        // let bindings: HashMap<Key, Nameable> = func
-        //     .params
-        //     .iter()
-        //     .zip(args.into_iter())
-        //     .map(|(key, val)| (key.clone(), Nameable::Value(val)))
-        //     .collect();
-
-        // match &*func.body {
-        //     Expr::Block(body, expr) => self.eval_block(&body, &expr, Some(bindings), None),
-        //     _ => unreachable!(),
-        // }
     }
 
     /// "Contravariant evaluation", the core logic of the control-flow blocks.
