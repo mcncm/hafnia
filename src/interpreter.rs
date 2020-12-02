@@ -506,6 +506,7 @@ impl<'a> Interpreter<'a> {
                 (U8(x), U8(y)) => U8(x + y),
                 (U16(x), U16(y)) => U16(x + y),
                 (U32(x), U32(y)) => U32(x + y),
+                (Array(ldata), Array(rdata)) => self.finish_array_sum(ldata, rdata)?,
                 (_, _) => panic!("Violated a typing invariant"),
             },
             Lexeme::Star => match (left_val, right_val) {
@@ -542,6 +543,30 @@ impl<'a> Interpreter<'a> {
             },
             _ => {
                 panic!("illegal expression.");
+            }
+        };
+        Ok(val)
+    }
+
+    fn finish_array_sum(
+        &self,
+        mut ldata: Vec<Value>,
+        mut rdata: Vec<Value>,
+    ) -> Result<Value, ErrorBuf> {
+        use values::types::Type;
+        // Time for some heavy dynamic typing
+        let val = match (ldata.len(), rdata.len()) {
+            (0, 0) => Value::Array(vec![]),
+            (0, _) => Value::Array(rdata),
+            (_, 0) => Value::Array(ldata),
+            (_, _) => {
+                if ldata[0].type_of() == rdata[0].type_of() {
+                    ldata.append(&mut rdata);
+                    Value::Array(ldata)
+                } else {
+                    // TODO this should be a type error
+                    todo!();
+                }
             }
         };
         Ok(val)
@@ -792,6 +817,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn array_concat() {
+        use Value::*;
+        test_interpreter! {
+            "[false, false] + [true, false]";
+            Array(vec![Bool(false), Bool(false), Bool(true), Bool(false)])
+        }
+    }
     //////////////
     // Programs //
     //////////////
@@ -904,5 +937,27 @@ mod tests {
         let m3 = m;
         "#;
         test_program(prog, vec![H(0), M(0)])
+    }
+
+    #[test]
+    fn array_linear_concat() {
+        let prog = r#"
+        let a = [?true, ?true];
+        let b = [?true, ?true];
+        let c = a + b;
+        "#;
+        test_program(prog, vec![X(0), X(1), X(2), X(3)])
+    }
+
+    #[test]
+    #[should_panic]
+    fn array_linearity_violation() {
+        let prog = r#"
+        let a = [?true, ?true];
+        let b = [?true, ?true];
+        let c = a + b;
+        let d = a + b;
+        "#;
+        test_program(prog, vec![X(0), X(1), X(2), X(3)])
     }
 }
