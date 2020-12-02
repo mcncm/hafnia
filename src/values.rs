@@ -23,7 +23,7 @@ pub enum Value {
     Q_U32([usize; 32]),
 
     // Composite types
-    Array(types::Type, usize, Vec<Value>),
+    Array(Vec<Value>),
 
     // Measured value
     Measured(Box<Value>),
@@ -46,7 +46,7 @@ impl Value {
         self.type_of().is_linear()
     }
 
-    fn type_of(&self) -> types::Type {
+    pub fn type_of(&self) -> types::Type {
         use types::Type::*;
         use Value::*;
         match self {
@@ -62,7 +62,23 @@ impl Value {
             Q_U16(_) => T_Q_U16,
             Q_U32(_) => T_Q_U32,
 
-            Array(ty, sz, _) => T_Array(Box::new(ty.clone()), *sz),
+            // NOTE: This here reveals the inadequacy of values, rather than
+            // expressions, having types. We can’t know the type of an expression
+            // until we evaluate it, but the array might be empty, in which case we
+            // cannot evaluate the expression, because it might have side-effects
+            // like allocation. We must make some peculiar compromise like arrays
+            // being untyped, or empty arrays having their own type.
+            //
+            // The peculiar compromise I’ll choose is that arrays *maybe*
+            // contain their type; if empty, there is no type for them to
+            // contain.
+            Array(data) => T_Array(
+                match data.len() {
+                    0 => Box::new(None),
+                    _ => Box::new(Some(data[0].type_of())),
+                },
+                data.len(),
+            ),
 
             Measured(val) => T_Measured(Box::new(val.type_of())),
         }
@@ -123,7 +139,7 @@ pub mod types {
         T_Tuple(Vec<Type>),
 
         // Array
-        T_Array(Box<Type>, usize),
+        T_Array(Box<Option<Type>>, usize),
 
         // Struct
         T_Struct(HashMap<String, Type>),
@@ -149,8 +165,11 @@ pub mod types {
                 T_Q_U16 =>           StructuralDiscipline { linear: true },
                 T_Q_U32 =>           StructuralDiscipline { linear: true },
 
-                T_Array(type_, _) => StructuralDiscipline {
-                    linear: type_.discipline().linear,
+                T_Array(typ, _) =>   StructuralDiscipline {
+                    linear: match &**typ {
+                        Some(typ) => typ.discipline().linear,
+                        None => false,
+                    }
                 },
 
                 // Tuples and structs are as constrained as their most constrained member
@@ -179,21 +198,21 @@ pub mod types {
         /// Arrays of nonlinear types should be nonlinear
         #[test]
         fn arrays_inherit_linearity_1() {
-            let qubit_array_type = T_Array(Box::new(T_Bool), 4);
+            let qubit_array_type = T_Array(Box::new(Some(T_Bool)), 4);
             assert!(!qubit_array_type.is_linear());
         }
 
         /// Arrays of linear types should be linear
         #[test]
         fn arrays_inherit_linearity_2() {
-            let qubit_array_type = T_Array(Box::new(T_Q_Bool), 4);
+            let qubit_array_type = T_Array(Box::new(Some(T_Q_Bool)), 4);
             assert!(qubit_array_type.is_linear());
         }
 
         /// Arrays of arrays of linear types should be linear
         #[test]
         fn arrays_inherit_linearity_3() {
-            let qubit_array_type = T_Array(Box::new(T_Array(Box::new(T_Q_Bool), 3)), 4);
+            let qubit_array_type = T_Array(Box::new(Some(T_Array(Box::new(Some(T_Q_Bool)), 3))), 4);
             assert!(qubit_array_type.is_linear());
         }
 

@@ -277,6 +277,8 @@ impl Interpreter {
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
             Variable(variable) => self.eval_variable(variable),
+            IntArr { item, reps } => self.eval_int_arr(item, reps),
+            ExtArr(items) => self.eval_ext_arr(items),
             Group(expr) => self.evaluate(expr),
             If {
                 cond,
@@ -364,6 +366,40 @@ impl Interpreter {
             }
             _ => panic!("Invariant violation!"),
         }
+    }
+
+    fn eval_int_arr(&mut self, item: &Expr, reps: &Expr) -> Result<Value, ErrorBuf> {
+        let reps = match self.evaluate(reps)? {
+            Value::U32(n) => n as usize,
+            _ => todo!(),
+        };
+        // NOTE: You cannot use `std::iter::repeat` to build this list, because
+        // it might allocate!
+        let mut data = vec![];
+        for _ in 0..reps {
+            data.push(self.evaluate(item)?)
+        }
+        Ok(Value::Array(data))
+    }
+
+    fn eval_ext_arr(&mut self, items: &[Expr]) -> Result<Value, ErrorBuf> {
+        let mut ty = None;
+        let mut data = vec![];
+        for item in items.iter() {
+            let val = self.evaluate(item)?;
+            let next_ty = Some(val.type_of());
+            data.push(val);
+
+            if next_ty != ty {
+                if ty == None {
+                    ty = next_ty;
+                } else {
+                    // Error condition: not all the types are the same!
+                    todo!();
+                }
+            }
+        }
+        Ok(Value::Array(data))
     }
 
     fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {

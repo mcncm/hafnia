@@ -155,7 +155,6 @@ impl Serialize for EnvNode {
 
 impl BackendSerializable<Qasm> for EnvNode {
     fn to_backend(&self) -> String {
-        use serde_json;
         let json = serde_json::to_value(self).unwrap();
         json.to_string()
     }

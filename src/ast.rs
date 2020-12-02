@@ -14,6 +14,13 @@ pub enum Expr {
     },
     Literal(Token),
     Variable(Token),
+    // Intensional arrays of the form [1; 4]
+    IntArr {
+        item: Box<Expr>,
+        reps: Box<Expr>,
+    },
+    // Extensional arrays of the form [1, 2, 3]
+    ExtArr(Vec<Expr>),
     Group(Box<Expr>),
     Block(Vec<Stmt>, Option<Box<Expr>>),
     If {
@@ -36,44 +43,37 @@ impl Expr {
     pub fn requires_semicolon(&self) -> bool {
         use Expr::*;
         match self {
-            BinOp {
-                left: _,
-                op: _,
-                right: _,
-            } => true,
-            UnOp { op: _, right: _ } => true,
+            BinOp { .. } => true,
+            UnOp { .. } => true,
             Literal(_) => true,
             Variable(_) => true,
+            IntArr { .. } => true,
+            ExtArr(_) => true,
             Group(_) => true,
             Block(_, _) => false,
-            If {
-                cond: _,
-                then_branch: _,
-                else_branch: _,
-            } => false,
-            Call {
-                callee: _,
-                args: _,
-                paren: _,
-            } => true,
+            If { .. } => false,
+            Call { .. } => true,
         }
     }
 }
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Expr::*;
         let s_expr = match self {
-            Self::BinOp { left, op, right } => format!("({} {} {})", op, left, right),
-            Self::UnOp { op, right } => format!("({} {})", op, right),
-            Self::Literal(token) => format!("{}", token),
-            Self::Variable(token) => format!("{}", token),
-            Self::Group(expr) => format!("{}", expr),
-            Self::If {
+            BinOp { left, op, right } => format!("({} {} {})", op, left, right),
+            UnOp { op, right } => format!("({} {})", op, right),
+            Literal(token) => format!("{}", token),
+            Variable(token) => format!("{}", token),
+            IntArr { item, reps } => format!("[{}; {}]", item, reps),
+            ExtArr(items) => format!("{:#?}", items),
+            Group(expr) => format!("{}", expr),
+            If {
                 cond,
                 then_branch,
                 else_branch,
             } => format!("(if {} {} {:#?})", cond, then_branch, else_branch),
-            Self::Block(stmts, expr) => match expr {
+            Block(stmts, expr) => match expr {
                 Some(expr) => {
                     format!("(block {:?} {})", stmts, *expr)
                 }
@@ -81,7 +81,7 @@ impl fmt::Display for Expr {
                     format!("(block {:?})", stmts)
                 }
             },
-            Self::Call {
+            Call {
                 callee,
                 args,
                 paren: _,

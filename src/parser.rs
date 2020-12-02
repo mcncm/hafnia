@@ -302,8 +302,36 @@ impl Parser {
                 op,
                 right: Box::new(right),
             });
+        } else if self.match_lexeme(LBracket) {
+            return self.finish_array();
         }
         self.call()
+    }
+
+    fn finish_array(&mut self) -> Result<Expr, ParseError> {
+        // Empty array:
+        if self.match_lexeme(RBracket) {
+            return Ok(Expr::ExtArr(vec![]));
+        }
+
+        // Otherwise, there is at least one item:
+        let item = self.expression()?;
+        let arr = if self.match_lexeme(Semicolon) {
+            let item = Box::new(item);
+            let reps = Box::new(self.expression()?);
+            Expr::IntArr { item, reps }
+        } else {
+            let mut items = vec![item];
+            loop {
+                if !self.match_lexeme(Comma) {
+                    break;
+                }
+                items.push(self.expression()?);
+            }
+            Expr::ExtArr(items)
+        };
+        self.consume(RBracket, "missing ']' at end of array")?;
+        Ok(arr)
     }
 
     #[rustfmt::skip]
