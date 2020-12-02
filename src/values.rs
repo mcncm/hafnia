@@ -1,10 +1,11 @@
 use crate::{ast::Expr, token::Token};
+use serde::{Deserialize, Serialize};
 
 /// The enum of all the cavy values, comprising the unit type booleans, integers
 /// of several sizes, and the quantized counterparts of these types. The
 /// quantized integer types are all little-endian by default. In future versions
 /// of the compiler, it may be possible to specify the endianness of the backend.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
     Unit,
@@ -69,6 +70,7 @@ impl Value {
 }
 
 pub mod types {
+    use super::{Deserialize, Serialize};
     use crate::token::Token;
     use std::collections::HashMap;
     use std::fmt;
@@ -102,7 +104,7 @@ pub mod types {
     }
 
     #[allow(non_camel_case_types)]
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     pub enum Type {
         T_Unit,
 

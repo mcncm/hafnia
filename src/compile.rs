@@ -20,5 +20,8 @@ pub fn compile(src: (String, String), _flags: Flags) -> Result<String> {
         interpreter.execute(&stmt)?;
     }
 
-    Ok(interpreter.circuit.to_backend())
+    let bindings_asm = interpreter.env.to_backend();
+    let circuit_asm = interpreter.circuit.to_backend();
+    let asm = format!("//{}\n{}", bindings_asm, circuit_asm);
+    Ok(asm)
 }

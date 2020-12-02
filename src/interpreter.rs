@@ -240,15 +240,11 @@ impl Interpreter {
                 // runtime. Also, there isn’t as strong of a distinction between
                 // If statements and If expressions as feels appropriate.
                 match (then_branch, else_branch) {
-                    (Block(then_body, None), None) => {
-                        // Now the implementation for the non-excluded cases. (We should
-                        // actually spawn a new environment in the block, in which the
-                        // extra control has been added. This is merely piling ad-hoc
-                        // solution on ad-hoc solution.)
+                    (Block(then_body, then_expr), None) => {
                         let mut controls = HashSet::new();
                         controls.insert(*u);
-                        self.eval_block(then_body, &None, None, Some(controls))
-                        // ...And ignore the else branch for now.
+                        self.eval_block(then_body, then_expr, None, Some(controls))?;
+                        Ok(Value::Unit)
                     }
                     _ => {
                          todo!();

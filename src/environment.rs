@@ -1,5 +1,7 @@
+use crate::backend::{BackendSerializable, Qasm};
 use crate::functions::builtins::BUILTINS;
 use crate::{circuit::Qubit, functions::Func, values::Value};
+use serde::{self, Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::{hash_set::Union, HashMap, HashSet},
@@ -32,18 +34,18 @@ impl<T> Default for Moveable<T> {
     }
 }
 
+impl<T> Moveable<T> {
+    pub fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+}
+
 impl<T> Into<Option<T>> for Moveable<T> {
     fn into(self) -> Option<T> {
         match self {
             Moveable::There(v) => Some(v),
             Moveable::Moved => None,
         }
-    }
-}
-
-impl<T> Moveable<T> {
-    pub fn take(&mut self) -> Self {
-        std::mem::take(self)
     }
 }
 
@@ -128,6 +130,34 @@ impl EnvNode {
 
     fn remove_control(&mut self, qubit: &Qubit) -> bool {
         self.controls.remove(qubit)
+    }
+}
+
+/// We want to be able to serialize environments so we can dump the variable
+/// bindings in the base environment when we write the object code; however,
+/// we probably won't care about deserializing an environment node.
+impl Serialize for EnvNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // We'll filter out just the things that we actually care to serialize;
+        // namely, values that haven't been moved.
+        let mut table = HashMap::new();
+        for (key, val) in self.values.iter() {
+            if let Moveable::There(Nameable::Value(val)) = val {
+                table.insert(key, val);
+            }
+        }
+        table.serialize(serializer)
+    }
+}
+
+impl BackendSerializable<Qasm> for EnvNode {
+    fn to_backend(&self) -> String {
+        use serde_json;
+        let json = serde_json::to_value(self).unwrap();
+        json.to_string()
     }
 }
 
@@ -221,5 +251,11 @@ impl Environment {
 
     pub fn controls(&self) -> HashSet<Qubit> {
         self.store.as_ref().unwrap().all_controls()
+    }
+}
+
+impl BackendSerializable<Qasm> for Environment {
+    fn to_backend(&self) -> String {
+        self.store.as_ref().unwrap().to_backend()
     }
 }

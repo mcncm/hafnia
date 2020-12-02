@@ -5,7 +5,9 @@ use std::{
 };
 use Gate::*;
 
+/// This type alias identifies qubits with their numerical indices
 pub type Qubit = usize;
+
 /// These are gates from which most ordinary circuits will be built
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
@@ -103,7 +105,7 @@ impl BackendSerializable<Qasm> for Gate {
 #[derive(Default, Debug)]
 pub struct Circuit {
     pub circ_buf: VecDeque<Gate>,
-    pub max_qubit: Option<usize>,
+    pub max_qubit: Option<Qubit>,
 }
 
 impl Circuit {
