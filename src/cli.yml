@@ -3,11 +3,11 @@ version: "0.2.0\n"
 author: mcncm <cavy-lang-support@mit.edu>
 about: A small, imperative quantum programming language
 args:
-  - INPUT:
+  - input:
       about: The source file to compile
       required: false
       index: 1
-  - OBJECT:
+  - object:
       short: o
       value_name: OBJECT
       about: Place the output into <file>
@@ -16,6 +16,12 @@ args:
       short: O
       value_name: OPT
       about: Sets an optimization level [O0, O1, O2, or O3].
+      required: false
+  - qbcount:
+      short: q
+      long: qbcount
+      value_name: QBCOUNT
+      about: Sets the number of qubits of your architecture
       required: false
   - debug:
       short: d

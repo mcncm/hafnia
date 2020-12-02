@@ -1,4 +1,4 @@
-use crate::backend::Backend;
+use crate::backend::{arch::Arch, Backend};
 use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
@@ -13,15 +13,15 @@ const WELCOME: &str = "Welcome to the alpha version of the Cavy repl!";
 const GOODBYE: &str = "Thanks for hacking with us!";
 const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
-pub struct Repl {
-    interpreter: Interpreter,
+pub struct Repl<'a> {
+    interpreter: Interpreter<'a>,
     flags: sys::Flags,
 }
 
-impl Repl {
-    pub fn new(flags: sys::Flags) -> Repl {
+impl<'a> Repl<'a> {
+    pub fn new(flags: sys::Flags, arch: &'a Arch) -> Repl {
         Repl {
-            interpreter: Interpreter::new(),
+            interpreter: Interpreter::new(&arch),
             flags,
         }
     }

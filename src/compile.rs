@@ -1,5 +1,5 @@
 use crate::{
-    backend::BackendSerializable,
+    backend::{arch::Arch, BackendSerializable},
     errors::Result,
     interpreter::Interpreter,
     parser::Parser,
@@ -8,14 +8,14 @@ use crate::{
 };
 use std::{error::Error, path::PathBuf};
 
-pub fn compile(src: (String, String), _flags: Flags) -> Result<String> {
+pub fn compile(src: (String, String), _flags: Flags, arch: &Arch) -> Result<String> {
     let src = SourceCode {
         code: src.1.chars().peekable(),
         file: Some(src.0),
     };
     let tokens = Scanner::new(src).tokenize().unwrap();
     let stmts = Parser::new(tokens).parse().unwrap();
-    let mut interpreter = Interpreter::new();
+    let mut interpreter = Interpreter::new(&arch);
     for stmt in stmts.into_iter() {
         interpreter.execute(&stmt)?;
     }

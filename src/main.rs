@@ -4,6 +4,7 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use cavy::backend::arch;
 use cavy::repl::Repl;
 use cavy::{compile, sys};
 
@@ -42,13 +43,27 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
 }
 
 fn get_code(argmatches: &ArgMatches) -> Result<Option<(String, String)>, io::Error> {
-    match argmatches.value_of("INPUT") {
+    match argmatches.value_of("input") {
         Some(path) => {
             let source_path = PathBuf::from(&path);
             Ok(Some((path.to_string(), fs::read_to_string(&source_path)?)))
         }
         None => Ok(None),
     }
+}
+
+fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::Error>> {
+    let qb_count = match argmatches.value_of("qbcount") {
+        Some(qb_count) => Some(arch::QbCount::Finite(qb_count.parse::<usize>()?)),
+        None => None,
+    };
+
+    let arch = match qb_count {
+        Some(qb_count) => arch::Arch { qb_count },
+        None => arch::Arch::default(),
+    };
+
+    Ok(arch)
 }
 
 fn main() {
@@ -72,18 +87,26 @@ fn main() {
         }
     }
 
+    let arch = match get_arch(&argmatches) {
+        Ok(arch) => arch,
+        Err(_) => {
+            eprintln!("Failed to identify target architecture.");
+            process::exit(1);
+        }
+    };
+
     match get_code(&argmatches) {
         // A source file was given and read without error
         Ok(Some(src)) => {
-            let object_path = Path::new(argmatches.value_of("OBJECT").unwrap_or("a.qasm"));
-            let object_code = compile::compile(src, flags).unwrap();
+            let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.qasm"));
+            let object_code = compile::compile(src, flags, &arch).unwrap();
             let mut file = File::create(&object_path).unwrap();
             file.write_all(object_code.as_bytes()).unwrap();
             process::exit(0);
         }
         // A source file was not given; run a repl
         Ok(None) => {
-            let mut repl = Repl::new(flags);
+            let mut repl = Repl::new(flags, &arch);
             repl.run();
         }
         // An error was encountered in reading a source file

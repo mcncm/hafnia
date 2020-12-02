@@ -1,4 +1,5 @@
 use crate::ast::{Expr, Stmt};
+use crate::backend::arch::Arch;
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
@@ -11,82 +12,95 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryInto,
     fmt, mem,
     rc::Rc,
 };
 
-pub trait Allocator<T> {
-    fn alloc(&mut self, n: usize) -> Vec<T>;
+pub mod alloc {
+    use super::{Arch, ErrorBuf, Qubit, Value};
+    use std::convert::TryInto;
 
-    // This signature maybe ought to be `... -> Result<usize, Error>` or
-    // something. We’ll see how it does for now.
-    fn free(&mut self, addr: usize);
-}
+    pub trait Allocator<T> {
+        fn alloc(&mut self, n: usize) -> Result<Vec<T>, ErrorBuf>;
 
-/// The default (and currently only) allocator used by the Interpreter. The
-/// implementation does not try to be clever: allocations are only ever
-/// performed after the greatest qubit yet allocated. This means that qubits are
-/// never reused, which is a sound policy to begin with, especially as we know
-/// nothing about the reinitialization capability of the target hardware.
-///
-/// # Examples
-/// ```
-/// # use cavy::values::Value;
-/// # use cavy::interpreter::QubitAllocator;
-/// let mut allocator = QubitAllocator::new();
-/// let qb0 = allocator.alloc_q_bool();
-/// let qb1 = allocator.alloc_q_bool();
-/// assert_eq!(qb0, Value::Q_Bool(0));
-/// assert_eq!(qb1, Value::Q_Bool(1));
-/// ```
-#[derive(Default)]
-pub struct QubitAllocator {
-    least_free: usize,
-}
-
-impl Allocator<Qubit> for QubitAllocator {
-    fn alloc(&mut self, n: usize) -> Vec<Qubit> {
-        let end = self.least_free + n;
-        let qubits = (self.least_free..end).collect();
-        self.least_free = end;
-        qubits
+        // This signature maybe ought to be `... -> Result<usize, Error>` or
+        // something. We’ll see how it does for now.
+        fn free(&mut self, addr: usize);
     }
 
-    /// Yes, this is a no-op.
-    fn free(&mut self, _addr: usize) {}
-}
-
-impl QubitAllocator {
-    pub fn new() -> Self {
-        Self::default()
+    /// The default (and currently only) allocator used by the Interpreter. The
+    /// implementation does not try to be clever: allocations are only ever
+    /// performed after the greatest qubit yet allocated. This means that qubits are
+    /// never reused, which is a sound policy to begin with, especially as we know
+    /// nothing about the reinitialization capability of the target hardware.
+    ///
+    /// # Examples
+    /// ```
+    /// # use cavy::values::Value;
+    /// # use cavy::interpreter::alloc::QubitAllocator;
+    /// # use cavy::backend::arch;
+    /// let arch = arch::Arch::default();
+    /// let mut allocator = QubitAllocator::new(&arch);
+    /// let qb0 = allocator.alloc_q_bool().unwrap();
+    /// let qb1 = allocator.alloc_q_bool().unwrap();
+    /// assert_eq!(qb0, Value::Q_Bool(0));
+    /// assert_eq!(qb1, Value::Q_Bool(1));
+    /// ```
+    pub struct QubitAllocator<'a> {
+        least_free: usize,
+        arch: &'a Arch,
     }
 
-    pub fn alloc_q_bool(&mut self) -> Value {
-        Value::Q_Bool(self.alloc(1)[0])
-    }
-
-    pub fn free_q_bool(&mut self, val: Value) {
-        match val {
-            Value::Q_Bool(index) => {
-                self.free(index);
+    impl<'a> Allocator<Qubit> for QubitAllocator<'a> {
+        fn alloc(&mut self, n: usize) -> Result<Vec<Qubit>, ErrorBuf> {
+            let end = self.least_free + n;
+            if self.arch.qb_count < end.into() {
+                // Should fail if we run out of qubits!
+                todo!();
             }
-            _ => {
-                panic!();
+            let qubits = (self.least_free..end).collect();
+            self.least_free = end;
+            Ok(qubits)
+        }
+
+        /// Yes, this is a no-op.
+        fn free(&mut self, _addr: usize) {}
+    }
+
+    impl<'a> QubitAllocator<'a> {
+        pub fn new(arch: &'a Arch) -> Self {
+            Self {
+                least_free: 0,
+                arch,
             }
         }
-    }
 
-    pub fn alloc_q_u8(&mut self) -> Value {
-        Value::Q_U8(self.alloc(8).try_into().unwrap())
-    }
+        pub fn alloc_q_bool(&mut self) -> Result<Value, ErrorBuf> {
+            Ok(Value::Q_Bool(self.alloc(1)?[0]))
+        }
 
-    pub fn alloc_q_u16(&mut self) -> Value {
-        Value::Q_U16(self.alloc(16).try_into().unwrap())
-    }
+        pub fn free_q_bool(&mut self, val: Value) {
+            match val {
+                Value::Q_Bool(index) => {
+                    self.free(index);
+                }
+                _ => {
+                    todo!();
+                }
+            }
+        }
 
-    pub fn alloc_q_u32(&mut self) -> Value {
-        Value::Q_U32(self.alloc(32).try_into().unwrap())
+        pub fn alloc_q_u8(&mut self) -> Result<Value, ErrorBuf> {
+            Ok(Value::Q_U8(self.alloc(8)?.try_into().unwrap()))
+        }
+
+        pub fn alloc_q_u16(&mut self) -> Result<Value, ErrorBuf> {
+            Ok(Value::Q_U16(self.alloc(16)?.try_into().unwrap()))
+        }
+
+        pub fn alloc_q_u32(&mut self) -> Result<Value, ErrorBuf> {
+            Ok(Value::Q_U32(self.alloc(32)?.try_into().unwrap()))
+        }
     }
 }
 
@@ -113,10 +127,11 @@ impl fmt::Display for InterpreterError {
 
 impl std::error::Error for InterpreterError {}
 
-pub struct Interpreter {
+pub struct Interpreter<'a> {
     pub env: Environment,
     pub circuit: Circuit,
-    pub qubit_allocator: QubitAllocator,
+    pub qubit_allocator: alloc::QubitAllocator<'a>,
+    arch: &'a Arch,
     // This flag indicates whether code generation is currently covariant or
     // contravariant. It’s an implementation detail, and I’m not sure I like the
     // design of branching on a flag. I’m sure to think about this more, and
@@ -128,12 +143,13 @@ pub struct Interpreter {
     contra_stack: Vec<Gate>,
 }
 
-impl Interpreter {
-    pub fn new() -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(arch: &'a Arch) -> Self {
         Self {
             env: Environment::base(),
             circuit: Circuit::new(),
-            qubit_allocator: QubitAllocator::new(),
+            qubit_allocator: alloc::QubitAllocator::new(&arch),
+            arch: &arch,
             contra: false,
             contra_stack: vec![],
         }
@@ -422,7 +438,7 @@ impl Interpreter {
             | (Bang, val @ Value::Q_U32(_)) => crate::functions::builtins::measure(self, &[val])?,
 
             (Question, Value::Bool(x)) => {
-                let val = self.qubit_allocator.alloc_q_bool();
+                let val = self.qubit_allocator.alloc_q_bool()?;
                 if x {
                     if let Value::Q_Bool(u) = val {
                         self.compile_gate(Gate::X(u));
@@ -434,7 +450,7 @@ impl Interpreter {
             }
 
             (Question, Value::U8(x)) => {
-                let val = self.qubit_allocator.alloc_q_u8();
+                let val = self.qubit_allocator.alloc_q_u8()?;
                 if let Value::Q_U8(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
@@ -448,7 +464,7 @@ impl Interpreter {
             }
 
             (Question, Value::U16(x)) => {
-                let val = self.qubit_allocator.alloc_q_u16();
+                let val = self.qubit_allocator.alloc_q_u16()?;
                 if let Value::Q_U16(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
@@ -462,7 +478,7 @@ impl Interpreter {
             }
 
             (Question, Value::U32(x)) => {
-                let val = self.qubit_allocator.alloc_q_u32();
+                let val = self.qubit_allocator.alloc_q_u32()?;
                 if let Value::Q_U32(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
@@ -658,7 +674,8 @@ mod tests {
 
             let tokens = Scanner::new(src).tokenize().unwrap();
             let ast = Parser::new(tokens).expression().unwrap();
-            let actual_value = Interpreter::new().evaluate(&ast);
+            let arch = Arch::default();
+            let actual_value = Interpreter::new(&arch).evaluate(&ast);
 
             assert_eq!(expected_value, actual_value.unwrap());
         };
@@ -672,7 +689,8 @@ mod tests {
 
         let tokens = Scanner::new(src).tokenize().unwrap();
         let stmts = Parser::new(tokens).parse().unwrap();
-        let mut interp = Interpreter::new();
+        let arch = Arch::default();
+        let mut interp = Interpreter::new(&arch);
         for stmt in stmts.into_iter() {
             interp.execute(&stmt).unwrap();
         }
