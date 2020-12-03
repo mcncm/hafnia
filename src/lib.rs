@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+pub mod alloc;
 pub mod ast;
 pub mod backend;
 pub mod circuit;
@@ -11,6 +12,7 @@ pub mod errors;
 pub mod functions;
 pub mod interpreter;
 pub mod parser;
+pub mod qram;
 pub mod repl;
 pub mod scanner;
 pub mod sys;
