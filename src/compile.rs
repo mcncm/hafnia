@@ -1,5 +1,8 @@
 use crate::{
-    backend::{arch::Arch, BackendSerializable},
+    backend::{
+        arch::Arch,
+        target::{Qasm, TargetSerializable},
+    },
     errors::Result,
     interpreter::Interpreter,
     parser::Parser,
@@ -20,8 +23,8 @@ pub fn compile(src: (String, String), _flags: Flags, arch: &Arch) -> Result<Stri
         interpreter.execute(&stmt)?;
     }
 
-    let bindings_asm = interpreter.env.to_backend();
-    let circuit_asm = interpreter.circuit.to_backend();
-    let asm = format!("//{}\n{}", bindings_asm, circuit_asm);
+    let bindings_asm = interpreter.env.to_target();
+    let circuit_asm: Qasm = interpreter.circuit.to_target();
+    let asm = format!("//{}\n{}", bindings_asm.0, circuit_asm.0);
     Ok(asm)
 }

@@ -1,36 +1,76 @@
 /// In this module we outline the Backend api. This is pretty unstable for the
 /// time being, so don’t rely on it.
 
-/// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
-/// this is what Cirq supports.
-pub const QASM_VERSION: &str = "2.0";
+/// Compilation targets, if the compiler is configured to produce an object file.
+pub mod target {
+    use crate::circuit::{Circuit, Gate};
 
-pub trait Backend {
-    type CodeObject;
-}
-
-pub trait BackendSerializable<T: Backend> {
-    fn to_backend(&self) -> T::CodeObject;
-}
-
-///////////////////////
-// Concrete Backends //
-///////////////////////
-
-pub struct NullBackend {}
-impl Backend for NullBackend {
-    type CodeObject = ();
-}
-
-impl NullBackend {
-    pub fn new() -> Self {
-        Self {}
+    pub trait TargetSerializable<T> {
+        fn to_target(&self) -> T;
     }
-}
 
-pub struct Qasm {}
-impl Backend for Qasm {
-    type CodeObject = String;
+    /////////////////
+    // Null target //
+    /////////////////
+
+    pub struct NullTarget();
+
+    //////////////
+    // OpenQASM //
+    //////////////
+
+    /// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
+    /// this is what Cirq supports.
+    pub const QASM_VERSION: &str = "2.0";
+
+    /// The Qasm object code type is just a wrapper around a String.
+    pub struct Qasm(pub String);
+
+    impl TargetSerializable<Qasm> for Circuit {
+        fn to_target(&self) -> Qasm {
+            let declaration = {
+                if let Some(max_qubit) = self.max_qubit {
+                    let qubits = max_qubit + 1;
+                    format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
+                } else {
+                    String::new()
+                }
+            };
+            let gates = self
+                .circ_buf
+                .iter()
+                .map(|gate| gate.to_target().0)
+                .collect::<Vec<String>>()
+                .join("\n");
+            Qasm(format!(
+                "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}\n",
+                QASM_VERSION, declaration, gates
+            ))
+        }
+    }
+
+    ///////////
+    // LaTeX //
+    ///////////
+
+    pub const LATEX_HEADER: &str = r#"
+    \documentclass{article}
+    \begin{document}
+    "#;
+
+    pub const LATEX_FOOTER: &str = r#"
+    \end{document}
+    "#;
+
+    /// This backend emits a circuit in qcircuit format
+    pub struct Latex(pub String);
+
+    /// Serialize as a quantikz circuit
+    impl TargetSerializable<Latex> for Circuit {
+        fn to_target(&self) -> Latex {
+            Latex(format!("{}{}{}", LATEX_HEADER, "", LATEX_FOOTER))
+        }
+    }
 }
 
 /// This module contains types for describing target architectures

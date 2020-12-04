@@ -11,11 +11,11 @@ fn is_power_of_two(n: usize) -> bool {
 /// This is the structure of the Qram bucket brigade:
 /// ```text
 ///             [ | ]
-///            /     \        ^^ pos < N - 2
+///            /     \
 ///           /       \
-///       [ | ]       [ | ]      pos < 2(N - 1)
+///       [ | ]       [ | ]
 ///       /   \       /   \
-///     [ ]   [ ]   [ ]   [ ]    pos >= 2(N - 1)
+///     [ ]   [ ]   [ ]   [ ]
 /// ```
 /// Each internal node contains two qubits, because we assume not to have access
 /// to true qutrits. It is probably a worthwhile (if slightly marginal) research
@@ -25,10 +25,14 @@ fn is_power_of_two(n: usize) -> bool {
 /// `N + 2 * (N - 1)` qubits
 ///
 /// The three states of the internal nodes shall be:
-/// `|left⟩ := |00⟩`, `|right⟩ := |01⟩`, `|wait⟩ := |10⟩`
+/// `|wait⟩ := |00⟩`, `|left⟩ := |10⟩`, `|right⟩ := |01⟩`
 pub struct Qram {
     pub size: usize,
     arena: Vec<Qubit>,
+    // The Qram is also an allocator in its own right. Consider whether this
+    // functionality is orthogonal to--and should be separated from--the bucket
+    // brigade implementation.
+    least_free: usize,
 }
 
 #[derive(PartialEq, Eq)]
@@ -46,7 +50,11 @@ impl Qram {
         assert!(is_power_of_two(size));
         // Should be able to promise that there are enough qubits for the QRAM!!
         let arena = allocator.alloc(Self::arena_len(size)).unwrap();
-        Self { size, arena }
+        Self {
+            size,
+            arena,
+            least_free: 0,
+        }
     }
 
     fn arena_len(size: usize) -> usize {
@@ -95,6 +103,26 @@ impl Qram {
         assert!(self.layer_of(pos) != QramLayer::Leaf);
         self.arena[pos + 1]
     }
+}
+
+impl Allocator<Qubit> for Qram {
+    fn alloc(&mut self, n: usize) -> Result<Vec<Qubit>, ErrorBuf> {
+        // This implementation is copied directly from that of QubitAllocator.
+        // This is not so bad today, but you should either decide on a mechanism
+        // to keep them in step with one another, or a reason to prefer
+        // different allocation algorithms for the two.
+        let end = self.least_free + n;
+        if self.size < end.into() {
+            // Should fail if we run out of qubits!
+            todo!();
+        }
+        let qubits = (self.least_free..end).collect();
+        self.least_free = end;
+        Ok(qubits)
+    }
+
+    /// Yes, this is a no-op.
+    fn free(&mut self, _addr: usize) {}
 }
 
 pub mod test {

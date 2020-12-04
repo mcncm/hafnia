@@ -1,4 +1,4 @@
-use crate::backend::{BackendSerializable, Qasm, QASM_VERSION};
+use crate::backend::target::{Qasm, TargetSerializable, QASM_VERSION};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
@@ -85,10 +85,10 @@ impl Gate {
     }
 }
 
-impl BackendSerializable<Qasm> for Gate {
+impl TargetSerializable<Qasm> for Gate {
     #[rustfmt::skip]
-    fn to_backend(&self) -> String {
-        match self {
+    fn to_target(&self) -> Qasm {
+        let instruction = match self {
             X(tgt)           => format!("x q[{}];", tgt),
             T { tgt, conj }  => format!("{} q[{}];",
                                         if *conj { "tdg" } else { "t" },
@@ -97,7 +97,8 @@ impl BackendSerializable<Qasm> for Gate {
             Z(tgt)           => format!("z q[{}];", tgt),
             CX { tgt, ctrl } => format!("cx q[{}], q[{}];", ctrl, tgt),
             M(tgt)           => format!("measure q[{}] -> c[{}];", tgt, tgt)
-        }
+        };
+        Qasm(instruction)
     }
 }
 
@@ -125,32 +126,10 @@ impl Circuit {
     }
 }
 
-impl BackendSerializable<Qasm> for Circuit {
-    fn to_backend(&self) -> String {
-        let declaration = {
-            if let Some(max_qubit) = self.max_qubit {
-                let qubits = max_qubit + 1;
-                format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
-            } else {
-                String::new()
-            }
-        };
-        let gates = self
-            .circ_buf
-            .iter()
-            .map(|gate| gate.to_backend())
-            .collect::<Vec<String>>()
-            .join("\n");
-        format!(
-            "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}\n",
-            QASM_VERSION, declaration, gates
-        )
-    }
-}
-
 impl fmt::Display for Circuit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repr = self.to_backend();
-        write!(f, "{}", repr)
+        use crate::backend::target::{Qasm, TargetSerializable};
+        let repr: Qasm = self.to_target();
+        write!(f, "{}", repr.0)
     }
 }

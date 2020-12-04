@@ -10,9 +10,9 @@
 Cavy is an imperative programming language for quantum computers. It's designed
 to be accessible to everyday programmers, without cheating you out of
 correctness. It uses a internal intermediate representation (IR) to generate
-code in multiple low-level circuit languages, including cQASM and Cirq. You can
-run it on real hardware, or in a simulator, and execute it from within Python.
-And it has a REPL, too, that works with real hardware!
+code in multiple low-level circuit languages, including OpenQASM and Quantikz.
+You can run it on real hardware--or in a simulator--through an easy-to-use
+Python wrapper. And it has a REPL, too!
 
 This is not the only quantum programming language out there. Both academic and
 corporate researchers have written their own. I'm just a student who did this
@@ -43,12 +43,12 @@ randomness_. Below is some sample Cavy code implementing a simple one-byte QRNG.
 let q: ?u8 = 0;  // Declare a "qubyte" unsigned int, deterministically initialized to 0.
 q = split(q);    // Split the wavefunction into 256 branches of equal weight.
 r = !q;          // Consume the ?u8 and bind its measured value to a u8.
-print(r);        // Write the random int to stdout.
+print r;        // Write the random int to stdout.
 ```
 
 This should look reasonably familiar to those familiar with conventional
-imperative programming languages--especially Rust, whose declaration syntax I've
-taken to and shamelessly copied. There are a few novel features, though.
+imperative programming languages--especially Rust. There are a few novel
+features, though.
 
 The first is the `?` annotation, which denotes the following type as _linear_.
 Linear types (or their weaker _affine_ cousins) exist in a few other languages,
@@ -125,8 +125,8 @@ We can create an entangled pair like this:
 
 ```cavy
 // Initialize two qubuts to the state |0⟩|0⟩
-let q1: ?bool = false;
-let q2: ?bool = false;
+let q1 = ?false;
+let q2 = ?false;
 
 q1 = split(q1); // Our little register is now in the state |0⟩|0⟩ + |1⟩|0⟩.
 if q2 {         // On the branch where q0 is |1⟩...
@@ -134,8 +134,8 @@ if q2 {         // On the branch where q0 is |1⟩...
 }               // Now we have a Bell pair, |0⟩|0⟩ + |1⟩|1⟩.
 
 // Read out the register!
-c1 = !q1; print(c1);
-c2 = !q2; print(c2);
+c1 = !q1; print c1;
+c2 = !q2; print c2;
 ```
 
 This program's trace will always be either `0\n0` `1\n1`.
@@ -167,7 +167,7 @@ and runs on aarch64. Cavy currently requires rustc >= 1.48.0.
 ## For your quantum computing infrastructure
 Please email `cavy` dash `lang` dash `support` at `mit` dot `edu`.
 
-# Interfacing with other languages
+# Interfacing with scripting languages
 
 ## Python
 You can call the Cavy compiler from Python through
@@ -175,6 +175,16 @@ You can call the Cavy compiler from Python through
 functions for loading compiling Cavy programs as Cirq and Qiskit circuits, LaTeX
 diagrams, and so on.
 
+## Julia
+I’ll also put out a Julia wrapper--and sooner, if I hear of any interest!
+
+# Development
+
+Cavy has an Emacs major mode,
+[cavy-mode.el](https://github.com/mcncm/cavy-mode), which provides syntax
+highlighting and object code display (in QASM or as a LaTeX circuit).
+
 # Contributing
-If you discover a bug, please open an issue and/or email `cavy` dash `lang` dash
-`support` at `mit` dot `edu`.
+If you discover a bug, want to contribute to the compiler, or talk about its
+design and goals, please open an issue and/or email `cavy` dash `lang` dash
+`support` at `mit` dot `edu`. Pull requests are welcome!

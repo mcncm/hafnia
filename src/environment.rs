@@ -1,4 +1,4 @@
-use crate::backend::{BackendSerializable, Qasm};
+use crate::backend::target::{Qasm, TargetSerializable};
 use crate::functions::builtins::BUILTINS;
 use crate::{circuit::Qubit, functions::Func, values::Value};
 use serde::{self, Deserialize, Serialize};
@@ -153,10 +153,11 @@ impl Serialize for EnvNode {
     }
 }
 
-impl BackendSerializable<Qasm> for EnvNode {
-    fn to_backend(&self) -> String {
+/// This implementation has to be here because `EnvNode` is not `pub`.
+impl TargetSerializable<Qasm> for EnvNode {
+    fn to_target(&self) -> Qasm {
         let json = serde_json::to_value(self).unwrap();
-        json.to_string()
+        Qasm(json.to_string())
     }
 }
 
@@ -253,8 +254,9 @@ impl Environment {
     }
 }
 
-impl BackendSerializable<Qasm> for Environment {
-    fn to_backend(&self) -> String {
-        self.store.as_ref().unwrap().to_backend()
+/// This implementation has to be here becuase `store` is not a `pub` field.
+impl TargetSerializable<Qasm> for Environment {
+    fn to_target(&self) -> Qasm {
+        Qasm(self.store.as_ref().unwrap().to_target().0)
     }
 }

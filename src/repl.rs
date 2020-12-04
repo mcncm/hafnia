@@ -1,4 +1,4 @@
-use crate::backend::{arch::Arch, Backend};
+use crate::backend::arch::Arch;
 use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
