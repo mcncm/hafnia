@@ -4,7 +4,7 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use cavy::backend::arch;
+use cavy::backend::{arch, target};
 use cavy::repl::Repl;
 use cavy::{compile, sys};
 
@@ -25,16 +25,16 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
         phase = sys::CompilerPhase::Tokenize;
     }
 
-    // Should this fail silently?
     let opt = match argmatches.value_of("opt") {
         Some("1") => 1,
         Some("2") => 2,
         Some("3") => 3,
-        _ => 0,
+        Some(_) => unreachable!(),
+        None => 0,
     };
     if opt > 0 {
-        println!(
-            "Running with optimization level {}. This option currently does nothing.",
+        eprintln!(
+            "Warning: running with optimization level O{}. This option is currently disabled.",
             opt
         );
     }
@@ -42,6 +42,8 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     sys::Flags { debug, opt, phase }
 }
 
+/// FIXME This return type is very unclear. Should return a `SourceCode` struct.
+/// This turns out to be (very midly) tricky because of lifetimes.
 fn get_code(argmatches: &ArgMatches) -> Result<Option<(String, String)>, io::Error> {
     match argmatches.value_of("input") {
         Some(path) => {
@@ -53,23 +55,36 @@ fn get_code(argmatches: &ArgMatches) -> Result<Option<(String, String)>, io::Err
 }
 
 fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::Error>> {
+    use arch::{Arch, QbCount};
+
     let qb_count = match argmatches.value_of("qbcount") {
-        Some(qb_count) => Some(arch::QbCount::Finite(qb_count.parse::<usize>()?)),
+        Some(qb_count) => Some(QbCount::Finite(qb_count.parse::<usize>()?)),
         None => None,
     };
 
     let arch = match qb_count {
-        Some(qb_count) => arch::Arch { qb_count },
-        None => arch::Arch::default(),
+        Some(qb_count) => Arch { qb_count },
+        None => Arch::default(),
     };
 
     Ok(arch)
 }
 
+fn get_target(argmatches: &ArgMatches) -> &dyn target::Target<ObjectCode = String> {
+    match argmatches.value_of("target") {
+        Some("qasm") => &target::Qasm {},
+        Some("latex") => &target::Latex {},
+        Some(_) => unreachable!(),
+        None => &target::Qasm {},
+    }
+}
+
 fn main() {
     let yaml = load_yaml!("cli.yml");
-    let argmatches = App::from(yaml).get_matches();
+    let app = App::from(yaml).version(sys::VERSION_STRING);
+    let argmatches = app.get_matches();
     let flags = get_flags(&argmatches);
+    let target = get_target(&argmatches);
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed.
@@ -99,14 +114,14 @@ fn main() {
         // A source file was given and read without error
         Ok(Some(src)) => {
             let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.qasm"));
-            let object_code = compile::compile(src, flags, &arch).unwrap();
+            let object_code = compile::compile(src, flags, &arch, target).unwrap();
             let mut file = File::create(&object_path).unwrap();
             file.write_all(object_code.as_bytes()).unwrap();
             process::exit(0);
         }
         // A source file was not given; run a repl
         Ok(None) => {
-            let mut repl = Repl::new(flags, &arch);
+            let mut repl = Repl::new(&flags, &arch);
             repl.run();
         }
         // An error was encountered in reading a source file

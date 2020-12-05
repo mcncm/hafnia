@@ -544,7 +544,10 @@ impl<'a> Interpreter<'a> {
         self.env.moving = !contra;
     }
 
-    pub fn interpret(&mut self, _input: &str) -> Result<(), ErrorBuf> {
+    pub fn interpret(&mut self, stmts: Vec<Stmt>) -> Result<(), ErrorBuf> {
+        for stmt in stmts.into_iter() {
+            self.execute(&stmt)?;
+        }
         Ok(())
     }
 

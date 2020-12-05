@@ -10,9 +10,9 @@ use std::path::Path;
 use std::process::Command;
 
 #[cfg(debug_assertions)]
-const BUILD_TYPE: &'static str = "debug";
+const BUILD_TYPE: &str = "debug";
 #[cfg(not(debug_assertions))]
-const BUILD_TYPE: &'static str = "release";
+const BUILD_TYPE: &str = "release";
 
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -20,8 +20,7 @@ fn main() {
     let address_path = Path::new(&out_dir).join("address");
 
     let version_string = format!(
-        "{} {} ({}:{}{}, {} build, {} [{}])",
-        env!("CARGO_PKG_NAME"),
+        "{} ({}:{}{}, {} build, {} [{}])",
         env!("CARGO_PKG_VERSION"),
         get_branch_name(),
         get_commit_hash(),

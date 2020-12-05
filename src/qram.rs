@@ -112,7 +112,7 @@ impl Allocator<Qubit> for Qram {
         // to keep them in step with one another, or a reason to prefer
         // different allocation algorithms for the two.
         let end = self.least_free + n;
-        if self.size < end.into() {
+        if self.size < end {
             // Should fail if we run out of qubits!
             todo!();
         }

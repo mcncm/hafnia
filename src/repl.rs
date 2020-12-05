@@ -15,11 +15,11 @@ const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
 pub struct Repl<'a> {
     interpreter: Interpreter<'a>,
-    flags: sys::Flags,
+    flags: &'a sys::Flags,
 }
 
 impl<'a> Repl<'a> {
-    pub fn new(flags: sys::Flags, arch: &'a Arch) -> Repl {
+    pub fn new(flags: &'a sys::Flags, arch: &'a Arch) -> Self {
         Repl {
             interpreter: Interpreter::new(&arch),
             flags,

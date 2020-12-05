@@ -1,19 +1,39 @@
-/// In this module we outline the Backend api. This is pretty unstable for the
+/// In this module we outline the backend APIs. This is all pretty unstable for the
 /// time being, so don’t rely on it.
 
 /// Compilation targets, if the compiler is configured to produce an object file.
 pub mod target {
-    use crate::circuit::{Circuit, Gate};
+    use crate::interpreter::Interpreter;
 
-    pub trait TargetSerializable<T> {
-        fn to_target(&self) -> T;
+    /// This is a marker trait for compile targets
+    pub trait Target<'a>: std::fmt::Debug {
+        type ObjectCode;
+
+        fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode;
+    }
+
+    /// This trait is implemented by internal structs which, during code
+    /// generation, need inform the target safely about their private fields.
+    pub trait IntoTarget<'a, T>
+    where
+        T: Target<'a>,
+    {
+        // TODO consider using the Serde API, which is of course pretty standard
+        // in Rust. Maybe that accomplishes the same thing without the awkward
+        fn into_target(&self, target: &T) -> T::ObjectCode;
     }
 
     /////////////////
     // Null target //
     /////////////////
 
+    #[derive(Debug)]
     pub struct NullTarget();
+    impl<'a> Target<'a> for NullTarget {
+        type ObjectCode = ();
+
+        fn from(&self, _interp: &Interpreter<'a>) {}
+    }
 
     //////////////
     // OpenQASM //
@@ -24,10 +44,38 @@ pub mod target {
     pub const QASM_VERSION: &str = "2.0";
 
     /// The Qasm object code type is just a wrapper around a String.
-    pub struct Qasm(pub String);
+    #[derive(Debug)]
+    pub struct Qasm;
 
-    impl TargetSerializable<Qasm> for Circuit {
-        fn to_target(&self) -> Qasm {
+    impl Qasm {
+        fn bindings(&self, env: &crate::environment::Environment) -> String {
+            format!("// {}", env.into_target(self))
+        }
+
+        fn headers(&self) -> String {
+            format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
+        }
+
+        fn circuit(&self, circuit: &crate::circuit::Circuit) -> String {
+            circuit.into_target(self)
+        }
+    }
+
+    impl<'a> Target<'a> for Qasm {
+        type ObjectCode = String;
+
+        fn from(&self, interp: &Interpreter<'a>) -> String {
+            format!(
+                "{}\n{}\n{}",
+                self.bindings(&interp.env),
+                self.headers(),
+                self.circuit(&interp.circuit)
+            )
+        }
+    }
+
+    impl IntoTarget<'_, Qasm> for crate::circuit::Circuit {
+        fn into_target(&self, target: &Qasm) -> String {
             let declaration = {
                 if let Some(max_qubit) = self.max_qubit {
                     let qubits = max_qubit + 1;
@@ -39,13 +87,18 @@ pub mod target {
             let gates = self
                 .circ_buf
                 .iter()
-                .map(|gate| gate.to_target().0)
+                .map(|gate| gate.into_target(target))
                 .collect::<Vec<String>>()
                 .join("\n");
-            Qasm(format!(
-                "OPENQASM {};\ninclude \"qelib1.inc\";\n{}\n{}\n",
-                QASM_VERSION, declaration, gates
-            ))
+            format!("{}\n{}\n", declaration, gates)
+        }
+    }
+
+    impl<'a> IntoTarget<'a, Qasm> for crate::interpreter::Interpreter<'a> {
+        fn into_target(&self, target: &Qasm) -> String {
+            let bindings_asm = self.env.into_target(target);
+            let circuit_asm = self.circuit.into_target(target);
+            format!("//{}\n{}", bindings_asm, circuit_asm)
         }
     }
 
@@ -53,22 +106,39 @@ pub mod target {
     // LaTeX //
     ///////////
 
-    pub const LATEX_HEADER: &str = r#"
-    \documentclass{article}
-    \begin{document}
-    "#;
-
-    pub const LATEX_FOOTER: &str = r#"
-    \end{document}
-    "#;
-
     /// This backend emits a circuit in qcircuit format
-    pub struct Latex(pub String);
+    #[derive(Debug)]
+    pub struct Latex;
+
+    impl Latex {
+        const HEADER: &'static str = r#"
+        \documentclass{article}
+        \begin{document}
+        "#;
+
+        const FOOTER: &'static str = r#"
+        \end{document}
+        "#;
+    }
+
+    impl<'a> Target<'a> for Latex {
+        type ObjectCode = String;
+
+        fn from(&self, _interp: &Interpreter<'a>) -> Self::ObjectCode {
+            format!("{}{}{}", Self::HEADER, "", Self::FOOTER)
+        }
+    }
 
     /// Serialize as a quantikz circuit
-    impl TargetSerializable<Latex> for Circuit {
-        fn to_target(&self) -> Latex {
-            Latex(format!("{}{}{}", LATEX_HEADER, "", LATEX_FOOTER))
+    impl<'a> IntoTarget<'a, Latex> for crate::circuit::Circuit {
+        fn into_target(&self, _backend: &Latex) -> String {
+            todo!();
+        }
+    }
+
+    impl<'a> IntoTarget<'a, Latex> for crate::interpreter::Interpreter<'a> {
+        fn into_target(&self, _backend: &Latex) -> String {
+            todo!();
         }
     }
 }

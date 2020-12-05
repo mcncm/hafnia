@@ -1,4 +1,4 @@
-use crate::backend::target::{Qasm, TargetSerializable, QASM_VERSION};
+use crate::backend::target::{IntoTarget, Qasm, Target, QASM_VERSION};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
@@ -85,10 +85,10 @@ impl Gate {
     }
 }
 
-impl TargetSerializable<Qasm> for Gate {
+impl IntoTarget<'_, Qasm> for Gate {
     #[rustfmt::skip]
-    fn to_target(&self) -> Qasm {
-        let instruction = match self {
+    fn into_target(&self, _target: &Qasm) -> String {
+        match self {
             X(tgt)           => format!("x q[{}];", tgt),
             T { tgt, conj }  => format!("{} q[{}];",
                                         if *conj { "tdg" } else { "t" },
@@ -97,8 +97,7 @@ impl TargetSerializable<Qasm> for Gate {
             Z(tgt)           => format!("z q[{}];", tgt),
             CX { tgt, ctrl } => format!("cx q[{}], q[{}];", ctrl, tgt),
             M(tgt)           => format!("measure q[{}] -> c[{}];", tgt, tgt)
-        };
-        Qasm(instruction)
+        }
     }
 }
 
@@ -128,8 +127,9 @@ impl Circuit {
 
 impl fmt::Display for Circuit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::backend::target::{Qasm, TargetSerializable};
-        let repr: Qasm = self.to_target();
-        write!(f, "{}", repr.0)
+        use crate::backend::target::{IntoTarget, Qasm};
+        let backend = Qasm {};
+        let repr: String = self.into_target(&backend);
+        write!(f, "{}", repr)
     }
 }

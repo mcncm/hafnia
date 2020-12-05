@@ -5,7 +5,7 @@
 
 # Overview
 
-[![Build Status](https://travis-ci.com/mcncm/cavy-rs.svg?token=wTZePJvDpqqWnfcvqYkS&branch=master)](https://travis-ci.com/mcncm/cavy-rs)
+[![Build Status](https://travis-ci.com/mcncm/cavy-rs.svg?token=wTZePJvDpqqWnfcvqYkS&branch=main)](https://travis-ci.com/mcncm/cavy-rs)
 
 Cavy is an imperative programming language for quantum computers. It's designed
 to be accessible to everyday programmers, without cheating you out of

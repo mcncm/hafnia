@@ -1,5 +1,4 @@
 name: Cavy
-version: "0.2.0\n"
 author: mcncm <cavy-lang-support@mit.edu>
 about: A small, imperative quantum programming language
 args:
@@ -10,12 +9,27 @@ args:
   - object:
       short: o
       value_name: OBJECT
-      about: Place the output into <file>
+      about: Write the compiler output into <OBJECT>
       required: false
+  - target:
+      short: t
+      long: target
+      value_name: TARGET
+      about: Object language to target.
+      required: false
+      possible_values:
+        - qasm
+        - latex
   - opt:
       short: O
+      long: opt
       value_name: OPT
-      about: Sets an optimization level [O0, O1, O2, or O3].
+      about: Sets an optimization level.
+      possible_values:
+        - "0"
+        - "1"
+        - "2"
+        - "3"
       required: false
   - qbcount:
       short: q
