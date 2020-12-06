@@ -51,7 +51,7 @@ impl Func for UserFunc {
             .collect();
 
         match &*self.body {
-            Expr::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), None),
+            Expr::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), vec![]),
             _ => unreachable!(),
         }
     }

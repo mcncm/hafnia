@@ -54,7 +54,10 @@ impl<T> Into<Option<T>> for Moveable<T> {
 struct EnvNode {
     pub values: HashMap<Key, Moveable<Nameable>>,
     pub enclosing: Option<Box<EnvNode>>,
-    controls: HashSet<Qubit>,
+    // Uniqueness of the elements must be enforced by the user of this data
+    // structure. Note that we won't ever need to remove controls by value: they
+    // are only removed by going out of scope!
+    controls: Vec<Qubit>,
 }
 
 impl EnvNode {
@@ -109,27 +112,18 @@ impl EnvNode {
         }
     }
 
-    /// Get a reference to all the controlled qubits in this scope
-    ///
-    /// TODO Figure out how to return a Union<&Qubit, _> instead of allocating.
-    /// What is the second type parameter?
-    pub fn all_controls(&self) -> HashSet<Qubit> {
-        match &self.enclosing {
-            Some(node) => node
-                .all_controls()
-                .union(&self.controls)
-                .copied() // Awkward copy that shouldn’t really be necessary
-                .collect(),
-            None => self.controls.clone(),
-        }
+    /// Get a reference to all the controlled qubits in this scope.
+    pub fn all_controls(&self) -> Box<dyn Iterator<Item = &Qubit> + '_> {
+        use std::iter;
+        let controls = self.controls.iter().chain(match &self.enclosing {
+            Some(node) => node.controls.iter(),
+            None => [].iter(),
+        });
+        Box::new(controls)
     }
 
-    fn insert_control(&mut self, qubit: Qubit) -> bool {
-        self.controls.insert(qubit)
-    }
-
-    fn remove_control(&mut self, qubit: &Qubit) -> bool {
-        self.controls.remove(qubit)
+    fn insert_control(&mut self, qubit: Qubit) {
+        self.controls.push(qubit)
     }
 }
 
@@ -197,17 +191,12 @@ impl Environment {
     //////////////////
 
     /// Push an environment onto the stack.
-    pub fn open_scope(
-        &mut self,
-        values: Option<HashMap<Key, Nameable>>,
-        controls: Option<HashSet<Qubit>>,
-    ) {
+    pub fn open_scope(&mut self, values: Option<HashMap<Key, Nameable>>, controls: Vec<Qubit>) {
         let values = values
             .unwrap_or_default()
             .into_iter()
             .map(|(key, value)| (key, Moveable::There(value)))
             .collect();
-        let controls = controls.unwrap_or_default();
         let new_store = Box::new(EnvNode {
             values,
             controls,
@@ -239,18 +228,25 @@ impl Environment {
     }
 
     /// Add a control in the current scope
-    pub fn insert_control(&mut self, qubit: Qubit) -> bool {
+    pub fn insert_control(&mut self, qubit: Qubit) {
         self.store.as_mut().unwrap().insert_control(qubit)
     }
 
-    // this method shouldn’t be necessary; controls should be associated with a
-    // scope, and disappear when it ends.
-    pub fn remove_control(&mut self, qubit: Qubit) -> bool {
-        self.store.as_mut().unwrap().remove_control(&qubit)
-    }
-
-    pub fn controls(&self) -> HashSet<Qubit> {
-        self.store.as_ref().unwrap().all_controls()
+    pub fn controls(&self) -> Box<dyn Iterator<Item = Qubit>> {
+        let controls: Vec<Qubit> = self
+            .store
+            .as_ref()
+            .unwrap()
+            .all_controls()
+            // FIXME We are, for now, going to punt on the question of lifetimes
+            // of controls. Indeed, this data only lives as long as the
+            // innermost scope. To return only *references* to the controls, we
+            // would need to prove that nothing the interpreter does with them
+            // outlives that scope. To save that hassle, for the time being,
+            // we'll simply clone this iterator.
+            .cloned()
+            .collect();
+        Box::new(controls.into_iter())
     }
 }
 

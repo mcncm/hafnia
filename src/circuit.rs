@@ -73,12 +73,12 @@ impl Gate {
     }
 
     /// Control on multiple qubits
-    pub fn controlled_on(self, ctrls: &HashSet<Qubit>) -> Vec<Gate> {
+    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = Qubit>>) -> Vec<Gate> {
         let mut inner_gates = vec![self];
-        for ctrl in ctrls.iter() {
+        for ctrl in ctrls {
             inner_gates = inner_gates
                 .into_iter()
-                .flat_map(|gate| gate.controlled_on_one(*ctrl))
+                .flat_map(|gate| gate.controlled_on_one(ctrl))
                 .collect::<Vec<Gate>>()
         }
         inner_gates

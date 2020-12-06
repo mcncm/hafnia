@@ -191,9 +191,9 @@ pub mod target {
                 X(tgt)           => self.insert_single(tgt, r"\gate{X}".to_string()),
                 T { tgt, conj }  => self.insert_single(tgt, {
                     if *conj {
-                        r"\gate{T}".to_string()
-                    } else {
                         r"\gate{T^\dag}".to_string()
+                    } else {
+                        r"\gate{T}".to_string()
                     }
                 }),
                 H(tgt)           => self.insert_single(tgt, r"\gate{H}".to_string()),
@@ -238,19 +238,18 @@ pub mod target {
                 self.add_moment();
             }
             let moment = self.len() - 1;
-            for (wire, gate) in gates.into_iter() {
-                self.arr[*wire][moment] = LayoutState::Some(gate);
+            for (&wire, gate) in gates.into_iter() {
+                self.arr[wire][moment] = LayoutState::Some(gate);
+                self.first_free[wire] = moment + 1;
             }
             // FIXME We'll also do this suboptimally: we'll do a second pass
             // through the range, changing everything still free into Blocked.
-            // We *could* do this in a single pass if we sorted `gates`.
-            // Note that the range is *ex*clusive here.
+            // We *could* do this in a single pass if we sorted `gates`. Note
+            // that the range is *ex*clusive, because we can’t have the
+            // ends of a CNOT being free.
             for wire in (min + 1)..max {
                 if self.arr[wire][moment] == LayoutState::None {
                     self.arr[wire][moment] = LayoutState::Blocked;
-                    if self.first_free[wire] == moment {
-                        self.first_free[wire] += 1;
-                    }
                 }
             }
             self.add_moment();
@@ -272,7 +271,7 @@ pub mod target {
                 })
                 .collect::<Vec<String>>()
                 // Must not be a raw string; we really want to emit a newline!
-                .join("\\\\\n")
+                .join(" \\\\\n")
         }
     }
 

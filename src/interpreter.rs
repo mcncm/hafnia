@@ -171,9 +171,8 @@ impl<'a> Interpreter<'a> {
                 // If statements and If expressions as feels appropriate.
                 match (then_branch, else_branch) {
                     (Block(then_body, then_expr), None) => {
-                        let mut controls = HashSet::new();
-                        controls.insert(*u);
-                        self.eval_block(then_body, then_expr, None, Some(controls))?;
+                        let controls = vec![*u];
+                        self.eval_block(then_body, then_expr, None, controls)?;
                         Ok(Value::Unit)
                     }
                     _ => {
@@ -215,7 +214,7 @@ impl<'a> Interpreter<'a> {
                 then_branch,
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
-            Block(stmts, expr) => self.eval_block(stmts, expr, None, None),
+            Block(stmts, expr) => self.eval_block(stmts, expr, None, vec![]),
             Call {
                 callee,
                 args,
@@ -232,7 +231,7 @@ impl<'a> Interpreter<'a> {
         stmts: &[Stmt],
         expr: &Option<Box<Expr>>,
         bindings: Option<HashMap<Key, Nameable>>,
-        controls: Option<HashSet<Qubit>>,
+        controls: Vec<Qubit>,
     ) -> Result<Value, ErrorBuf> {
         self.env.open_scope(bindings, controls);
         let val = self.eval_block_inner(stmts, expr);
@@ -561,7 +560,7 @@ impl<'a> Interpreter<'a> {
     /// by user-defined functions. It’s not clearly something that *should* be
     /// exposed as part of the compiler API.
     pub fn compile_gate(&mut self, gate: Gate) {
-        let inner_gates = gate.controlled_on(&self.env.controls());
+        let inner_gates = gate.controlled_on(self.env.controls());
         for inner_gate in inner_gates.into_iter() {
             self.emit_gate(inner_gate);
         }
