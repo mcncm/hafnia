@@ -110,35 +110,98 @@ pub mod target {
     #[derive(Debug)]
     pub struct Latex;
 
-    impl Latex {
-        const HEADER: &'static str = r#"
-        \documentclass{article}
-        \begin{document}
-        "#;
+    /// A private struct used by the Latex backend to lay out the circuit representation.
+    struct LayoutArray(Vec<Vec<String>>);
 
-        const FOOTER: &'static str = r#"
-        \end{document}
-        "#;
+    impl LayoutArray {
+        #[rustfmt::skip]
+        fn push_gate(&mut self, gate: &crate::circuit::Gate) {
+            use crate::circuit::Gate::*;
+            match gate {
+                X(tgt)           => self.0[*tgt].push(r"\gate{X}".to_string()),
+                T { tgt, conj }  => self.0[*tgt].push({
+                    if *conj {
+                        r"\gate{T}".to_string()
+                    } else {
+                        r"\gate{T^\dag}".to_string()
+                    }
+                }),
+                H(tgt)           => self.0[*tgt].push(r"\gate{H}".to_string()),
+                Z(tgt)           => self.0[*tgt].push(r"\gate{Z}".to_string()),
+                CX { .. } => todo!(),
+                M(_)           => todo!(),
+            }
+        }
+
+        /// After all gates have been pushed, some of the wires will be too
+        /// short. These need empty cells added to them.
+        fn equalize_wires(&mut self) {
+            if self.0.is_empty() {
+                return;
+            }
+
+            // At this point, are guaranteed to have at least one wire, so this
+            // unwrap is safe.
+            let length = self.0.iter().map(|wire| wire.len()).max().unwrap();
+            for wire in &mut self.0 {
+                for _ in 0..(length - wire.len()) {
+                    wire.push(r"\qw".to_string());
+                }
+
+                // Finally, the wires are all the right length and we can cap
+                // them all with a \qw.
+                wire.push(r"\qw ".to_string());
+            }
+        }
+    }
+
+    impl Latex {
+        const HEADER: &'static str = r"\documentclass{standalone}
+\usepackage{tikz}
+\usetikzlibrary{quantikz}
+\begin{document}
+\begin{quantikz}
+";
+
+        const FOOTER: &'static str = r"
+\end{quantikz}
+\end{document}
+";
+
+        fn diagram(&self, circuit: &crate::circuit::Circuit) -> String {
+            let max_qubit = match circuit.max_qubit {
+                Some(qb) => qb,
+                None => {
+                    return String::new();
+                }
+            };
+
+            let mut layout_array = LayoutArray(vec![vec![String::new()]; max_qubit + 1]);
+            for gate in circuit.circ_buf.iter() {
+                layout_array.push_gate(gate);
+            }
+            layout_array.equalize_wires();
+
+            layout_array
+                .0
+                .iter()
+                .map(|wire| wire.join(" & "))
+                .collect::<Vec<String>>()
+                // Must not be a raw string; we really want to emit a newline!
+                .join("\\\\\n")
+        }
     }
 
     impl<'a> Target<'a> for Latex {
         type ObjectCode = String;
 
-        fn from(&self, _interp: &Interpreter<'a>) -> Self::ObjectCode {
-            format!("{}{}{}", Self::HEADER, "", Self::FOOTER)
-        }
-    }
-
-    /// Serialize as a quantikz circuit
-    impl<'a> IntoTarget<'a, Latex> for crate::circuit::Circuit {
-        fn into_target(&self, _backend: &Latex) -> String {
-            todo!();
-        }
-    }
-
-    impl<'a> IntoTarget<'a, Latex> for crate::interpreter::Interpreter<'a> {
-        fn into_target(&self, _backend: &Latex) -> String {
-            todo!();
+        fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode {
+            format!(
+                "{}{}{}",
+                Self::HEADER,
+                self.diagram(&interp.circuit),
+                Self::FOOTER
+            )
         }
     }
 }

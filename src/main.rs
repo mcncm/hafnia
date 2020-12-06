@@ -26,6 +26,7 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     }
 
     let opt = match argmatches.value_of("opt") {
+        Some("0") => 0,
         Some("1") => 1,
         Some("2") => 2,
         Some("3") => 3,
@@ -113,7 +114,7 @@ fn main() {
     match get_code(&argmatches) {
         // A source file was given and read without error
         Ok(Some(src)) => {
-            let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.qasm"));
+            let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));
             let object_code = compile::compile(src, flags, &arch, target).unwrap();
             let mut file = File::create(&object_path).unwrap();
             file.write_all(object_code.as_bytes()).unwrap();
