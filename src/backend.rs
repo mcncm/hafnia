@@ -18,8 +18,8 @@ pub mod target {
     where
         T: Target<'a>,
     {
-        // TODO consider using the Serde API, which is of course pretty standard
-        // in Rust. Maybe that accomplishes the same thing without the awkward
+        // FIXME Consider changing the name: in Rust, it is conventional for
+        // methods called `into` to take by value.
         fn into_target(&self, target: &T) -> T::ObjectCode;
     }
 
@@ -106,52 +106,173 @@ pub mod target {
     // LaTeX //
     ///////////
 
+    // TODO the public interface and private implementation are a bit mixed
+    // here: there is some functionality in the `diagram` function of `Latex`
+    // that should probably go in the `new` constructor of `LayoutArray`.
+
     /// This backend emits a circuit in qcircuit format
     #[derive(Debug)]
     pub struct Latex;
 
-    /// A private struct used by the Latex backend to lay out the circuit representation.
-    struct LayoutArray(Vec<Vec<String>>);
+    /// The three cell states in a common quantum circuit: in `Some(T)`, the
+    /// cell is occupied by a gate. In `None`, there is no gate or blocking
+    /// element. In `Blocked` there is no gate, but the cell is obstructed, as
+    /// by a vertical wire.
+    #[derive(Clone, PartialEq)]
+    enum LayoutState<T: Clone + PartialEq> {
+        Some(T),
+        None,
+        Blocked,
+    }
+
+    type Wire<T> = Vec<LayoutState<T>>;
+
+    /// A private struct used by the Latex backend to lay out the circuit
+    /// representation. The index order is space-major, because this should have
+    /// better locality of reference, and easier to serialize without an extra
+    /// allocation.
+    struct LayoutArray {
+        arr: Vec<Wire<String>>,
+        /// On each wire, the index of the first `None` cell, of which there is
+        /// guaranteed to be at least one.
+        first_free: Vec<usize>,
+    }
 
     impl LayoutArray {
+        fn new(wires: usize) -> Self {
+            // Start with length at least one. It will be an invariant of this
+            // data structure that there is always an empty final moment. This
+            // final moment will provide the terminal $\qw$ on each wire.
+            //
+            // (In fact, as a convenience we'll include *two* empty moments. The
+            // first of these will be the initial $\qw$ on each wire.)
+            //
+            // It is also an invariant that there's at least one wire, that
+            // should be enforced by `new`, although it isn't yet in a *natural* way.
+            assert!(wires > 0);
+            Self {
+                arr: vec![vec![LayoutState::Blocked, LayoutState::None]; wires],
+                first_free: vec![1; wires],
+            }
+        }
+
+        #[inline(always)]
+        fn wires(&self) -> usize {
+            // This is safe because we’re always guaranteed to contain at least
+            // one moment.
+            self.arr.len()
+        }
+
+        #[inline(always)]
+        fn add_moment(&mut self) {
+            for wire in self.arr.iter_mut() {
+                wire.push(LayoutState::None);
+            }
+        }
+
+        #[inline(always)]
+        fn len(&self) -> usize {
+            // Safe because we are guaranteed to always have at least one wire.
+            unsafe { self.arr.get_unchecked(0).len() }
+        }
+
+        /// Returns true if and only if the range of wires between `lower` and
+        /// `upper` (inclusive!) is all free.
+        fn range_free(&self, moment: usize, range: std::ops::RangeInclusive<usize>) -> bool {
+            self.arr[range]
+                .iter()
+                .all(|wire| wire[moment] == LayoutState::None)
+        }
+
         #[rustfmt::skip]
         fn push_gate(&mut self, gate: &crate::circuit::Gate) {
             use crate::circuit::Gate::*;
             match gate {
-                X(tgt)           => self.0[*tgt].push(r"\gate{X}".to_string()),
-                T { tgt, conj }  => self.0[*tgt].push({
+                X(tgt)           => self.insert_single(tgt, r"\gate{X}".to_string()),
+                T { tgt, conj }  => self.insert_single(tgt, {
                     if *conj {
                         r"\gate{T}".to_string()
                     } else {
                         r"\gate{T^\dag}".to_string()
                     }
                 }),
-                H(tgt)           => self.0[*tgt].push(r"\gate{H}".to_string()),
-                Z(tgt)           => self.0[*tgt].push(r"\gate{Z}".to_string()),
-                CX { .. } => todo!(),
-                M(_)           => todo!(),
+                H(tgt)           => self.insert_single(tgt, r"\gate{H}".to_string()),
+                Z(tgt)           => self.insert_single(tgt, r"\gate{Z}".to_string()),
+                CX { ctrl, tgt } => {
+                    let dist = (*tgt as isize) - (*ctrl as isize);
+                    let ctrl_label = format!(r"\ctrl{{{}}}", dist);
+                    let ctrl = (ctrl, ctrl_label);
+                    let tgt = (tgt, r"\targ{}".to_string());
+                    self.insert_multiple(vec![ctrl, tgt]);
+                }
+                M(tgt)           => self.insert_single(tgt, r"\meter{}".to_string()),
             }
         }
 
-        /// After all gates have been pushed, some of the wires will be too
-        /// short. These need empty cells added to them.
-        fn equalize_wires(&mut self) {
-            if self.0.is_empty() {
-                return;
-            }
+        fn insert_single(&mut self, wire: &usize, gate: String) {
+            let wire = *wire;
+            let mut moment = self.first_free[wire];
+            self.arr[wire][moment] = LayoutState::Some(gate);
 
-            // At this point, are guaranteed to have at least one wire, so this
-            // unwrap is safe.
-            let length = self.0.iter().map(|wire| wire.len()).max().unwrap();
-            for wire in &mut self.0 {
-                for _ in 0..(length - wire.len()) {
-                    wire.push(r"\qw".to_string());
+            while moment < self.len() - 1 {
+                moment += 1;
+                if self.arr[wire][moment] == LayoutState::None {
+                    self.first_free[wire] = moment;
+                    return;
                 }
-
-                // Finally, the wires are all the right length and we can cap
-                // them all with a \qw.
-                wire.push(r"\qw ".to_string());
             }
+
+            // There are no empty cells on this wire!
+            self.add_moment();
+            self.first_free[wire] = self.len() - 1;
+        }
+
+        fn insert_multiple(&mut self, gates: Vec<(&usize, String)>) {
+            // NOTE: is there a single iterator adapter in the standard library
+            // for getting both the min and max in one go?
+            let min = **gates.iter().map(|(wire, _)| wire).min().unwrap();
+            let max = **gates.iter().map(|(wire, _)| wire).max().unwrap();
+            // For now, we'll do the most naive possible correct thing: we'll *always*
+            // insert these at the end of the circuit.
+            if !self.range_free(self.len() - 1, min..=max) {
+                self.add_moment();
+            }
+            let moment = self.len() - 1;
+            for (wire, gate) in gates.into_iter() {
+                self.arr[*wire][moment] = LayoutState::Some(gate);
+            }
+            // FIXME We'll also do this suboptimally: we'll do a second pass
+            // through the range, changing everything still free into Blocked.
+            // We *could* do this in a single pass if we sorted `gates`.
+            // Note that the range is *ex*clusive here.
+            for wire in (min + 1)..max {
+                if self.arr[wire][moment] == LayoutState::None {
+                    self.arr[wire][moment] = LayoutState::Blocked;
+                    if self.first_free[wire] == moment {
+                        self.first_free[wire] += 1;
+                    }
+                }
+            }
+            self.add_moment();
+        }
+    }
+
+    impl IntoTarget<'_, Latex> for LayoutArray {
+        fn into_target(&self, _target: &Latex) -> String {
+            self.arr
+                .iter()
+                .map(|wire| {
+                    wire.iter()
+                        .map(|gate| match gate {
+                            LayoutState::Some(gate) => gate,
+                            _ => r"\qw",
+                        })
+                        .collect::<Vec<&str>>()
+                        .join(" & ")
+                })
+                .collect::<Vec<String>>()
+                // Must not be a raw string; we really want to emit a newline!
+                .join("\\\\\n")
         }
     }
 
@@ -176,19 +297,13 @@ pub mod target {
                 }
             };
 
-            let mut layout_array = LayoutArray(vec![vec![String::new()]; max_qubit + 1]);
+            let mut layout_array = LayoutArray::new(max_qubit + 1);
+
             for gate in circuit.circ_buf.iter() {
                 layout_array.push_gate(gate);
             }
-            layout_array.equalize_wires();
 
-            layout_array
-                .0
-                .iter()
-                .map(|wire| wire.join(" & "))
-                .collect::<Vec<String>>()
-                // Must not be a raw string; we really want to emit a newline!
-                .join("\\\\\n")
+            layout_array.into_target(self)
         }
     }
 
