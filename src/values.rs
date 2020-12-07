@@ -1,5 +1,6 @@
 use crate::{ast::Expr, token::Token};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// The enum of all the cavy values, comprising the unit type booleans, integers
 /// of several sizes, and the quantized counterparts of these types. The
@@ -81,6 +82,33 @@ impl Value {
             ),
 
             Measured(val) => T_Measured(Box::new(val.type_of())),
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Value::*;
+
+        match self {
+            Unit =>        write!(f, "()"),
+
+            Bool(x) =>     write!(f, "{}", x),
+            U8(x) =>       write!(f, "{}", x),
+            U16(x) =>      write!(f, "{}", x),
+            U32(x) =>      write!(f, "{}", x),
+
+            Array(data) => {
+                let data = data
+                    .iter()
+                    .map(|x| format!("{}", x))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "[{}]", data)
+            }
+
+            _ =>           write!(f, "<{}>", self.type_of()),
         }
     }
 }
@@ -180,13 +208,47 @@ pub mod types {
                     linear: members.values().any(|val| val.discipline().linear),
                 },
 
-                T_Measured(_) =>    StructuralDiscipline { linear: false },
+                T_Measured(_) =>     StructuralDiscipline { linear: false },
             }
         }
 
         /// Check if the type is linear
         pub fn is_linear(&self) -> bool {
             self.discipline().linear
+        }
+    }
+
+    impl fmt::Display for Type {
+        #[rustfmt::skip]
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            use Type::*;
+
+            match self {
+                T_Unit => write!(f, "()"),
+
+                T_Bool => write!(f, "bool"),
+                T_U8 =>   write!(f, "u8"),
+                T_U16 =>  write!(f, "u16"),
+                T_U32 =>  write!(f, "u32"),
+
+                T_Q_Bool => write!(f, "?bool"),
+                T_Q_U8 =>   write!(f, "?u8"),
+                T_Q_U16 =>  write!(f, "?u16"),
+                T_Q_U32 =>  write!(f, "?u32"),
+
+                // As above, this case reveals the inadequacy of dynamic typing
+                T_Array(typ, len) => {
+                    let typ = typ.as_ref().as_ref().unwrap();
+                    match len {
+                        0 => write!(f, "[_; 0]"),
+                        l => write!(f, "[{}; {}]", typ, l),
+                    }
+                }
+
+                T_Measured(typ) => write!(f, "!{{{}}}", typ),
+
+                _ => unimplemented!(),
+            }
         }
     }
 

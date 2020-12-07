@@ -1,6 +1,6 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, Stmt, TypeAnnot};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
@@ -79,7 +79,7 @@ impl<'a> Interpreter<'a> {
         use Stmt::*;
         match stmt {
             Print(expr) => {
-                println!("{:?}", self.evaluate(expr)?);
+                println!("{}", self.evaluate(expr)?);
             },
             Assn { lhs, rhs } => {
                 self.exec_assn(lhs, rhs)?;

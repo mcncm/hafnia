@@ -86,7 +86,7 @@ impl<'a> Repl<'a> {
                     let value = self.interpreter.evaluate(&expr)?;
                     // Print the value of the final *expression* only
                     if n == len - 1 {
-                        println!("{:?}", value);
+                        println!("{}", value);
                     };
                 }
                 stmt => {
