@@ -64,8 +64,21 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
         None => None,
     };
 
+    // Is there any way to make clap parse integer arguments for you?
+    let qram_size = argmatches
+        .value_of("qram_size")
+        .unwrap_or("0")
+        .parse::<usize>()
+        .unwrap_or_else(|_| {
+            eprintln!("Error: argument QRAM_SIZE must be a nonnegative integer.");
+            process::exit(1);
+        });
+
     let arch = match qb_count {
-        Some(qb_count) => Arch { qb_count },
+        Some(qb_count) => Arch {
+            qb_count,
+            qram_size,
+        },
         None => Arch::default(),
     };
 

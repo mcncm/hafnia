@@ -73,6 +73,8 @@ pub mod builtins {
             let mut m = HashMap::new();
             m.insert("flip", Builtin { arity: 1, func: &flip });
             m.insert("split", Builtin { arity: 1, func: &split });
+            m.insert("qalloc", Builtin { arity: 2, func: &qalloc });
+            m.insert("free", Builtin { arity: 1, func: &free });
             m
         };
     }
@@ -150,4 +152,27 @@ pub mod builtins {
     gate_function![flip, Z, false; Q_U8, Q_U16, Q_U32];
     gate_function![split, H, false; Q_U8, Q_U16, Q_U32];
     gate_function![measure, M, true; Q_U8, Q_U16, Q_U32];
+
+    /// Dynamic allocation in the QRAM.
+    fn qalloc(interp: &mut Interpreter, _args: &[Value]) -> Result<Value, ErrorBuf> {
+        match &mut interp.qram {
+            Some(_) => {
+                todo!();
+            }
+            None => {
+                todo!();
+            }
+        }
+    }
+
+    fn free(interp: &mut Interpreter, _args: &[Value]) -> Result<Value, ErrorBuf> {
+        match &mut interp.qram {
+            Some(_) => {
+                todo!();
+            }
+            None => {
+                todo!();
+            }
+        }
+    }
 }

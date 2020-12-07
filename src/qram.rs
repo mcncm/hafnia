@@ -46,9 +46,9 @@ enum QramLayer {
 }
 
 impl Qram {
-    fn new(size: usize, allocator: &mut dyn Allocator<Qubit>) -> Self {
+    pub fn new(allocator: &mut dyn Allocator<Qubit>, size: usize) -> Self {
         assert!(is_power_of_two(size));
-        // Should be able to promise that there are enough qubits for the QRAM!!
+        // Should be able to promise that there are enough qubits for the QRAM!
         let arena = allocator.alloc(Self::arena_len(size)).unwrap();
         Self {
             size,
@@ -149,7 +149,7 @@ pub mod test {
         // #![allow(unused_mut)]
         let arch = Arch::default();
         let mut alloc = QubitAllocator::new(&arch);
-        let qram = Qram::new(8, &mut alloc);
+        let qram = Qram::new(&mut alloc, 8);
         path![ qram => child_l, child_l, child_l ];
         path![ qram => child_l, child_l, child_r ];
         path![ qram => child_l, child_r, child_l ];
@@ -166,7 +166,7 @@ pub mod test {
         // #![allow(unused_mut)]
         let arch = Arch::default();
         let mut alloc = QubitAllocator::new(&arch);
-        let qram = Qram::new(8, &mut alloc);
+        let qram = Qram::new(&mut alloc, 8);
         path![ qram => child_l, child_l, child_l, child_l ];
     }
 }

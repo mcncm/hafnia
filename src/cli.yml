@@ -35,8 +35,12 @@ args:
       short: q
       long: qbcount
       value_name: QBCOUNT
-      about: Sets the number of qubits of your architecture
+      about: The number of qubits of your architecture
       required: false
+  - qram_size:
+      long: qram_size
+      value_name: QRAM_SIZE
+      about: The number of addressable random access qubits of your architecture
   - debug:
       short: d
       long: debug

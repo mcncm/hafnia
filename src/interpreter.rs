@@ -1,9 +1,10 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Expr, Stmt, TypeAnnot};
+use crate::ast::{Expr, Stmt};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
+use crate::qram::Qram;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
 use crate::{
@@ -44,6 +45,7 @@ impl std::error::Error for InterpreterError {}
 pub struct Interpreter<'a> {
     pub env: Environment,
     pub circuit: Circuit,
+    pub qram: Option<Qram>,
     qubit_allocator: QubitAllocator<'a>,
     arch: &'a Arch,
     // This flag indicates whether code generation is currently covariant or
@@ -59,10 +61,16 @@ pub struct Interpreter<'a> {
 
 impl<'a> Interpreter<'a> {
     pub fn new(arch: &'a Arch) -> Self {
+        let mut qubit_allocator = QubitAllocator::new(&arch);
+        let mut qram = None;
+        if arch.qram_size > 0 {
+            qram = Some(Qram::new(&mut qubit_allocator, arch.qram_size));
+        }
         Self {
             env: Environment::base(),
             circuit: Circuit::new(),
-            qubit_allocator: QubitAllocator::new(&arch),
+            qubit_allocator,
+            qram,
             arch: &arch,
             contra: false,
             contra_stack: vec![],

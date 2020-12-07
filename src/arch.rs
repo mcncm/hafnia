@@ -35,7 +35,10 @@ impl Default for QbCount {
 
 /// This is the main device architecture struct that describes the qubit
 /// layout, native gates, and related constraints.
+///
+/// TODO Enforce that qram_size <= qb_count
 #[derive(Default)]
 pub struct Arch {
     pub qb_count: QbCount,
+    pub qram_size: usize,
 }
