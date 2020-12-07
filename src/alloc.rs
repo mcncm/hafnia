@@ -1,4 +1,4 @@
-use crate::backend::arch::Arch;
+use crate::arch::Arch;
 use crate::circuit::Qubit;
 use crate::errors::ErrorBuf;
 use crate::values::Value;
@@ -22,7 +22,7 @@ pub trait Allocator<T> {
 /// ```
 /// # use cavy::values::Value;
 /// # use cavy::alloc::QubitAllocator;
-/// # use cavy::backend::arch;
+/// # use cavy::arch;
 /// let arch = arch::Arch::default();
 /// let mut allocator = QubitAllocator::new(&arch);
 /// let qb0 = allocator.alloc_q_bool().unwrap();

@@ -3,8 +3,8 @@
 #![allow(dead_code)]
 
 pub mod alloc;
+pub mod arch;
 pub mod ast;
-pub mod backend;
 pub mod circuit;
 pub mod compile;
 pub mod environment;
@@ -16,5 +16,6 @@ pub mod qram;
 pub mod repl;
 pub mod scanner;
 pub mod sys;
+pub mod target;
 pub mod token;
 pub mod values;

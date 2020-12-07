@@ -1,14 +1,12 @@
 use crate::{
-    backend::{
-        arch::Arch,
-        target::{IntoTarget, Qasm, Target},
-    },
+    arch::Arch,
     circuit::Circuit,
     errors::ErrorBuf,
     interpreter::Interpreter,
     parser::Parser,
     scanner::{Scanner, SourceCode},
     sys::Flags,
+    target::Target,
 };
 use std::{error::Error, path::PathBuf};
 

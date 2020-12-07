@@ -1,4 +1,4 @@
-use crate::backend::target::{IntoTarget, Qasm, Target, QASM_VERSION};
+use crate::target::{qasm::Qasm, IntoTarget, Target};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
@@ -127,7 +127,7 @@ impl Circuit {
 
 impl fmt::Display for Circuit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::backend::target::{IntoTarget, Qasm};
+        use crate::target::{qasm::Qasm, IntoTarget};
         let backend = Qasm {};
         let repr: String = self.into_target(&backend);
         write!(f, "{}", repr)

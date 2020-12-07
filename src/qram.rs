@@ -128,7 +128,7 @@ impl Allocator<Qubit> for Qram {
 pub mod test {
     use super::*;
     use crate::alloc::QubitAllocator;
-    use crate::backend::arch::Arch;
+    use crate::arch::Arch;
 
     /// Just eliminates unused variable warnings from path macro
     #[allow(unused_variables)]

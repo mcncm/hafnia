@@ -1,31 +1,29 @@
-/// In this module we outline the backend APIs. This is all pretty unstable for the
-/// time being, so don’t rely on it.
+/// In this module we outline the backend APIs for various target languages.
+/// This is all pretty unstable for the time being, so don’t rely on it too much
+/// externally.
+use crate::interpreter::Interpreter;
 
-/// Compilation targets, if the compiler is configured to produce an object file.
-pub mod target {
-    use crate::interpreter::Interpreter;
+/// This is a marker trait for compile targets
+pub trait Target<'a>: std::fmt::Debug {
+    type ObjectCode;
 
-    /// This is a marker trait for compile targets
-    pub trait Target<'a>: std::fmt::Debug {
-        type ObjectCode;
+    fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode;
+}
 
-        fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode;
-    }
+/// This trait is implemented by internal structs which, during code
+/// generation, need inform the target safely about their private fields.
+pub trait IntoTarget<'a, T>
+where
+    T: Target<'a>,
+{
+    // FIXME Consider changing the name: in Rust, it is conventional for
+    // methods called `into` to call by move.
+    fn into_target(&self, target: &T) -> T::ObjectCode;
+}
 
-    /// This trait is implemented by internal structs which, during code
-    /// generation, need inform the target safely about their private fields.
-    pub trait IntoTarget<'a, T>
-    where
-        T: Target<'a>,
-    {
-        // FIXME Consider changing the name: in Rust, it is conventional for
-        // methods called `into` to take by value.
-        fn into_target(&self, target: &T) -> T::ObjectCode;
-    }
-
-    /////////////////
-    // Null target //
-    /////////////////
+/// A null target for testing and running partial compiler pipelines.
+pub mod null {
+    use super::*;
 
     #[derive(Debug)]
     pub struct NullTarget();
@@ -34,10 +32,12 @@ pub mod target {
 
         fn from(&self, _interp: &Interpreter<'a>) {}
     }
+}
 
-    //////////////
-    // OpenQASM //
-    //////////////
+/// OpenQASM target, the default "assembly" backend most useful for interop with
+/// scripting language tools.
+pub mod qasm {
+    use super::*;
 
     /// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
     /// this is what Cirq supports.
@@ -101,10 +101,11 @@ pub mod target {
             format!("//{}\n{}", bindings_asm, circuit_asm)
         }
     }
+}
 
-    ///////////
-    // LaTeX //
-    ///////////
+/// The LaTeX backend, which uses quantikz.
+pub mod latex {
+    use super::*;
 
     // TODO the public interface and private implementation are a bit mixed
     // here: there is some functionality in the `diagram` function of `Latex`
@@ -176,14 +177,6 @@ pub mod target {
             unsafe { self.arr.get_unchecked(0).len() }
         }
 
-        /// Returns true if and only if the range of wires between `lower` and
-        /// `upper` (inclusive!) is all free.
-        fn range_free(&self, moment: usize, range: std::ops::RangeInclusive<usize>) -> bool {
-            self.arr[range]
-                .iter()
-                .all(|wire| wire[moment] == LayoutState::None)
-        }
-
         #[rustfmt::skip]
         fn push_gate(&mut self, gate: &crate::circuit::Gate) {
             use crate::circuit::Gate::*;
@@ -225,6 +218,14 @@ pub mod target {
             // There are no empty cells on this wire!
             self.add_moment();
             self.first_free[wire] = self.len() - 1;
+        }
+
+        /// Returns true if and only if the range of wires between `lower` and
+        /// `upper` (inclusive!) is all free.
+        fn range_free(&self, moment: usize, range: std::ops::RangeInclusive<usize>) -> bool {
+            self.arr[range]
+                .iter()
+                .all(|wire| wire[moment] == LayoutState::None)
         }
 
         fn insert_multiple(&mut self, gates: Vec<(&usize, String)>) {
@@ -317,48 +318,5 @@ pub mod target {
                 Self::FOOTER
             )
         }
-    }
-}
-
-/// This module contains types for describing target architectures
-pub mod arch {
-    use std::cmp::{Ordering, PartialOrd};
-    use std::convert::From;
-
-    /// The number of qubits acccessible to a given architecture. Its ordering
-    /// should be the natural one for something that’s maybe infinite:
-    ///
-    /// # Examples
-    /// ```
-    /// # use cavy::backend::arch::QbCount;
-    /// let c1 = QbCount::Finite(0);
-    /// let c2 = QbCount::Finite(1);
-    /// let c3 = QbCount::Infinite;
-    /// assert!(c1 < c2);
-    /// assert!(c2 < c3);
-    /// ```
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum QbCount {
-        Finite(usize),
-        Infinite,
-    }
-
-    impl From<usize> for QbCount {
-        fn from(num: usize) -> Self {
-            QbCount::Finite(num)
-        }
-    }
-
-    impl Default for QbCount {
-        fn default() -> Self {
-            Self::Infinite
-        }
-    }
-
-    /// This is the main device architecture struct that describes the qubit
-    /// layout, native gates, and related constraints.
-    #[derive(Default)]
-    pub struct Arch {
-        pub qb_count: QbCount,
     }
 }

@@ -1,6 +1,6 @@
 use crate::alloc::QubitAllocator;
+use crate::arch::Arch;
 use crate::ast::{Expr, Stmt};
-use crate::backend::arch::Arch;
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;

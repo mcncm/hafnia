@@ -1,5 +1,5 @@
-use crate::backend::target::{IntoTarget, Qasm, Target};
 use crate::functions::builtins::BUILTINS;
+use crate::target::{qasm::Qasm, IntoTarget, Target};
 use crate::{circuit::Qubit, functions::Func, values::Value};
 use serde::{self, Deserialize, Serialize};
 use std::{

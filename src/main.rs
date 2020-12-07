@@ -4,8 +4,9 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use cavy::backend::{arch, target};
+use cavy::arch;
 use cavy::repl::Repl;
+use cavy::target;
 use cavy::{compile, sys};
 
 use clap::{load_yaml, App, ArgMatches};
@@ -73,10 +74,10 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
 
 fn get_target(argmatches: &ArgMatches) -> &dyn target::Target<ObjectCode = String> {
     match argmatches.value_of("target") {
-        Some("qasm") => &target::Qasm {},
-        Some("latex") => &target::Latex {},
+        Some("qasm") => &target::qasm::Qasm {},
+        Some("latex") => &target::latex::Latex {},
         Some(_) => unreachable!(),
-        None => &target::Qasm {},
+        None => &target::qasm::Qasm {},
     }
 }
 
