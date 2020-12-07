@@ -10,7 +10,7 @@ pub enum Lexeme {
     Ident(String),
 
     // keywords
-    If, Else, For, Let, Fn, Print, True, False,
+    If, Else, For, Let, In, Fn, Print, True, False,
     Bool, U4, U8, U16, U32,
 
     // literals

@@ -197,6 +197,9 @@ impl Environment {
             .into_iter()
             .map(|(key, value)| (key, Moveable::There(value)))
             .collect();
+        // We must put the bindings directly in the new node, because they might
+        // shadow outer bindings! This is essential for `let` and `for` to work
+        // correctly.
         let new_store = Box::new(EnvNode {
             values,
             controls,

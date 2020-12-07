@@ -19,6 +19,7 @@ lazy_static! {
         m.insert("else",  Lexeme::Else);
         m.insert("for",   Lexeme::For);
         m.insert("let",   Lexeme::Let);
+        m.insert("in",    Lexeme::In);
         m.insert("fn",    Lexeme::Fn);
         m.insert("print", Lexeme::Print);
         m.insert("true",  Lexeme::True);

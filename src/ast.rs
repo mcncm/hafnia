@@ -28,6 +28,11 @@ pub enum Expr {
         then_branch: Box<Expr>,
         else_branch: Option<Box<Expr>>,
     },
+    Let {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        body: Box<Expr>,
+    },
     Call {
         // For the time being, functions are not values, so the callee is not an
         // expression, but just a name. Arguments should also be expressions,
@@ -52,6 +57,7 @@ impl Expr {
             Group(_) => true,
             Block(_, _) => false,
             If { .. } => false,
+            Let { .. } => false,
             Call { .. } => true,
         }
     }
@@ -73,6 +79,7 @@ impl fmt::Display for Expr {
                 then_branch,
                 else_branch,
             } => format!("(if {} {} {:#?})", cond, then_branch, else_branch),
+            Let { lhs, rhs, body } => format!("(let ({} {}) {})", lhs, rhs, body),
             Block(stmts, expr) => match expr {
                 Some(expr) => {
                     format!("(block {:?} {})", stmts, *expr)

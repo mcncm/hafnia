@@ -202,6 +202,35 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn eval_let(&mut self, lhs: &Expr, rhs: &Expr, body: &Expr) -> Result<Value, ErrorBuf> {
+        // Note that `self` is passed as a parameter to the closure, rather than
+        // captured from the environment. The latter would violate the borrow
+        // checker rules by making a second mutable borrow.
+        //
+        // NOTE This may not be very idiomatic, and it’s not unlikely that a
+        // future refactoring will replace this pattern entirely.
+        self.coevaluate(rhs, &mut |self_, rhs_val| {
+            self_.eval_let_inner(lhs, &rhs_val, body)
+        })
+    }
+
+    #[rustfmt::skip]
+    fn eval_let_inner(&mut self, lhs: &Expr, rhs: &Value, body: &Expr) -> Result<Value, ErrorBuf> {
+        use {Lexeme::Ident, Expr::{Variable, Block}};
+        match (lhs, body) {
+            (Variable(Token { lexeme: Ident(name), .. }), Block(stmts, expr)) => {
+                let mut bindings = HashMap::new();
+                // FIXME these `to_owned` and `clone` *shouldn't* be necessary.
+                bindings.insert(name.to_owned(), Nameable::Value(rhs.clone()));
+                self.eval_block(stmts, expr, Some(bindings), vec![])
+            }
+            (_, Block(_, _)) => {
+                panic!("Only support identifier lhs.");
+            }
+            (_, _) => unreachable!(),
+        }
+    }
+
     ///////////////////////////
     // Expression evaluation //
     ///////////////////////////
@@ -222,6 +251,7 @@ impl<'a> Interpreter<'a> {
                 then_branch,
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
+            Let { lhs, rhs, body } => self.eval_let(lhs, rhs, body),
             Block(stmts, expr) => self.eval_block(stmts, expr, None, vec![]),
             Call {
                 callee,
@@ -768,6 +798,18 @@ mod tests {
         }
         "#;
         test_program(prog, vec![CX { ctrl: 1, tgt: 0 }]);
+    }
+
+    #[test]
+    fn simple_uncomputation() {
+        let prog = r#"
+        let x = ?false;
+        let y = split(x) in {
+            let y = ~y;
+        }
+        let x = flip(x);
+        "#;
+        test_program(prog, vec![H(0), X(0), H(0), Z(0)])
     }
 
     #[test]

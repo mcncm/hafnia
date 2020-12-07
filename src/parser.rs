@@ -180,7 +180,7 @@ impl Parser {
     pub fn stmt_or_expr(&mut self) -> Result<Option<Either<Stmt, Expr>>, ParseError> {
         match self.peek_lexeme() {
             Some(Print) => Ok(Some(Either::Left(self.print_stmt()?))),
-            Some(Let) => Ok(Some(Either::Left(self.assn_stmt()?))),
+            Some(Let) => Ok(Some(Either::Left(self.assignment()?))),
             Some(For) => Ok(Some(Either::Left(self.for_stmt()?))),
             None => Ok(None),
             _ => Ok(Some(Either::Right(self.expression()?))),
@@ -208,13 +208,33 @@ impl Parser {
         Ok(Stmt::Fn { name, params, body })
     }
 
-    fn assn_stmt(&mut self) -> Result<Stmt, ParseError> {
+    /// Returns either an assignment statement, as in:
+    /// ```cavy
+    /// let x = 3;
+    /// ```
+    /// or a let-expression, as in:
+    /// ```cavy
+    /// let y = 3;
+    /// let x = y in {
+    ///     x + 1
+    /// }
+    /// ```
+    fn assignment(&mut self) -> Result<Stmt, ParseError> {
         self.forward();
         let lhs = Box::new(self.expression()?);
         self.consume(Lexeme::Equal, "missing '=' in assignment")?;
         let rhs = Box::new(self.expression()?);
-        self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
-        Ok(Stmt::Assn { lhs, rhs })
+        // But this could still be a *let expression statement*. We have to check
+        // for this case.
+        if self.match_lexeme(Lexeme::In) {
+            self.consume(Lexeme::LBrace, "expected '{' opening 'let' expression.")?;
+            let body = Box::new(self.block_expr()?);
+            let expr = Box::new(Expr::Let { lhs, rhs, body });
+            Ok(Stmt::Expr(expr))
+        } else {
+            self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
+            Ok(Stmt::Assn { lhs, rhs })
+        }
     }
 
     fn print_stmt(&mut self) -> Result<Stmt, ParseError> {
