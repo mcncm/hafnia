@@ -92,7 +92,7 @@ impl<'a> Interpreter<'a> {
             },
             Assn { lhs, rhs } => self.exec_assn(lhs, rhs),
             For { bind, iter, body } => self.exec_for(bind, iter, body),
-            Fn { name, params, body } => self.exec_fn(name, params, body),
+            Fn { name, params, body, .. } => self.exec_fn(name, params, body),
             Expr(expr) => {
                 self.evaluate(expr)?;
                 Ok(())

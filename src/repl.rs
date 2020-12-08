@@ -4,8 +4,11 @@ use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceCode};
 use crate::{ast::Stmt, sys};
+use lazy_static::lazy_static;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::{self, Write};
+use std::process;
 
 const UNICODE_PROMPT: &str = "ψ⟩ ";
 const ASCII_PROMPT: &str = "> ";
@@ -16,47 +19,71 @@ const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 pub struct Repl<'a> {
     interpreter: Interpreter<'a>,
     flags: &'a sys::Flags,
+    commands: HashMap<
+        &'a str,
+        (
+            // FIXME Ok, this lifetime problem is getting a little bit ugly. I'll just
+            // use owned strings here. It's not ideal, but at least it isn't in
+            // some tight innner loop.
+            &'a dyn Fn(&Repl<'a>, Vec<String>) -> (),
+            usize,
+            &'a str,
+        ),
+    >,
 }
 
 impl<'a> Repl<'a> {
     pub fn new(flags: &'a sys::Flags, arch: &'a Arch) -> Self {
+        // Set up commands. We can’t do this in a lazy_static because some
+        // impossible trait bounds would be required, but that’s ok--we’re
+        // setting up this table exactly once on startup, anyway!
+        type Cmd<'a> = &'a dyn Fn(&Repl<'a>, Vec<String>);
+
+        let commands = {
+            let mut m = HashMap::new();
+            m.insert(":h", (&Repl::help as Cmd, 0, "Help (you are here!)"));
+            m.insert(":q", (&Repl::quit as Cmd, 0, "Quit the REPL environment"));
+            m.insert(":c", (&Repl::show_circuit as Cmd, 0, "Show circuit"));
+            m
+        };
+
         Repl {
             interpreter: Interpreter::new(&arch),
             flags,
+            commands,
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&'a mut self) {
         self.greet();
         loop {
             let input = self.get_input();
-            match input.as_str() {
-                ":c" => {
-                    self.show_circuit();
+            let args: Vec<&str> = input.split_ascii_whitespace().collect();
+            if args.is_empty() {
+                continue;
+            }
+
+            // Handle a special command, if we get one.
+            if let Some((cmd, arity, _)) = self.commands.get(args[0]) {
+                if args.len() < arity + 1 {
+                    eprintln!(
+                        "Command '{}' expected at least {} argument.",
+                        args[0], arity
+                    );
+                    continue;
                 }
-                ":f" => {
-                    println!("{:?}", self.flags);
-                }
-                ":h" => {
-                    self.help();
-                }
-                ":q" => {
-                    break;
-                }
-                ":w" => {
-                    self.wheek();
-                }
-                s => {
-                    if let Err(errors) = self.handle_input(s) {
-                        self.handle_errors(errors);
-                    }
-                }
+                cmd(self, args[1..].iter().map(|s| s.to_string()).collect());
+                continue;
+            }
+
+            // Otherwise, execute code.
+            if let Err(errors) = self.exec_input(input.as_str()) {
+                self.handle_errors(errors);
             }
         }
-        self.farewell();
     }
 
-    fn handle_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
+    fn exec_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
         let source = SourceCode::from_src(input);
 
         let tokens = Scanner::new(source).tokenize()?;
@@ -113,23 +140,6 @@ impl<'a> Repl<'a> {
         println!("{}", GOODBYE);
     }
 
-    fn help(&self) {
-        println!(
-            "{}\nFeel free to email {} with questions.",
-            HELP,
-            sys::CONTACT_ADDRESS
-        );
-    }
-
-    fn show_circuit(&self) {
-        println!("{}", self.interpreter.circuit);
-    }
-
-    // An undocumented behavior of the repl
-    fn wheek(&self) {
-        println!("Wheek!");
-    }
-
     fn get_input(&self) -> String {
         print!("{}", UNICODE_PROMPT);
         io::stdout().flush().expect("Failed to flush stdout.");
@@ -140,5 +150,28 @@ impl<'a> Repl<'a> {
             .expect("Failed to read input.");
 
         input.trim().to_owned()
+    }
+
+    fn help(&self, _args: Vec<String>) {
+        println!("Contact:\n{:08}{}", "", sys::CONTACT_ADDRESS);
+
+        println!("Repl commands:");
+
+        for (cmd, (_, _, help)) in &self.commands {
+            println!("{:08}{}", cmd, help);
+        }
+    }
+
+    fn quit(&self, _args: Vec<String>) {
+        self.farewell();
+        process::exit(0);
+    }
+
+    fn doc(&self, _args: Vec<String>) {
+        unimplemented!();
+    }
+
+    fn show_circuit(&self, _args: Vec<String>) {
+        println!("{}", self.interpreter.circuit);
     }
 }

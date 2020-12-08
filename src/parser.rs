@@ -206,7 +206,12 @@ impl Parser {
         self.consume(Lexeme::RParen, "expected closing ')' after parameters.")?;
         self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
         let body = Box::new(self.block_expr()?);
-        Ok(Stmt::Fn { name, params, body })
+        Ok(Stmt::Fn {
+            name,
+            params,
+            body,
+            docstring: None,
+        })
     }
 
     /// Returns either an assignment statement, as in:

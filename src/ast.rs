@@ -122,6 +122,7 @@ pub enum Stmt {
         name: Token,
         params: Vec<Token>,
         body: Box<Expr>,
+        docstring: Option<String>,
     },
     For {
         bind: Box<Expr>,
