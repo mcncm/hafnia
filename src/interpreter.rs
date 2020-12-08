@@ -88,22 +88,16 @@ impl<'a> Interpreter<'a> {
         match stmt {
             Print(expr) => {
                 println!("{}", self.evaluate(expr)?);
+                Ok(())
             },
-            Assn { lhs, rhs } => {
-                self.exec_assn(lhs, rhs)?;
-            },
-            // Function definition
-            Fn { name, params, body } => self.exec_fn(name, params, body)?,
-            // Expression statement
+            Assn { lhs, rhs } => self.exec_assn(lhs, rhs),
+            For { bind, iter, body } => self.exec_for(bind, iter, body),
+            Fn { name, params, body } => self.exec_fn(name, params, body),
             Expr(expr) => {
                 self.evaluate(expr)?;
-            }
-            stmt => {
-                println!("{:?}", stmt);
-                todo!();
+                Ok(())
             }
         }
-        Ok(())
     }
 
     #[rustfmt::skip]
@@ -160,7 +154,6 @@ impl<'a> Interpreter<'a> {
         })
     }
 
-    #[rustfmt::skip]
     fn eval_if_inner(
         &mut self,
         cond_val: &Value,
@@ -184,11 +177,10 @@ impl<'a> Interpreter<'a> {
                         Ok(Value::Unit)
                     }
                     _ => {
-                         todo!();
+                        todo!();
                     }
                 }
-
-            },
+            }
             Value::Bool(_) => {
                 if cond_val.is_truthy() {
                     self.evaluate(then_branch)
@@ -197,9 +189,59 @@ impl<'a> Interpreter<'a> {
                 } else {
                     Ok(Value::Unit)
                 }
-            },
+            }
             _ => panic!("Violated a typing invariant"),
         }
+    }
+
+    fn exec_for(&mut self, bind: &Expr, iter: &Expr, body: &Expr) -> Result<(), ErrorBuf> {
+        self.coevaluate(iter, &mut |self_, iter_val| {
+            self_.eval_for_inner(bind, &iter_val, body)
+        })?;
+        Ok(())
+    }
+
+    // Yes, this one is called `eval` because the blocks are actually
+    // expressions; we're just dumping the return values.
+    fn eval_for_inner(
+        &mut self,
+        bind: &Expr,
+        iter: &Value,
+        body: &Expr,
+    ) -> Result<Value, ErrorBuf> {
+        use Expr::{Block, Variable};
+        use Lexeme::Ident;
+
+        // Unwrap the data for now.
+        let iter = match iter {
+            Value::Array(data) => data,
+            _ => panic!(),
+        };
+
+        match (bind, body) {
+            // NOTE it's not ideal that this accepcs a Block that may return
+            // something, then simply *ignores* the return value.
+            (
+                Variable(Token {
+                    lexeme: Ident(name),
+                    ..
+                }),
+                Block(stmts, None),
+            ) => {
+                for item in iter.iter() {
+                    let mut bindings = HashMap::new();
+                    // This clone shouldn't *really* be necessary; the block
+                    // itself confers a natural lifetime on the value.
+                    bindings.insert(name.to_owned(), Nameable::Value(item.clone()));
+                    self.eval_block(stmts, &None, Some(bindings), vec![])?;
+                }
+            }
+            (_, Block(_, _)) => {
+                panic!("Only support identifier 'for' loop bindings.");
+            }
+            (_, _) => unreachable!(),
+        };
+        Ok(Value::Unit)
     }
 
     fn eval_let(&mut self, lhs: &Expr, rhs: &Expr, body: &Expr) -> Result<Value, ErrorBuf> {
@@ -214,19 +256,29 @@ impl<'a> Interpreter<'a> {
         })
     }
 
-    #[rustfmt::skip]
     fn eval_let_inner(&mut self, lhs: &Expr, rhs: &Value, body: &Expr) -> Result<Value, ErrorBuf> {
-        use {Lexeme::Ident, Expr::{Variable, Block}};
+        use {
+            Expr::{Block, Variable},
+            Lexeme::Ident,
+        };
         match (lhs, body) {
-            (Variable(Token { lexeme: Ident(name), .. }), Block(stmts, expr)) => {
+            (
+                Variable(Token {
+                    lexeme: Ident(name),
+                    ..
+                }),
+                Block(stmts, expr),
+            ) => {
                 let mut bindings = HashMap::new();
                 // FIXME these `to_owned` and `clone` *shouldn't* be necessary.
                 bindings.insert(name.to_owned(), Nameable::Value(rhs.clone()));
                 self.eval_block(stmts, expr, Some(bindings), vec![])
             }
+
             (_, Block(_, _)) => {
                 panic!("Only support identifier lhs.");
             }
+
             (_, _) => unreachable!(),
         }
     }
@@ -779,6 +831,7 @@ mod tests {
             Array(vec![Bool(false), Bool(false), Bool(true), Bool(false)])
         }
     }
+
     //////////////
     // Programs //
     //////////////
@@ -810,6 +863,17 @@ mod tests {
         let x = flip(x);
         "#;
         test_program(prog, vec![H(0), X(0), H(0), Z(0)])
+    }
+
+    #[test]
+    fn simple_loop() {
+        let prog = r#"
+        let arr = [?false; 3];
+        for q in arr {
+            let q = ~q;
+        }
+        "#;
+        test_program(prog, vec![X(0), X(1), X(2)])
     }
 
     #[test]

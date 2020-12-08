@@ -270,7 +270,13 @@ impl Parser {
     }
 
     fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
-        todo!();
+        self.forward();
+        let bind = Box::new(self.expression()?);
+        self.consume(Lexeme::In, "expected 'in' in 'for' statement")?;
+        let iter = Box::new(self.expression()?);
+        self.consume(Lexeme::LBrace, "expected '{' opening 'for' body.")?;
+        let body = Box::new(self.block_expr()?);
+        Ok(Stmt::For { bind, iter, body })
     }
 
     fn block_expr(&mut self) -> Result<Expr, ParseError> {

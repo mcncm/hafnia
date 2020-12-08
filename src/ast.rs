@@ -121,6 +121,6 @@ pub enum Stmt {
     For {
         bind: Box<Expr>,
         iter: Box<Expr>,
-        body: Box<Stmt>,
+        body: Box<Expr>,
     },
 }

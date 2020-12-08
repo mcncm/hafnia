@@ -129,7 +129,10 @@ fn main() {
         // A source file was given and read without error
         Ok(Some(src)) => {
             let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));
-            let object_code = compile::compile(src, flags, &arch, target).unwrap();
+            let object_code = compile::compile(src, flags, &arch, target).unwrap_or_else(|errs| {
+                print!("{}", errs);
+                process::exit(1);
+            });
             let mut file = File::create(&object_path).unwrap();
             file.write_all(object_code.as_bytes()).unwrap();
             process::exit(0);
