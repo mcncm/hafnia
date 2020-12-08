@@ -102,12 +102,33 @@ impl<'a> Interpreter<'a> {
 
     #[rustfmt::skip]
     fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), ErrorBuf> {
-        use {Lexeme::Ident, Expr::Variable};
-        if let Variable(Token { lexeme: Ident(name), loc: _ }) = lhs {
-            let rhs_val = self.evaluate(rhs)?;
-            self.env.insert(name.clone(), Nameable::Value(rhs_val));
-        } else {
-            panic!("Only support identifier lhs.");
+        let rhs = self.evaluate(rhs)?;
+        self.exec_assn_inner(lhs, &rhs)
+    }
+
+    /// Recursively assign inner values
+    fn exec_assn_inner(&mut self, lhs: &Expr, rhs: &Value) -> Result<(), ErrorBuf> {
+        use {Expr::Variable, Lexeme::Ident};
+        match (lhs, &rhs) {
+            (
+                Variable(Token {
+                    lexeme: Ident(name),
+                    ..
+                }),
+                _,
+            ) => {
+                self.env.insert(name.clone(), Nameable::Value(rhs.clone()));
+            }
+            (Expr::Seq(binders), Value::Array(values))
+            | (Expr::Seq(binders), Value::Tuple(values)) => {
+                if binders.len() != values.len() {
+                    todo!(); // Should be an error
+                }
+                for (binder, value) in binders.iter().zip(values.iter()) {
+                    self.exec_assn_inner(binder, value)?;
+                }
+            }
+            _ => todo!(),
         }
         Ok(())
     }
@@ -1045,6 +1066,38 @@ mod tests {
         let q = ~arr[2][1];
         "#;
         test_program(prog, vec![X(5)])
+    }
+
+    #[test]
+    fn array_destructuring_simple() {
+        let prog = r#"
+        let arr = [?false; 3];
+        let (q, r, s) = arr;
+        let r = ~r;
+        "#;
+        test_program(prog, vec![X(1)])
+    }
+
+    #[test]
+    #[should_panic]
+    fn destructuring_linearity_violation() {
+        let prog = r#"
+        let arr = [?false; 3];
+        let (q, r, s) = arr;
+        let r = ~r;
+        let t = arr[0];
+        "#;
+        test_program(prog, vec![X(1)])
+    }
+
+    #[test]
+    fn tuple_destructuring_nested() {
+        let prog = r#"
+        let data = ((?false, ?false), (?true, ?true));
+        let ((a, b), (c, d)) = data;
+        let b = split(b);
+        "#;
+        test_program(prog, vec![X(2), X(3), H(1)])
     }
 
     #[test]
