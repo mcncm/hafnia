@@ -24,6 +24,8 @@ pub enum Value {
     Q_U32([usize; 32]),
 
     // Composite types
+    Tuple(Vec<Value>),
+
     Array(Vec<Value>),
 
     // Measured value
@@ -62,6 +64,8 @@ impl Value {
             Q_U8(_) => T_Q_U8,
             Q_U16(_) => T_Q_U16,
             Q_U32(_) => T_Q_U32,
+
+            Tuple(data) => T_Tuple(data.iter().map(|elem| elem.type_of()).collect()),
 
             // NOTE: This here reveals the inadequacy of values, rather than
             // expressions, having types. We can’t know the type of an expression
@@ -121,6 +125,12 @@ impl From<u32> for Value {
     }
 }
 
+impl From<()> for Value {
+    fn from((): ()) -> Value {
+        Value::Tuple(vec![])
+    }
+}
+
 impl fmt::Display for Value {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -135,14 +145,22 @@ impl fmt::Display for Value {
             U32(x) =>      write!(f, "{}", x),
 
             Array(data) => {
-                let data = data
+                let repr = data
                     .iter()
                     .map(|x| format!("{}", x))
                     .collect::<Vec<String>>()
                     .join(", ");
-                write!(f, "[{}]", data)
+                write!(f, "[{}]", repr)
             }
 
+            Tuple(data) => {
+                let repr = data
+                    .iter()
+                    .map(|x| format!("{}", x))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "({})", repr)
+            }
             _ =>           write!(f, "<{}>", self.type_of()),
         }
     }
@@ -280,9 +298,14 @@ pub mod types {
                     }
                 }
 
-                T_Measured(typ) => write!(f, "!{{{}}}", typ),
+                T_Tuple(types) => {
+                    let repr = types.iter().map(|typ| format!("{}", typ)).collect::<Vec<String>>().join(", ");
+                    write!(f, "({})", repr)
+                }
 
-                _ => unimplemented!(),
+                T_Struct { .. } => todo!(),
+
+                T_Measured(typ) => write!(f, "!{{{}}}", typ),
             }
         }
     }

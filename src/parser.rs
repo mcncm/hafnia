@@ -428,15 +428,42 @@ impl Parser {
             Ident(_) => Ok(Expr::Variable(self.tokens.next().unwrap())),
             LParen => {
                 self.forward();
-                let expr = self.expression();
-                self.consume(RParen, "expected closing paren ')'")?;
-                Ok(Expr::Group(Box::new(expr?)))
+                self.finish_group()
             }
             _ => Err(ParseError {
                 token: self.tokens.next(),
                 msg: "not a primary token.",
             }),
         }
+    }
+
+    /// After reaching an `(` in the position of a primary token, we must have
+    /// either a group or a sequence.
+    fn finish_group(&mut self) -> Result<Expr, ParseError> {
+        // `()` shall be an empty sequence, and evaluate to an empty tuple.
+        if self.match_lexeme(Lexeme::RParen) {
+            return Ok(Expr::Seq(vec![]));
+        }
+
+        let head = self.expression()?;
+        let expr = if let Some(&Lexeme::Comma) = self.peek_lexeme() {
+            // Tuples with one element should have a single trailing comma to
+            // disambiguate from groups.
+            let mut items = vec![head];
+            while self.match_lexeme(Lexeme::Comma) {
+                if let Some(&Lexeme::RParen) = &self.peek_lexeme() {
+                    break;
+                }
+                items.push(self.expression()?);
+            }
+            Expr::Seq(items)
+        } else {
+            // If there were no commas, we should have a single expression
+            // followed by a close-paren, and return a group.
+            Expr::Group(Box::new(head))
+        };
+        self.consume(RParen, "expected closing paren ')'")?;
+        Ok(expr)
     }
 
     fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, ParseError> {

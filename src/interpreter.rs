@@ -293,6 +293,7 @@ impl<'a> Interpreter<'a> {
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
             Variable(variable) => self.eval_variable(variable),
+            Seq(items) => self.eval_seq(items),
             IntArr { item, reps } => self.eval_int_arr(item, reps),
             ExtArr(items) => self.eval_ext_arr(items),
             Group(expr) => self.evaluate(expr),
@@ -380,6 +381,14 @@ impl<'a> Interpreter<'a> {
             }
             _ => panic!("Invariant violation!"),
         }
+    }
+
+    fn eval_seq(&mut self, items: &[Expr]) -> Result<Value, ErrorBuf> {
+        let mut data = vec![];
+        for item in items.iter() {
+            data.push(self.evaluate(item)?);
+        }
+        Ok(Value::Tuple(data))
     }
 
     fn eval_int_arr(&mut self, item: &Expr, reps: &Expr) -> Result<Value, ErrorBuf> {
@@ -601,11 +610,11 @@ impl<'a> Interpreter<'a> {
     }
 
     fn eval_index(&mut self, head: &Expr, index: &Expr) -> Result<Value, ErrorBuf> {
-        use Value::{Array, U32};
+        use Value::{Array, Tuple, U32};
         let head = self.evaluate(head)?;
         let index = self.evaluate(index)?;
         match (head, index) {
-            (Array(data), U32(n)) => {
+            (Tuple(data), U32(n)) | (Array(data), U32(n)) => {
                 let n = n as usize;
                 if n < data.len() {
                     Ok(data[n].clone())
@@ -1036,6 +1045,15 @@ mod tests {
         let q = ~arr[2][1];
         "#;
         test_program(prog, vec![X(5)])
+    }
+
+    #[test]
+    fn tuple_index_simple() {
+        let prog = r#"
+        let arr = (?false, ?false, ?false);
+        let q = ~arr[2];
+        "#;
+        test_program(prog, vec![X(2)])
     }
 
     #[test]

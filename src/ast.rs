@@ -14,6 +14,8 @@ pub enum Expr {
     },
     Literal(Token),
     Variable(Token),
+    // Sequences of the form (1, 2, 3)
+    Seq(Vec<Expr>),
     // Intensional arrays of the form [1; 4]
     IntArr {
         item: Box<Expr>,
@@ -57,6 +59,7 @@ impl Expr {
             UnOp { .. } => true,
             Literal(_) => true,
             Variable(_) => true,
+            Seq { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
             Group(_) => true,
@@ -77,8 +80,9 @@ impl fmt::Display for Expr {
             UnOp { op, right } => format!("({} {})", op, right),
             Literal(token) => format!("{}", token),
             Variable(token) => format!("{}", token),
+            Seq(items) => format!("'({:#?})", items),
             IntArr { item, reps } => format!("[{}; {}]", item, reps),
-            ExtArr(items) => format!("{:#?}", items),
+            ExtArr(items) => format!("[{:#?}]", items),
             Group(expr) => format!("{}", expr),
             If {
                 cond,

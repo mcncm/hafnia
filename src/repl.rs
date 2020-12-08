@@ -16,20 +16,42 @@ const WELCOME: &str = "Welcome to the alpha version of the Cavy repl!";
 const GOODBYE: &str = "Thanks for hacking with us!";
 const HELP: &str = "Enter ':h' for help, or ':q' to quit.";
 
+/// NOTE this struct is very similar to `functions::builtins::Builtin`. Should
+/// they be unified?
+struct CmdSpec<'a> {
+    // FIXME Ok, this lifetime problem is getting a little bit ugly. I'll just
+    // use owned strings here. It's not ideal, but at least it isn't in
+    // some tight innner loop.
+    func: &'a dyn Fn(&Repl<'a>, Vec<String>),
+    arity: usize,
+    desc: &'a str,
+}
+
+// NOTE this macro is very similar to functions::builtins::builtins_table.
+macro_rules! command_table {
+    ($lt:lifetime, $($cmd:expr => $func:ident : $arity:expr ; $desc:expr),*) => {
+        {
+            type Cmd<$lt> = &$lt dyn Fn(&Repl<$lt>, Vec<String>);
+            let mut table = HashMap::new();
+            $(
+                table.insert(
+                    $cmd,
+                    CmdSpec {
+                        func: &Repl::$func as Cmd<$lt>,
+                        arity: $arity,
+                        desc: $desc,
+                    },
+                );
+            )*
+            table
+        }
+    };
+}
+
 pub struct Repl<'a> {
     interpreter: Interpreter<'a>,
     flags: &'a sys::Flags,
-    commands: HashMap<
-        &'a str,
-        (
-            // FIXME Ok, this lifetime problem is getting a little bit ugly. I'll just
-            // use owned strings here. It's not ideal, but at least it isn't in
-            // some tight innner loop.
-            &'a dyn Fn(&Repl<'a>, Vec<String>) -> (),
-            usize,
-            &'a str,
-        ),
-    >,
+    commands: HashMap<&'a str, CmdSpec<'a>>,
 }
 
 impl<'a> Repl<'a> {
@@ -37,15 +59,12 @@ impl<'a> Repl<'a> {
         // Set up commands. We can’t do this in a lazy_static because some
         // impossible trait bounds would be required, but that’s ok--we’re
         // setting up this table exactly once on startup, anyway!
-        type Cmd<'a> = &'a dyn Fn(&Repl<'a>, Vec<String>);
-
-        let commands = {
-            let mut m = HashMap::new();
-            m.insert(":h", (&Repl::help as Cmd, 0, "Help (you are here!)"));
-            m.insert(":q", (&Repl::quit as Cmd, 0, "Quit the REPL environment"));
-            m.insert(":c", (&Repl::show_circuit as Cmd, 0, "Show circuit"));
-            m
-        };
+        let commands = command_table! [
+            'a,
+            ":h" => help : 0 ; "Help (you are here!)",
+            ":q" => quit : 0 ; "Quit the repl environment",
+            ":c" => show_circuit : 0 ; "Display the circuit built so far"
+        ];
 
         Repl {
             interpreter: Interpreter::new(&arch),
@@ -64,7 +83,7 @@ impl<'a> Repl<'a> {
             }
 
             // Handle a special command, if we get one.
-            if let Some((cmd, arity, _)) = self.commands.get(args[0]) {
+            if let Some(CmdSpec { func, arity, .. }) = self.commands.get(args[0]) {
                 if args.len() < arity + 1 {
                     eprintln!(
                         "Command '{}' expected at least {} argument.",
@@ -72,7 +91,7 @@ impl<'a> Repl<'a> {
                     );
                     continue;
                 }
-                cmd(self, args[1..].iter().map(|s| s.to_string()).collect());
+                func(self, args[1..].iter().map(|s| s.to_string()).collect());
                 continue;
             }
 
@@ -153,13 +172,14 @@ impl<'a> Repl<'a> {
     }
 
     fn help(&self, _args: Vec<String>) {
-        println!("Contact:\n{:08}{}", "", sys::CONTACT_ADDRESS);
+        println!("\nContact:\n{:08}{}", "", sys::CONTACT_ADDRESS);
 
         println!("Repl commands:");
 
-        for (cmd, (_, _, help)) in &self.commands {
-            println!("{:08}{}", cmd, help);
+        for (cmd, CmdSpec { desc, .. }) in &self.commands {
+            println!("{:08}{}", cmd, desc);
         }
+        println!();
     }
 
     fn quit(&self, _args: Vec<String>) {
