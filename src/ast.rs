@@ -41,6 +41,11 @@ pub enum Expr {
         args: Vec<Expr>,
         paren: Token,
     },
+    Index {
+        head: Box<Expr>,
+        index: Box<Expr>,
+        bracket: Token,
+    },
 }
 
 impl Expr {
@@ -59,6 +64,7 @@ impl Expr {
             If { .. } => false,
             Let { .. } => false,
             Call { .. } => true,
+            Index { .. } => true,
         }
     }
 }
@@ -88,12 +94,11 @@ impl fmt::Display for Expr {
                     format!("(block {:?})", stmts)
                 }
             },
-            Call {
-                callee,
-                args,
-                paren: _,
-            } => {
+            Call { callee, args, .. } => {
                 format!("({} {:?})", callee, args)
+            }
+            Index { head, index, .. } => {
+                format!("(nth {} {})", head, index)
             }
         };
         write!(f, "{}", s_expr)

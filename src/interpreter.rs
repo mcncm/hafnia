@@ -146,7 +146,7 @@ impl<'a> Interpreter<'a> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
         // checker rules by making a second mutable borrow.
-        //
+
         // NOTE This may not be very idiomatic, and it’s not unlikely that a
         // future refactoring will replace this pattern entirely.
         self.coevaluate(cond, &mut |self_, cond_val| {
@@ -305,11 +305,8 @@ impl<'a> Interpreter<'a> {
             } => self.eval_if(cond, then_branch, else_branch),
             Let { lhs, rhs, body } => self.eval_let(lhs, rhs, body),
             Block(stmts, expr) => self.eval_block(stmts, expr, None, vec![]),
-            Call {
-                callee,
-                args,
-                paren: _,
-            } => self.eval_call(callee, args),
+            Call { callee, args, .. } => self.eval_call(callee, args),
+            Index { head, index, .. } => self.eval_index(head, index),
         }
     }
 
@@ -597,6 +594,25 @@ impl<'a> Interpreter<'a> {
         };
 
         func.call(self, &args)
+    }
+
+    fn eval_index(&mut self, head: &Expr, index: &Expr) -> Result<Value, ErrorBuf> {
+        use Value::{Array, U32};
+        let head = self.evaluate(head)?;
+        let index = self.evaluate(index)?;
+        match (head, index) {
+            (Array(data), U32(n)) => {
+                let n = n as usize;
+                if n < data.len() {
+                    Ok(data[n].clone())
+                } else {
+                    // TODO PRIORITY 1
+                    todo!("Error message here");
+                }
+            }
+            (_, U32(_)) => panic!("Violated a typing invariant"),
+            _ => unreachable!(),
+        }
     }
 
     /// "Contravariant evaluation", the core logic of the control-flow blocks.
@@ -989,5 +1005,23 @@ mod tests {
         let d = a + b;
         "#;
         test_program(prog, vec![X(0), X(1), X(2), X(3)])
+    }
+
+    #[test]
+    fn array_index_simple() {
+        let prog = r#"
+        let arr = [?false; 3];
+        let q = ~arr[2];
+        "#;
+        test_program(prog, vec![X(2)])
+    }
+
+    #[test]
+    fn array_index_nested() {
+        let prog = r#"
+        let arr = [[?false; 2]; 3];
+        let q = ~arr[2][1];
+        "#;
+        test_program(prog, vec![X(5)])
     }
 }

@@ -304,7 +304,7 @@ impl Parser {
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
         let res = Stmt::Expr(Box::new(self.expression()?));
-        self.consume(Lexeme::Semicolon, "missing ';' after expression statement!")?;
+        self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
         Ok(res)
     }
 
@@ -360,20 +360,31 @@ impl Parser {
         Ok(arr)
     }
 
+    /// Call a function or index into an array.
     #[rustfmt::skip]
     fn call(&mut self) -> Result<Expr, ParseError> {
-        let head = self.primary()?;
+        let mut expr = self.primary()?;
+
+        // This is a function call
         if self.match_lexeme(LParen) {
-            if let Expr::Variable(Token { lexeme: Ident(name), loc }) = head {
-                self.finish_call(Token { lexeme: Ident(name), loc })
+            if let Expr::Variable(Token { lexeme: Ident(name), loc }) = expr {
+                return self.finish_call(Token { lexeme: Ident(name), loc });
             } else {
-                Ok(head)
+                return Ok(expr);
             }
-        } else {
-            Ok(head)
         }
+
+        // Otherwise, this is either a bunch of nested index operations, or it's
+        // just a primary token. Build up indexing operations as long as there
+        // are open-brackets to consume.
+        while self.match_lexeme(Lexeme::LBracket) {
+            expr = self.finish_index(expr)?;
+        }
+
+        Ok(expr)
     }
 
+    // Inline(always) because there is only one call site.
     #[inline(always)]
     fn finish_call(&mut self, callee: Token) -> Result<Expr, ParseError> {
         let mut args = vec![];
@@ -385,11 +396,23 @@ impl Parser {
                 }
             }
         }
-        let paren = self.consume(RParen, "Expected closing paren ')'")?;
+        let paren = self.consume(RParen, "expected closing paren ')'")?;
         Ok(Expr::Call {
             callee: Box::new(callee),
             args,
             paren,
+        })
+    }
+
+    #[inline(always)]
+    fn finish_index(&mut self, head: Expr) -> Result<Expr, ParseError> {
+        let head = Box::new(head);
+        let index = Box::new(self.expression()?);
+        let bracket = self.consume(RBracket, "missing ']' at end of index")?;
+        Ok(Expr::Index {
+            head,
+            index,
+            bracket,
         })
     }
 
@@ -400,7 +423,7 @@ impl Parser {
             LParen => {
                 self.forward();
                 let expr = self.expression();
-                self.consume(RParen, "Expected closing paren ')'")?;
+                self.consume(RParen, "expected closing paren ')'")?;
                 Ok(Expr::Group(Box::new(expr?)))
             }
             _ => Err(ParseError {
