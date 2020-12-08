@@ -54,7 +54,7 @@ lazy_static! {
     };
     static ref TCTOKENS: HashMap<(char, char), Lexeme> = {
         let mut m = HashMap::new();
-        m.insert(('.', '.'), Lexeme::StopStop);
+        m.insert(('.', '.'), Lexeme::DotDot);
         m.insert(('=', '='), Lexeme::EqualEqual);
         m.insert(('~', '='), Lexeme::TildeEqual);
         m
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn two_character_tokens() {
-        lex_test!(".. == ~="; StopStop, EqualEqual, TildeEqual);
+        lex_test!(".. == ~="; DotDot, EqualEqual, TildeEqual);
     }
 
     #[test]

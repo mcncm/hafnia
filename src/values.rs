@@ -84,6 +84,41 @@ impl Value {
             Measured(val) => T_Measured(Box::new(val.type_of())),
         }
     }
+
+    pub fn make_range<T>(lower: T, upper: T) -> Self
+    where
+        std::ops::Range<T>: IntoIterator,
+        // This is pretty verbose. Why doesn’t a simple `T: Into<Self>` or
+        // `Self: From<T>` bound work?
+        Self: From<<std::ops::Range<T> as IntoIterator>::Item>,
+    {
+        let values = (lower..upper).into_iter().map(|val| val.into()).collect();
+        Value::Array(values)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(val: bool) -> Value {
+        Value::Bool(val)
+    }
+}
+
+impl From<u8> for Value {
+    fn from(val: u8) -> Value {
+        Value::U8(val)
+    }
+}
+
+impl From<u16> for Value {
+    fn from(val: u16) -> Value {
+        Value::U16(val)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(val: u32) -> Value {
+        Value::U32(val)
+    }
 }
 
 impl fmt::Display for Value {

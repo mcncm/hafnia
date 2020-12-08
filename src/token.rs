@@ -17,7 +17,7 @@ pub enum Lexeme {
     Nat(Unsigned),
 
     // two-character token types
-    StopStop, EqualEqual, TildeEqual,
+    DotDot, EqualEqual, TildeEqual,
 
     // single-character token types
     Equal, Plus, Star, Bang, Question, Tilde, Comma, Semicolon, Colon,
@@ -28,19 +28,27 @@ pub enum Lexeme {
 
 impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Lexeme::*;
         let repr = match self {
-            Self::Ident(s) => s.clone(),
-            Self::Fn => "fn".to_owned(),
-            Self::Nat(nat) => format!("{}", nat),
-            Self::StopStop => "..".to_owned(),
-            Self::EqualEqual => "==".to_owned(),
-            Self::TildeEqual => "~=".to_owned(),
-            Self::Plus => "+".to_owned(),
-            Self::Star => "*".to_owned(),
-            Self::Bang => "!".to_owned(),
-            Self::Tilde => "~".to_owned(),
-            Self::LParen => "(".to_owned(),
-            Self::RParen => ")".to_owned(),
+            Ident(s) => s.clone(),
+            Fn => "fn".to_owned(),
+            For => "for".to_owned(),
+            Let => "let".to_owned(),
+            In => "in".to_owned(),
+            Nat(nat) => format!("{}", nat),
+            DotDot => "..".to_owned(),
+            EqualEqual => "==".to_owned(),
+            TildeEqual => "~=".to_owned(),
+            Plus => "+".to_owned(),
+            Star => "*".to_owned(),
+            Bang => "!".to_owned(),
+            Tilde => "~".to_owned(),
+            LParen => "(".to_owned(),
+            RParen => ")".to_owned(),
+            LBracket => "[".to_owned(),
+            RBracket => "]".to_owned(),
+            LBrace => "{".to_owned(),
+            RBrace => "}".to_owned(),
             _ => "?".to_string(),
         };
         write!(f, "{}", repr)

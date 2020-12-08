@@ -63,6 +63,26 @@ pub mod builtins {
     use lazy_static::lazy_static;
     use std::collections::HashMap;
 
+    /// This macro is helpful for synchronizing the names of builtin functions
+    /// and the native functions they refer to.
+    macro_rules! builtins_table {
+        ($($func:ident : $arity:expr),*) => {
+            {
+                let mut table = HashMap::new();
+                $(
+                    table.insert(
+                        stringify!($func),
+                        Builtin {
+                            arity: $arity,
+                            func: &$func,
+                        },
+                    );
+                )*
+                table
+            }
+        };
+    }
+
     lazy_static! {
         /// The table of builtin functions, the implementations of which are
         /// given below. Note that although `not` and `measure` are defined as builtin
@@ -70,12 +90,13 @@ pub mod builtins {
         /// special `~` and `!` operators.
         #[rustfmt::skip]
         pub static ref BUILTINS: HashMap<&'static str, Builtin> = {
-            let mut m = HashMap::new();
-            m.insert("flip", Builtin { arity: 1, func: &flip });
-            m.insert("split", Builtin { arity: 1, func: &split });
-            m.insert("qalloc", Builtin { arity: 2, func: &qalloc });
-            m.insert("free", Builtin { arity: 1, func: &free });
-            m
+            builtins_table! [
+                flip   : 1,
+                split  : 1,
+                len    : 1,
+                qalloc : 2,
+                free   : 1
+            ]
         };
     }
 
@@ -152,6 +173,13 @@ pub mod builtins {
     gate_function![flip, Z, false; Q_U8, Q_U16, Q_U32];
     gate_function![split, H, false; Q_U8, Q_U16, Q_U32];
     gate_function![measure, M, true; Q_U8, Q_U16, Q_U32];
+
+    fn len(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        match &args[0] {
+            Value::Array(data) => Ok(Value::U32(data.len() as u32)),
+            _ => todo!("What happened here?"), // error
+        }
+    }
 
     /// Dynamic allocation in the QRAM.
     fn qalloc(interp: &mut Interpreter, _args: &[Value]) -> Result<Value, ErrorBuf> {

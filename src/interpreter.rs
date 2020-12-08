@@ -226,19 +226,17 @@ impl<'a> Interpreter<'a> {
                     lexeme: Ident(name),
                     ..
                 }),
-                Block(stmts, None),
+                Block(stmts, expr),
             ) => {
                 for item in iter.iter() {
                     let mut bindings = HashMap::new();
                     // This clone shouldn't *really* be necessary; the block
                     // itself confers a natural lifetime on the value.
                     bindings.insert(name.to_owned(), Nameable::Value(item.clone()));
-                    self.eval_block(stmts, &None, Some(bindings), vec![])?;
+                    self.eval_block(stmts, expr, Some(bindings), vec![])?;
                 }
             }
-            (_, Block(_, _)) => {
-                panic!("Only support identifier 'for' loop bindings.");
-            }
+            (_, Block(_, _)) => panic!("Only support identifier 'for' loop bindings."),
             (_, _) => unreachable!(),
         };
         Ok(Value::Unit)
@@ -499,46 +497,52 @@ impl<'a> Interpreter<'a> {
     fn eval_binop(&mut self, left: &Expr, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
         use crate::values::Value::*;
-        let left_val = self.evaluate(left)?;
-        let right_val = self.evaluate(right)?;
+        let left = self.evaluate(left)?;
+        let right = self.evaluate(right)?;
         let val = match op.lexeme {
-            Lexeme::Plus => match (left_val, right_val) {
+            Lexeme::Plus => match (left, right) {
                 (U8(x), U8(y)) => U8(x + y),
                 (U16(x), U16(y)) => U16(x + y),
                 (U32(x), U32(y)) => U32(x + y),
                 (Array(ldata), Array(rdata)) => self.finish_array_sum(ldata, rdata)?,
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::Star => match (left_val, right_val) {
+            Lexeme::Star => match (left, right) {
                 (U8(x), U8(y)) => U8(x * y),
                 (U16(x), U16(y)) => U16(x * y),
                 (U32(x), U32(y)) => U32(x * y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::LAngle => match (left_val, right_val) {
+            Lexeme::LAngle => match (left, right) {
                 (U8(x), U8(y)) => Bool(x < y),
                 (U16(x), U16(y)) => Bool(x < y),
                 (U32(x), U32(y)) => Bool(x < y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::RAngle => match (left_val, right_val) {
+            Lexeme::RAngle => match (left, right) {
                 (U8(x), U8(y)) => Bool(x > y),
                 (U16(x), U16(y)) => Bool(x > y),
                 (U32(x), U32(y)) => Bool(x > y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::EqualEqual => match (left_val, right_val) {
+            Lexeme::EqualEqual => match (left, right) {
                 (Bool(x), Bool(y)) => Bool(x == y),
                 (U8(x), U8(y)) => Bool(x == y),
                 (U16(x), U16(y)) => Bool(x == y),
                 (U32(x), U32(y)) => Bool(x == y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::TildeEqual => match (left_val, right_val) {
+            Lexeme::TildeEqual => match (left, right) {
                 (Bool(x), Bool(y)) => Bool(x != y),
                 (U8(x), U8(y)) => Bool(x != y),
                 (U16(x), U16(y)) => Bool(x != y),
                 (U32(x), U32(y)) => Bool(x != y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::DotDot => match (left, right) {
+                (U8(x), U8(y)) => Value::make_range(x, y),
+                (U16(x), U16(y)) => Value::make_range(x, y),
+                (U32(x), U32(y)) => Value::make_range(x, y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
             _ => {
@@ -840,6 +844,15 @@ mod tests {
     }
 
     #[test]
+    fn range_simple() {
+        use Value::*;
+        test_interpreter! {
+            "0..5";
+            Array(vec![U32(0), U32(1), U32(2), U32(3), U32(4)])
+        }
+    }
+
+    #[test]
     fn array_concat() {
         use Value::*;
         test_interpreter! {
@@ -1023,5 +1036,20 @@ mod tests {
         let q = ~arr[2][1];
         "#;
         test_program(prog, vec![X(5)])
+    }
+
+    #[test]
+    fn mixed_loop_conditional() {
+        let prog = r#"
+        let arr = [?false; 5];
+        for i in 0..len(arr) {
+            if i > 2 {
+                let q = arr[i] in {
+                    let q = ~q;
+                }
+            }
+        }
+        "#;
+        test_program(prog, vec![X(3), X(4)])
     }
 }
