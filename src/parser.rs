@@ -27,7 +27,9 @@ lazy_static! {
         m.insert(LAngle,     Precedence(1, false));
         m.insert(RAngle,     Precedence(1, false));
         m.insert(Plus,       Precedence(2, false));
+        m.insert(Minus,      Precedence(2, false));
         m.insert(Star,       Precedence(3, false));
+        m.insert(Percent,    Precedence(3, false));
         m.insert(DotDot,     Precedence(4, false));
         m
     };

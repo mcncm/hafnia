@@ -20,7 +20,8 @@ pub enum Lexeme {
     DotDot, EqualEqual, TildeEqual,
 
     // single-character token types
-    Equal, Plus, Star, Bang, Question, Tilde, Comma, Semicolon, Colon,
+    Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde, Comma, Semicolon,
+    Colon,
 
     // delimiters
     LBracket, RBracket, LParen, RParen, LBrace, RBrace, LAngle, RAngle,
@@ -40,7 +41,9 @@ impl fmt::Display for Lexeme {
             EqualEqual => "==".to_owned(),
             TildeEqual => "~=".to_owned(),
             Plus => "+".to_owned(),
+            Minus => "-".to_owned(),
             Star => "*".to_owned(),
+            Percent => "%".to_owned(),
             Bang => "!".to_owned(),
             Tilde => "~".to_owned(),
             LParen => "(".to_owned(),

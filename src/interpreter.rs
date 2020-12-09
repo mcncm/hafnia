@@ -557,10 +557,22 @@ impl<'a> Interpreter<'a> {
                 (Array(ldata), Array(rdata)) => self.finish_array_sum(ldata, rdata)?,
                 (_, _) => panic!("Violated a typing invariant"),
             },
+            Lexeme::Minus => match (left, right) {
+                (U8(x), U8(y)) => U8(x.wrapping_sub(y)),
+                (U16(x), U16(y)) => U16(x.wrapping_sub(y)),
+                (U32(x), U32(y)) => U32(x.wrapping_sub(y)),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
             Lexeme::Star => match (left, right) {
                 (U8(x), U8(y)) => U8(x * y),
                 (U16(x), U16(y)) => U16(x * y),
                 (U32(x), U32(y)) => U32(x * y),
+                (_, _) => panic!("Violated a typing invariant"),
+            },
+            Lexeme::Percent => match (left, right) {
+                (U8(x), U8(y)) => U8(x % y),
+                (U16(x), U16(y)) => U16(x % y),
+                (U32(x), U32(y)) => U32(x % y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
             Lexeme::LAngle => match (left, right) {

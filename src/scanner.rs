@@ -35,7 +35,9 @@ lazy_static! {
     static ref SCTOKENS: HashMap<char, Lexeme> = {
         let mut m = HashMap::new();
         m.insert('+', Lexeme::Plus);
+        m.insert('-', Lexeme::Minus);
         m.insert('*', Lexeme::Star);
+        m.insert('%', Lexeme::Percent);
         m.insert('~', Lexeme::Tilde);
         m.insert('=', Lexeme::Equal);
         m.insert(',', Lexeme::Comma);
