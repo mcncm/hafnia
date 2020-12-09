@@ -17,6 +17,8 @@ use std::{collections::HashMap, fmt::Debug};
 /// the design needs work.
 pub trait Func: Debug {
     fn call(&self, interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf>;
+    /// Retrieves the function's docstring, if it has one.
+    fn doc(&self) -> &Option<String>;
 }
 
 /// Functions: I’ll keep this in this file for now, but note that functions are
@@ -26,6 +28,7 @@ pub trait Func: Debug {
 pub struct UserFunc {
     pub params: Vec<String>,
     pub body: Box<Expr>,
+    pub doc: Option<String>,
 }
 
 impl Func for UserFunc {
@@ -55,6 +58,10 @@ impl Func for UserFunc {
             _ => unreachable!(),
         }
     }
+
+    fn doc(&self) -> &Option<String> {
+        &self.doc
+    }
 }
 
 pub mod builtins {
@@ -66,7 +73,7 @@ pub mod builtins {
     /// This macro is helpful for synchronizing the names of builtin functions
     /// and the native functions they refer to.
     macro_rules! builtins_table {
-        ($($func:ident : $arity:expr),*) => {
+        ($($doc:literal | $func:ident : $arity:expr),*) => {
             {
                 let mut table = HashMap::new();
                 $(
@@ -75,6 +82,7 @@ pub mod builtins {
                         Builtin {
                             arity: $arity,
                             func: &$func,
+                            doc: Some($doc.to_string()),
                         },
                     );
                 )*
@@ -91,21 +99,43 @@ pub mod builtins {
         #[rustfmt::skip]
         pub static ref BUILTINS: HashMap<&'static str, Builtin> = {
             builtins_table! [
-                flip      : 1,
-                split     : 1,
-                len       : 1,
-                enumerate : 1,
-                qalloc    : 2,
-                free      : 1
+                r"Return the argument, shifted by a phase of π."
+                    | flip      : 1,
+
+                r"Return the argument, after a bitwise Hadamard operation."
+                    | split     : 1,
+
+                r"Return the length of the argument."
+                    | len       : 1,
+
+                r"Return an array consisting of pairs of indices and elements \
+                of the argument."
+                    | enumerate : 1,
+
+                r"Zip together two arrays, returning an array of pairs of \
+                elements."
+                    | zip       : 2,
+
+                r"Reverse an array or tuple."
+                    | reversed  : 1,
+
+                r"Allocate memory from the QRAM."
+                    | qalloc    : 2,
+
+                r"Free memory to the QRAM."
+                    | free      : 1
             ]
         };
     }
 
-    /// Type representing a builtin function
+    /// Type representing a builtin function. These are best implemented with a
+    /// separate data structure from user-defined functions because the `func`
+    /// field is here a native function, rather than a `Block` expression.
     #[derive(Clone)]
     pub struct Builtin {
         arity: usize,
         func: &'static (dyn Fn(&mut Interpreter, &[Value]) -> Result<Value, ErrorBuf> + Sync),
+        doc: Option<String>,
     }
 
     impl std::fmt::Debug for Builtin {
@@ -120,6 +150,10 @@ pub mod builtins {
                 todo!();
             }
             (self.func)(interp, args)
+        }
+
+        fn doc(&self) -> &Option<String> {
+            &self.doc
         }
     }
 
@@ -179,15 +213,17 @@ pub mod builtins {
         use Value::{Array, Tuple};
         match &args[0] {
             Array(data) | Tuple(data) => Ok(Value::U32(data.len() as u32)),
-            _ => todo!("Violated typing invariant!"), // error
+            _ => panic!("Violated typing invariant!"), // error
         }
     }
+
+    // Functions for manipulating iterators
 
     fn enumerate(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
         use std::convert::TryInto;
         use Value::{Array, Tuple};
         match &args[0] {
-            Array(data) | Tuple(data) => {
+            Array(data) => {
                 let pairs = data
                     .iter()
                     .enumerate()
@@ -197,11 +233,42 @@ pub mod builtins {
                     .collect();
                 Ok(Array(pairs))
             }
-            _ => todo!("Violated typing invariant!"), // error
+            _ => panic!("Violated typing invariant!"), // error
         }
     }
 
-    /// Dynamic allocation in the QRAM.
+    fn zip(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        use Value::{Array, Tuple};
+        match (&args[0], &args[1]) {
+            (Array(data_l), Array(data_r)) => {
+                let pairs = data_l
+                    .iter()
+                    .zip(data_r.iter())
+                    .map(|(item_l, item_r)| Tuple(vec![item_l.clone(), item_r.clone()]))
+                    .collect();
+                Ok(Array(pairs))
+            }
+            _ => panic!("Violated typing invariant!"), // error
+        }
+    }
+
+    fn reversed(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        use Value::{Array, Tuple};
+        match &args[0] {
+            Array(data) => {
+                let data_rev = data.iter().rev().map(|item| item.clone()).collect();
+                Ok(Array(data_rev))
+            }
+            Tuple(data) => {
+                let data_rev = data.iter().rev().map(|item| item.clone()).collect();
+                Ok(Tuple(data_rev))
+            }
+            _ => panic!("Violated typing invariant!"), // error
+        }
+    }
+
+    // Dynamic allocation
+
     fn qalloc(interp: &mut Interpreter, _args: &[Value]) -> Result<Value, ErrorBuf> {
         match &mut interp.qram {
             Some(_) => {

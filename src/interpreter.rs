@@ -176,8 +176,13 @@ impl<'a> Interpreter<'a> {
             .collect::<Vec<String>>();
         let body = Box::new(body.clone());
 
-        self.env
-            .insert(name, Nameable::Func(Rc::new(UserFunc { params, body })));
+        let func = UserFunc {
+            params,
+            body,
+            doc: None,
+        };
+
+        self.env.insert(name, Nameable::Func(Rc::new(func)));
 
         Ok(())
     }
