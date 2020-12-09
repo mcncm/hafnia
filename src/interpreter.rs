@@ -103,12 +103,36 @@ impl<'a> Interpreter<'a> {
     #[rustfmt::skip]
     fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), ErrorBuf> {
         let rhs = self.evaluate(rhs)?;
-        self.exec_assn_inner(lhs, &rhs)
+        let bindings = self.destruct_bind(lhs, &rhs)?;
+        for (name, val) in bindings {
+            self.env.insert(name, val);
+        }
+        Ok(())
     }
 
-    /// Recursively assign inner values
-    fn exec_assn_inner(&mut self, lhs: &Expr, rhs: &Value) -> Result<(), ErrorBuf> {
+    /// Recursively build a set of bindings from a valid lvalue and rvalue.
+    fn destruct_bind(
+        &mut self,
+        lhs: &Expr,
+        rhs: &Value,
+    ) -> Result<HashMap<String, Nameable>, ErrorBuf> {
+        Ok(self.destruct_bind_inner(lhs, rhs)?.into_iter().collect())
+    }
+
+    /// In the recursive inner subroutine, we delegate the bindings to a Vec,
+    /// which should be a bit faster than a HashMap, as well as easier to work
+    /// with.
+    ///
+    /// TODO There is not yet any checking for uniqueness! I’ve left this
+    /// because it should perhaps be done in an earlier pass.
+    fn destruct_bind_inner(
+        &mut self,
+        lhs: &Expr,
+        rhs: &Value,
+    ) -> Result<Vec<(String, Nameable)>, ErrorBuf> {
         use {Expr::Variable, Lexeme::Ident};
+        let mut bindings = vec![];
+
         match (lhs, &rhs) {
             (
                 Variable(Token {
@@ -117,7 +141,7 @@ impl<'a> Interpreter<'a> {
                 }),
                 _,
             ) => {
-                self.env.insert(name.clone(), Nameable::Value(rhs.clone()));
+                bindings.push((name.clone(), Nameable::Value(rhs.clone())));
             }
             (Expr::Seq(binders), Value::Array(values))
             | (Expr::Seq(binders), Value::Tuple(values)) => {
@@ -125,12 +149,12 @@ impl<'a> Interpreter<'a> {
                     todo!(); // Should be an error
                 }
                 for (binder, value) in binders.iter().zip(values.iter()) {
-                    self.exec_assn_inner(binder, value)?;
+                    bindings.append(&mut self.destruct_bind_inner(binder, value)?);
                 }
             }
             _ => todo!(),
         }
-        Ok(())
+        Ok(bindings)
     }
 
     /// Calling this function is how Cavy functions are defined. This has some
@@ -233,32 +257,23 @@ impl<'a> Interpreter<'a> {
         use Expr::{Block, Variable};
         use Lexeme::Ident;
 
-        // Unwrap the data for now.
+        // Unwrap the data for now. I suspect we *don’t* want to be iterating over
+        // tuples, for instance.
         let iter = match iter {
             Value::Array(data) => data,
             _ => panic!(),
         };
 
-        match (bind, body) {
-            // NOTE it's not ideal that this accepcs a Block that may return
+        match body {
+            // NOTE it's not ideal that this accepts a Block that may return
             // something, then simply *ignores* the return value.
-            (
-                Variable(Token {
-                    lexeme: Ident(name),
-                    ..
-                }),
-                Block(stmts, expr),
-            ) => {
+            Block(stmts, expr) => {
                 for item in iter.iter() {
-                    let mut bindings = HashMap::new();
-                    // This clone shouldn't *really* be necessary; the block
-                    // itself confers a natural lifetime on the value.
-                    bindings.insert(name.to_owned(), Nameable::Value(item.clone()));
+                    let bindings = self.destruct_bind(bind, item)?;
                     self.eval_block(stmts, expr, Some(bindings), vec![])?;
                 }
             }
-            (_, Block(_, _)) => panic!("Only support identifier 'for' loop bindings."),
-            (_, _) => unreachable!(),
+            _ => panic!("Violated a typing invariant"),
         };
         Ok(Value::Unit)
     }
@@ -1110,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_loop_conditional() {
+    fn mixed_loop_conditional_1() {
         let prog = r#"
         let arr = [?false; 5];
         for i in 0..len(arr) {
@@ -1122,5 +1137,35 @@ mod tests {
         }
         "#;
         test_program(prog, vec![X(3), X(4)])
+    }
+
+    #[test]
+    fn mixed_loop_conditional_2() {
+        let prog = r#"
+        let arr = [?false; 5];
+        for (i, q) in enumerate(arr) {
+            if i > 2 {
+                let q = ~q;
+            }
+        }
+        "#;
+        test_program(prog, vec![X(3), X(4)])
+    }
+
+    #[test]
+    fn multiple_return_ebit() {
+        let prog = r#"
+        fn ebit() {
+            let p = split(?false);
+            let q = ?false;
+            if p {
+                let q = ~q;
+            }
+            (p, q)
+        }
+
+        let (p, q) = ebit();
+        "#;
+        test_program(prog, vec![H(0), CX { ctrl: 0, tgt: 1 }]);
     }
 }

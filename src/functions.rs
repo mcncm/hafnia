@@ -91,11 +91,12 @@ pub mod builtins {
         #[rustfmt::skip]
         pub static ref BUILTINS: HashMap<&'static str, Builtin> = {
             builtins_table! [
-                flip   : 1,
-                split  : 1,
-                len    : 1,
-                qalloc : 2,
-                free   : 1
+                flip      : 1,
+                split     : 1,
+                len       : 1,
+                enumerate : 1,
+                qalloc    : 2,
+                free      : 1
             ]
         };
     }
@@ -175,9 +176,28 @@ pub mod builtins {
     gate_function![measure, M, true; Q_U8, Q_U16, Q_U32];
 
     fn len(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        use Value::{Array, Tuple};
         match &args[0] {
-            Value::Array(data) => Ok(Value::U32(data.len() as u32)),
-            _ => todo!("What happened here?"), // error
+            Array(data) | Tuple(data) => Ok(Value::U32(data.len() as u32)),
+            _ => todo!("Violated typing invariant!"), // error
+        }
+    }
+
+    fn enumerate(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
+        use std::convert::TryInto;
+        use Value::{Array, Tuple};
+        match &args[0] {
+            Array(data) | Tuple(data) => {
+                let pairs = data
+                    .iter()
+                    .enumerate()
+                    // TODO Ok, I should *really* add a "usize" type that’s
+                    // identical to the underlying Rust one.
+                    .map(|(i, elem)| Tuple(vec![Value::U32(i.try_into().unwrap()), elem.clone()]))
+                    .collect();
+                Ok(Array(pairs))
+            }
+            _ => todo!("Violated typing invariant!"), // error
         }
     }
 

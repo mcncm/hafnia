@@ -300,7 +300,11 @@ impl Parser {
                     stmts.push(stmt);
                 }
                 Either::Right(expr) => {
-                    final_expr = Some(expr);
+                    if let Some(&Lexeme::RBrace) = self.peek_lexeme() {
+                        final_expr = Some(expr);
+                    } else {
+                        stmts.push(Stmt::Expr(Box::new(expr)));
+                    }
                 }
             }
         }

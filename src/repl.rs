@@ -117,7 +117,7 @@ impl<'a> Repl<'a> {
         let stmts = Parser::new(tokens).parse()?;
 
         if self.flags.phase <= sys::CompilerPhase::Parse {
-            println!("{:?}", stmts);
+            println!("{:#?}", stmts);
             return Ok(());
         }
 
