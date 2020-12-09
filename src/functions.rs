@@ -256,11 +256,11 @@ pub mod builtins {
         use Value::{Array, Tuple};
         match &args[0] {
             Array(data) => {
-                let data_rev = data.iter().rev().map(|item| item.clone()).collect();
+                let data_rev = data.iter().rev().cloned().collect();
                 Ok(Array(data_rev))
             }
             Tuple(data) => {
-                let data_rev = data.iter().rev().map(|item| item.clone()).collect();
+                let data_rev = data.iter().rev().cloned().collect();
                 Ok(Tuple(data_rev))
             }
             _ => panic!("Violated typing invariant!"), // error

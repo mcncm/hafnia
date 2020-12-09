@@ -60,7 +60,7 @@ pub struct Location {
     pub pos: usize,  // starting position in source file
     pub line: usize, // line number in source file
     pub col: usize,  // column number in source file
-    pub file: Option<String>,
+    pub file: Option<PathBuf>,
 }
 
 impl fmt::Display for Location {

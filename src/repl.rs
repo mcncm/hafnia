@@ -105,7 +105,7 @@ impl<'a> Repl<'a> {
     fn exec_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
         let source = SourceCode::from_src(input);
 
-        let tokens = Scanner::new(source).tokenize()?;
+        let tokens = Scanner::new(&source).tokenize()?;
         if self.flags.phase <= sys::CompilerPhase::Tokenize {
             // I wonder if there’s another way to factor this code so that I
             // don’t have to make these tests every time I handle input... Not

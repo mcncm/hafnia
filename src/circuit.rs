@@ -46,9 +46,9 @@ impl Gate {
             T { tgt: _, conj: _ } => todo!(),
             H(_tgt) => todo!(),
             Z(tgt) => vec![
-                Z(tgt),
+                H(tgt),
                 CX { ctrl, tgt },
-                Z(tgt)
+                H(tgt)
             ],
             // This is just applying a well-known identity for CCX.
             CX { ctrl: inner_ctrl, tgt } => vec![

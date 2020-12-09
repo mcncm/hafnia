@@ -5,9 +5,10 @@ use crate::{
 };
 use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::Chars;
 use std::vec::Vec;
 
@@ -79,33 +80,67 @@ impl fmt::Display for ScanError {
 
 impl std::error::Error for ScanError {}
 
-pub struct SourceCode<'a> {
-    pub code: Peekable<Chars<'a>>,
+pub struct SourceCode {
+    pub code: String,
     // TODO: should replace this with a &Path or &PathBuf, but this leads to a lot
     // of lifetime wrangling I don't want to deal with right now.
-    pub file: Option<String>,
+    pub file: Option<PathBuf>,
 }
 
-impl<'a> SourceCode<'a> {
-    pub fn from_src(src: &'a str) -> Self {
+impl SourceCode {
+    pub fn from_src(src: &str) -> Self {
         Self {
-            code: src.chars().peekable(),
+            code: src.to_string(),
             file: None,
         }
     }
 }
 
+impl TryFrom<PathBuf> for SourceCode {
+    type Error = ErrorBuf;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let code = match std::fs::read_to_string(&path) {
+            Ok(code) => code,
+            Err(err) => {
+                return Err(ErrorBuf(vec![Box::new(err)]));
+            }
+        };
+
+        let src = Self {
+            code,
+            // FIXME This should be a PathBuf, but there were some difficulties
+            // with lifetimes last time I tried to do that.
+            file: Some(path),
+        };
+
+        Ok(src)
+    }
+
+    // let source_path = PathBuf::from(&path);
+
+    // let src = SourceCode {
+    //     code: src.1.chars().peekable(),
+    //     file: Some(src.0),
+    // };
+
+    // let source_path = PathBuf::from(&path);
+    // Ok(Some((path.to_string(), fs::read_to_string(&source_path)?)))
+}
+
 struct ScanHead<'a> {
-    src: SourceCode<'a>,
+    src: Peekable<Chars<'a>>,
+    file: &'a Option<PathBuf>,
     pub pos: usize,  // absolute position in source
     pub line: usize, // line number in source
     pub col: usize,  // column number in source
 }
 
 impl<'a> ScanHead<'a> {
-    fn new(src: SourceCode<'a>) -> Self {
+    fn new(src: &'a SourceCode) -> Self {
         ScanHead {
-            src,
+            src: src.code.chars().peekable(),
+            file: &src.file,
             pos: 0,
             line: 1,
             col: 1,
@@ -117,14 +152,14 @@ impl<'a> ScanHead<'a> {
             pos: self.pos,
             line: self.line,
             col: self.col,
-            file: self.src.file.as_ref().cloned(),
+            file: self.file.as_ref().cloned(),
         }
     }
 
     /// Advance to the next source character, not ignoring whitespace. If there
     /// is a character, return it.
     fn next_raw_char(&mut self) -> Option<char> {
-        let next = self.src.code.next();
+        let next = self.src.next();
         if let Some(ch) = next {
             self.pos += 1;
             self.col += 1;
@@ -151,7 +186,7 @@ impl<'a> ScanHead<'a> {
     }
 
     fn peek(&mut self) -> Option<&char> {
-        self.src.code.peek()
+        self.src.peek()
     }
 }
 
@@ -189,7 +224,7 @@ macro_rules! push_token {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(src: SourceCode<'a>) -> Self {
+    pub fn new(src: &'a SourceCode) -> Self {
         Scanner {
             scan_head: ScanHead::new(src),
             token_buf: vec![],
@@ -339,12 +374,8 @@ mod tests {
                 )*
             )?
 
-            let src = SourceCode {
-                code: $code.chars().peekable(),
-                file: None,
-            };
-
-            let scanner = Scanner::new(src);
+            let src = SourceCode::from_src($code);
+            let scanner = Scanner::new(&src);
             let tokens = scanner.tokenize().unwrap();
 
             assert_eq!(tokens.len(), expected_tokens.len(), "expected same number of tokens.");

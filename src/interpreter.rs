@@ -768,12 +768,8 @@ mod tests {
         ($code:expr ; $tok:ident$(($($arg:expr),+))?) => {
             let expected_value = Value::$tok $(($($arg),+))?;
 
-            let src = SourceCode {
-                code: $code.chars().peekable(),
-                file: None,
-            };
-
-            let tokens = Scanner::new(src).tokenize().unwrap();
+            let src = SourceCode::from_src($code);
+            let tokens = Scanner::new(&src).tokenize().unwrap();
             let ast = Parser::new(tokens).expression().unwrap();
             let arch = Arch::default();
             let actual_value = Interpreter::new(&arch).evaluate(&ast);
@@ -783,12 +779,9 @@ mod tests {
     }
 
     fn test_program(prog: &'static str, expected_gates: Vec<Gate>) {
-        let src = SourceCode {
-            code: prog.chars().peekable(),
-            file: None,
-        };
+        let src = SourceCode::from_src(prog);
 
-        let tokens = Scanner::new(src).tokenize().unwrap();
+        let tokens = Scanner::new(&src).tokenize().unwrap();
         let stmts = Parser::new(tokens).parse().unwrap();
         let arch = Arch::default();
         let mut interp = Interpreter::new(&arch);
@@ -930,6 +923,18 @@ mod tests {
         }
         "#;
         test_program(prog, vec![CX { ctrl: 1, tgt: 0 }]);
+    }
+
+    #[test]
+    fn controlled_z() {
+        let prog = r#"
+        let x = ?false;
+        let y = ?false;
+        if y {
+            let x = flip(x);
+        }
+        "#;
+        test_program(prog, vec![H(0), CX { ctrl: 1, tgt: 0 }, H(0)]);
     }
 
     #[test]

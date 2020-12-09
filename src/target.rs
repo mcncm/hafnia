@@ -233,16 +233,34 @@ pub mod latex {
             // for getting both the min and max in one go?
             let min = **gates.iter().map(|(wire, _)| wire).min().unwrap();
             let max = **gates.iter().map(|(wire, _)| wire).max().unwrap();
-            // For now, we'll do the most naive possible correct thing: we'll *always*
-            // insert these at the end of the circuit.
-            if !self.range_free(self.len() - 1, min..=max) {
+
+            // If the last moment isn't free, we’ll have to add another one.
+            let moment = if !self.range_free(self.len() - 1, min..=max) {
                 self.add_moment();
+                self.len() - 1
+            } else {
+                // Now we'll do the second-most-naive thing after always inserting
+                // in the last moment: We'll start at the last moment, then walk
+                // backwards until the last moment in which the gate fits, like a
+                // Tetris game. It would be slightly better still to step *over*
+                // intermediate gates. Note that this makes the whole layout
+                // algorithm something like O(depth^2 * width), which is horrible.
+                let mut moment = self.len() - 1;
+                while self.range_free(moment - 1, min..=max) {
+                    moment -= 1;
+                }
+                moment
+            };
+            // Now, if we're *still* at the end we need to add a new moment.
+            if moment == self.len() - 1 {
+                self.add_moment()
             }
-            let moment = self.len() - 1;
+
             for (&wire, gate) in gates.into_iter() {
                 self.arr[wire][moment] = LayoutState::Some(gate);
                 self.first_free[wire] = moment + 1;
             }
+
             // FIXME We'll also do this suboptimally: we'll do a second pass
             // through the range, changing everything still free into Blocked.
             // We *could* do this in a single pass if we sorted `gates`. Note
@@ -253,7 +271,7 @@ pub mod latex {
                     self.arr[wire][moment] = LayoutState::Blocked;
                 }
             }
-            self.add_moment();
+            // self.add_moment();
         }
     }
 

@@ -1,11 +1,14 @@
+use std::convert::TryInto;
 use std::fs;
-use std::io::{self, prelude::*};
+use std::io::prelude::*;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
 use cavy::arch;
+use cavy::errors::ErrorBuf;
 use cavy::repl::Repl;
+use cavy::scanner::SourceCode;
 use cavy::target;
 use cavy::{compile, sys};
 
@@ -44,13 +47,11 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     sys::Flags { debug, opt, phase }
 }
 
-/// FIXME This return type is very unclear. Should return a `SourceCode` struct.
-/// This turns out to be (very midly) tricky because of lifetimes.
-fn get_code(argmatches: &ArgMatches) -> Result<Option<(String, String)>, io::Error> {
+fn get_code(argmatches: &ArgMatches) -> Result<Option<SourceCode>, ErrorBuf> {
     match argmatches.value_of("input") {
         Some(path) => {
-            let source_path = PathBuf::from(&path);
-            Ok(Some((path.to_string(), fs::read_to_string(&source_path)?)))
+            let path = PathBuf::from(&path);
+            Ok(Some(path.try_into()?))
         }
         None => Ok(None),
     }
