@@ -64,6 +64,11 @@ lazy_static! {
     };
 }
 
+/// Characters that are allowed in identifiers
+fn is_ident_char(ch: char) -> bool {
+    ch.is_alphanumeric() | (ch == '_')
+}
+
 #[derive(Debug)]
 pub struct ScanError {
     loc: Location,
@@ -118,16 +123,6 @@ impl TryFrom<PathBuf> for SourceCode {
 
         Ok(src)
     }
-
-    // let source_path = PathBuf::from(&path);
-
-    // let src = SourceCode {
-    //     code: src.1.chars().peekable(),
-    //     file: Some(src.0),
-    // };
-
-    // let source_path = PathBuf::from(&path);
-    // Ok(Some((path.to_string(), fs::read_to_string(&source_path)?)))
 }
 
 struct ScanHead<'a> {
@@ -300,7 +295,9 @@ impl<'a> Scanner<'a> {
             else if ch.is_ascii_digit() {
                 self.consume_nat();
             }
-            // Or it could be a keyword or identifier
+            // Or it could be a keyword or identifier. Identifiers must start
+            // with an alphabetic character, but can contain alphanumeric
+            // characters and underscores.
             else if ch.is_alphabetic() {
                 self.consume_ident();
             }
@@ -319,7 +316,7 @@ impl<'a> Scanner<'a> {
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
                 self.next_char();
-            } else if ch.is_ascii_alphabetic() {
+            } else if ch.is_alphabetic() {
                 self.scrub_token("Numeric tokens may not contain alphabetic characters.");
                 return;
             } else {
@@ -341,7 +338,7 @@ impl<'a> Scanner<'a> {
     /// character, and may be followed by alphabetic and numeric characters.
     fn consume_ident(&mut self) {
         while let Some(ch) = self.scan_head.peek() {
-            if ch.is_ascii_alphanumeric() {
+            if is_ident_char(*ch) {
                 self.next_char();
             } else {
                 break;
@@ -485,6 +482,11 @@ mod tests {
     #[test]
     fn ident_trailing_numbers() {
         lex_test!("foo1"; Ident(String::from("foo1")));
+    }
+
+    #[test]
+    fn ident_underscore() {
+        lex_test!("foo_bar"; Ident(String::from("foo_bar")));
     }
 
     #[test]

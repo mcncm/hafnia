@@ -17,7 +17,7 @@ pub enum Lexeme {
     Nat(Unsigned),
 
     // two-character token types
-    DotDot, EqualEqual, TildeEqual,
+    DotDot, EqualEqual, TildeEqual, MinusRAngle,
 
     // single-character token types
     Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde, Comma, Semicolon,
@@ -40,18 +40,24 @@ impl fmt::Display for Lexeme {
             DotDot => "..".to_owned(),
             EqualEqual => "==".to_owned(),
             TildeEqual => "~=".to_owned(),
+            MinusRAngle => "->".to_owned(),
             Plus => "+".to_owned(),
             Minus => "-".to_owned(),
             Star => "*".to_owned(),
             Percent => "%".to_owned(),
             Bang => "!".to_owned(),
             Tilde => "~".to_owned(),
+            Comma => ",".to_owned(),
+            Semicolon => ";".to_owned(),
+            Colon => ":".to_owned(),
             LParen => "(".to_owned(),
             RParen => ")".to_owned(),
             LBracket => "[".to_owned(),
             RBracket => "]".to_owned(),
             LBrace => "{".to_owned(),
             RBrace => "}".to_owned(),
+            LAngle => "<".to_owned(),
+            RAngle => ">".to_owned(),
             _ => "?".to_string(),
         };
         write!(f, "{}", repr)

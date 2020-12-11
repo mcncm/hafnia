@@ -1,8 +1,29 @@
 use crate::token::Token;
 use std::fmt;
 
+/// Expression node.
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub tags: ExprTags,
+}
+
+impl From<ExprKind> for Expr {
+    fn from(kind: ExprKind) -> Self {
+        Self {
+            kind,
+            tags: ExprTags::default(),
+        }
+    }
+}
+
+/// Decorations added to an expression node through successive compiler passes.
+#[derive(Default, Debug, Clone)]
+pub struct ExprTags {}
+
+/// A kind of expression node.
+#[derive(Debug, Clone)]
+pub enum ExprKind {
     BinOp {
         left: Box<Expr>,
         op: Token,
@@ -50,10 +71,10 @@ pub enum Expr {
     },
 }
 
-impl Expr {
+impl ExprKind {
     /// Some expressions require semicolons when used in expression statements.
     pub fn requires_semicolon(&self) -> bool {
-        use Expr::*;
+        use ExprKind::*;
         match self {
             BinOp { .. } => true,
             UnOp { .. } => true,
@@ -74,8 +95,8 @@ impl Expr {
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Expr::*;
-        let s_expr = match self {
+        use ExprKind::*;
+        let s_expr = match &self.kind {
             BinOp { left, op, right } => format!("({} {} {})", op, left, right),
             UnOp { op, right } => format!("({} {})", op, right),
             Literal(token) => format!("{}", token),
@@ -109,8 +130,21 @@ impl fmt::Display for Expr {
     }
 }
 
+/// Statement node.
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+}
+
+impl From<StmtKind> for Stmt {
+    fn from(kind: StmtKind) -> Self {
+        Self { kind }
+    }
+}
+
+/// A kind of statement
+#[derive(Debug, Clone)]
+pub enum StmtKind {
     Print(Box<Expr>),
     Expr(Box<Expr>),
     Assn {

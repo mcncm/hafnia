@@ -1,5 +1,5 @@
 use crate::{
-    ast::Expr,
+    ast::{Expr, ExprKind},
     environment::{Key, Nameable},
     errors::ErrorBuf,
     interpreter::Interpreter,
@@ -53,8 +53,8 @@ impl Func for UserFunc {
             .map(|(key, val)| (key.clone(), Nameable::Value(val.clone())))
             .collect();
 
-        match &*self.body {
-            Expr::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), vec![]),
+        match &(&*self.body).kind {
+            ExprKind::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), vec![]),
             _ => unreachable!(),
         }
     }

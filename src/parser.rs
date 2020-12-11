@@ -1,9 +1,10 @@
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
 use crate::errors;
 use crate::token::{
     Lexeme::{self, *},
     Location, Token,
 };
+use crate::values::types::Type;
 use errors::ErrorBuf;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -168,10 +169,12 @@ impl Parser {
             Ok(Some(Either::Left(stmt))) => Ok(Some(stmt)),
             Ok(Some(Either::Right(expr))) => {
                 // If we got an expression, return an expression statement
-                if expr.requires_semicolon() {
+                if expr.kind.requires_semicolon() {
                     self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
                 }
-                Ok(Some(Stmt::Expr(Box::new(expr))))
+                let kind = StmtKind::Expr(Box::new(expr));
+                let stmt = Stmt { kind };
+                Ok(Some(stmt))
             }
             // Any other combination of Some/None, Ok/Err: propagate it
             Ok(None) => Ok(None),
@@ -208,12 +211,13 @@ impl Parser {
         self.consume(Lexeme::RParen, "expected closing ')' after parameters.")?;
         self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
         let body = Box::new(self.block_expr()?);
-        Ok(Stmt::Fn {
+        let kind = StmtKind::Fn {
             name,
             params,
             body,
             docstring: None,
-        })
+        };
+        Ok(Stmt { kind })
     }
 
     /// Returns either an assignment statement, as in:
@@ -237,11 +241,11 @@ impl Parser {
         if self.match_lexeme(Lexeme::In) {
             self.consume(Lexeme::LBrace, "expected '{' opening 'let' expression.")?;
             let body = Box::new(self.block_expr()?);
-            let expr = Box::new(Expr::Let { lhs, rhs, body });
-            Ok(Stmt::Expr(expr))
+            let expr_kind = ExprKind::Let { lhs, rhs, body };
+            Ok(StmtKind::Expr(Box::new(expr_kind.into())).into())
         } else {
             self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
-            Ok(Stmt::Assn { lhs, rhs })
+            Ok(StmtKind::Assn { lhs, rhs }.into())
         }
     }
 
@@ -249,7 +253,7 @@ impl Parser {
         self.forward();
         let expr = self.expression()?;
         self.consume(Lexeme::Semicolon, "missing ';' after statement")?;
-        Ok(Stmt::Print(Box::new(expr)))
+        Ok(StmtKind::Print(Box::new(expr.into())).into())
     }
 
     fn if_expr(&mut self) -> Result<Expr, ParseError> {
@@ -270,11 +274,12 @@ impl Parser {
             )?;
             else_branch = Some(Box::new(self.block_expr()?));
         }
-        Ok(Expr::If {
+        let kind = ExprKind::If {
             cond,
             then_branch,
             else_branch,
-        })
+        };
+        Ok(kind.into())
     }
 
     fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -284,7 +289,8 @@ impl Parser {
         let iter = Box::new(self.expression()?);
         self.consume(Lexeme::LBrace, "expected '{' opening 'for' body.")?;
         let body = Box::new(self.block_expr()?);
-        Ok(Stmt::For { bind, iter, body })
+        let kind = StmtKind::For { bind, iter, body };
+        Ok(kind.into())
     }
 
     fn block_expr(&mut self) -> Result<Expr, ParseError> {
@@ -305,19 +311,19 @@ impl Parser {
                     if let Some(&Lexeme::RBrace) = self.peek_lexeme() {
                         final_expr = Some(expr);
                     } else {
-                        stmts.push(Stmt::Expr(Box::new(expr)));
+                        stmts.push(StmtKind::Expr(Box::new(expr.into())).into());
                     }
                 }
             }
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
-        Ok(Expr::Block(stmts, final_expr.map(Box::new)))
+        Ok(ExprKind::Block(stmts, final_expr.map(Box::new)).into())
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
-        let res = Stmt::Expr(Box::new(self.expression()?));
+        let res = StmtKind::Expr(Box::new(self.expression()?));
         self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
-        Ok(res)
+        Ok(res.into())
     }
 
     pub fn expression(&mut self) -> Result<Expr, ParseError> {
@@ -336,10 +342,11 @@ impl Parser {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.tokens.next().unwrap();
             let right = self.unary()?;
-            return Ok(Expr::UnOp {
+            let kind = ExprKind::UnOp {
                 op,
                 right: Box::new(right),
-            });
+            };
+            return Ok(kind.into());
         } else if self.match_lexeme(LBracket) {
             return self.finish_array();
         }
@@ -349,7 +356,7 @@ impl Parser {
     fn finish_array(&mut self) -> Result<Expr, ParseError> {
         // Empty array:
         if self.match_lexeme(RBracket) {
-            return Ok(Expr::ExtArr(vec![]));
+            return Ok(ExprKind::ExtArr(vec![]).into());
         }
 
         // Otherwise, there is at least one item:
@@ -357,7 +364,7 @@ impl Parser {
         let arr = if self.match_lexeme(Semicolon) {
             let item = Box::new(item);
             let reps = Box::new(self.expression()?);
-            Expr::IntArr { item, reps }
+            ExprKind::IntArr { item, reps }
         } else {
             let mut items = vec![item];
             loop {
@@ -366,10 +373,10 @@ impl Parser {
                 }
                 items.push(self.expression()?);
             }
-            Expr::ExtArr(items)
+            ExprKind::ExtArr(items)
         };
         self.consume(RBracket, "missing ']' at end of array")?;
-        Ok(arr)
+        Ok(arr.into())
     }
 
     /// Call a function or index into an array.
@@ -379,7 +386,7 @@ impl Parser {
 
         // This is a function call
         if self.match_lexeme(LParen) {
-            if let Expr::Variable(Token { lexeme: Ident(name), loc }) = expr {
+            if let ExprKind::Variable(Token { lexeme: Ident(name), loc }) = expr.kind {
                 return self.finish_call(Token { lexeme: Ident(name), loc });
             } else {
                 return Ok(expr);
@@ -409,11 +416,12 @@ impl Parser {
             }
         }
         let paren = self.consume(RParen, "expected closing paren ')'")?;
-        Ok(Expr::Call {
+        let kind = ExprKind::Call {
             callee: Box::new(callee),
             args,
             paren,
-        })
+        };
+        Ok(kind.into())
     }
 
     #[inline(always)]
@@ -421,17 +429,24 @@ impl Parser {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
         let bracket = self.consume(RBracket, "missing ']' at end of index")?;
-        Ok(Expr::Index {
+        let kind = ExprKind::Index {
             head,
             index,
             bracket,
-        })
+        };
+        Ok(kind.into())
     }
 
     fn primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek_lexeme().unwrap() {
-            Nat(_) | True | False => Ok(Expr::Literal(self.tokens.next().unwrap())),
-            Ident(_) => Ok(Expr::Variable(self.tokens.next().unwrap())),
+            Nat(_) | True | False => {
+                let kind = ExprKind::Literal(self.tokens.next().unwrap());
+                Ok(kind.into())
+            }
+            Ident(_) => {
+                let kind = ExprKind::Variable(self.tokens.next().unwrap());
+                Ok(kind.into())
+            }
             LParen => {
                 self.forward();
                 self.finish_group()
@@ -448,7 +463,7 @@ impl Parser {
     fn finish_group(&mut self) -> Result<Expr, ParseError> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
         if self.match_lexeme(Lexeme::RParen) {
-            return Ok(Expr::Seq(vec![]));
+            return Ok(ExprKind::Seq(vec![]).into());
         }
 
         let head = self.expression()?;
@@ -462,18 +477,18 @@ impl Parser {
                 }
                 items.push(self.expression()?);
             }
-            Expr::Seq(items)
+            ExprKind::Seq(items).into()
         } else {
             // If there were no commas, we should have a single expression
             // followed by a close-paren, and return a group.
-            Expr::Group(Box::new(head))
+            ExprKind::Group(Box::new(head)).into()
         };
         self.consume(RParen, "expected closing paren ')'")?;
         Ok(expr)
     }
 
     fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, ParseError> {
-        let mut lhs = lhs;
+        let mut lhs = lhs.kind;
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {
             // Check the outer operator's precedence
@@ -495,16 +510,16 @@ impl Parser {
                         break;
                     }
                 }
-                lhs = Expr::BinOp {
+                lhs = ExprKind::BinOp {
                     op: outer,
-                    left: Box::new(lhs),
-                    right: Box::new(rhs),
+                    left: Box::new(lhs.into()),
+                    right: Box::new(rhs.into()),
                 };
             } else {
                 break;
             }
         }
-        Ok(lhs)
+        Ok(lhs.into())
     }
 
     fn synchronize(&mut self, _err: &str) {
@@ -515,7 +530,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Expr::{self, *};
+    use crate::ast::ExprKind::{self, *};
     use crate::token::Token;
     use Lexeme::*;
 
@@ -537,7 +552,7 @@ mod tests {
     macro_rules! test_s_expr {
         // BinOp
         ($ast:expr, ({$op:expr} $left:tt $right:tt)) => {
-            match $ast {
+            match &$ast.kind {
                 BinOp { op, left, right } => {
                     assert_eq!(op.lexeme, $op);
                     test_s_expr! { *left, $left };
@@ -551,7 +566,7 @@ mod tests {
         };
         // UnOp
         ($ast:expr, ({$op:expr} $right:tt)) => {
-            match $ast {
+            match &$ast.kind {
                 UnOp { op, right } => {
                     assert_eq!(op.lexeme, $op);
                     test_s_expr! { *right, $right };
@@ -564,7 +579,7 @@ mod tests {
         };
         // Literals and variables
         ($ast:expr, {$literal:expr}) => {
-            match $ast {
+            match &$ast.kind {
                 Literal(token) => {
                     assert_eq!(token.lexeme, $literal);
                 }

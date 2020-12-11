@@ -3,7 +3,7 @@ use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceCode};
-use crate::{ast::Stmt, sys};
+use crate::{ast::StmtKind, sys};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -127,17 +127,14 @@ impl<'a> Repl<'a> {
 
         let len = stmts.len();
         for (n, stmt) in stmts.iter().enumerate() {
-            match stmt {
-                Stmt::Expr(expr) => {
-                    let value = self.interpreter.evaluate(&expr)?;
-                    // Print the value of the final *expression* only
-                    if n == len - 1 {
-                        println!("{}", value);
-                    };
-                }
-                stmt => {
-                    self.interpreter.execute(&stmt)?;
-                }
+            if let StmtKind::Expr(expr) = &stmt.kind {
+                let value = self.interpreter.evaluate(&expr)?;
+                // Print the value of the final *expression* only
+                if n == len - 1 {
+                    println!("{}", value);
+                };
+            } else {
+                self.interpreter.execute(&stmt)?;
             }
         }
         Ok(())

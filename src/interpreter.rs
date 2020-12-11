@@ -1,6 +1,6 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
@@ -84,10 +84,10 @@ impl<'a> Interpreter<'a> {
     #[rustfmt::skip]
     pub fn execute(&mut self, stmt: &Stmt) -> Result<(), ErrorBuf> {
         use crate::ast::Expr;
-        use Stmt::*;
-        match stmt {
+        use StmtKind::*;
+        match &stmt.kind {
             Print(expr) => {
-                println!("{}", self.evaluate(expr)?);
+                println!("{}", self.evaluate(&expr)?);
                 Ok(())
             },
             Assn { lhs, rhs } => self.exec_assn(lhs, rhs),
@@ -130,10 +130,10 @@ impl<'a> Interpreter<'a> {
         lhs: &Expr,
         rhs: &Value,
     ) -> Result<Vec<(String, Nameable)>, ErrorBuf> {
-        use {Expr::Variable, Lexeme::Ident};
+        use {ExprKind::Variable, Lexeme::Ident};
         let mut bindings = vec![];
 
-        match (lhs, &rhs) {
+        match (&lhs.kind, &rhs) {
             (
                 Variable(Token {
                     lexeme: Ident(name),
@@ -143,8 +143,8 @@ impl<'a> Interpreter<'a> {
             ) => {
                 bindings.push((name.clone(), Nameable::Value(rhs.clone())));
             }
-            (Expr::Seq(binders), Value::Array(values))
-            | (Expr::Seq(binders), Value::Tuple(values)) => {
+            (ExprKind::Seq(binders), Value::Array(values))
+            | (ExprKind::Seq(binders), Value::Tuple(values)) => {
                 if binders.len() != values.len() {
                     todo!(); // Should be an error
                 }
@@ -210,7 +210,7 @@ impl<'a> Interpreter<'a> {
         then_branch: &Expr,
         else_branch: &Option<Box<Expr>>,
     ) -> Result<Value, ErrorBuf> {
-        use Expr::Block;
+        use ExprKind::Block;
         match cond_val {
             // FIXME This is less than half of an implementation!
             Value::Q_Bool(u) => {
@@ -220,7 +220,7 @@ impl<'a> Interpreter<'a> {
                 // the same type, and it might only fail contingently at
                 // runtime. Also, there isn’t as strong of a distinction between
                 // If statements and If expressions as feels appropriate.
-                match (then_branch, else_branch) {
+                match (&then_branch.kind, &else_branch) {
                     (Block(then_body, then_expr), None) => {
                         let controls = vec![*u];
                         self.eval_block(then_body, then_expr, None, controls)?;
@@ -259,7 +259,7 @@ impl<'a> Interpreter<'a> {
         iter: &Value,
         body: &Expr,
     ) -> Result<Value, ErrorBuf> {
-        use Expr::{Block, Variable};
+        use ExprKind::{Block, Variable};
         use Lexeme::Ident;
 
         // Unwrap the data for now. I suspect we *don’t* want to be iterating over
@@ -269,7 +269,7 @@ impl<'a> Interpreter<'a> {
             _ => panic!(),
         };
 
-        match body {
+        match &body.kind {
             // NOTE it's not ideal that this accepts a Block that may return
             // something, then simply *ignores* the return value.
             Block(stmts, expr) => {
@@ -297,10 +297,10 @@ impl<'a> Interpreter<'a> {
 
     fn eval_let_inner(&mut self, lhs: &Expr, rhs: &Value, body: &Expr) -> Result<Value, ErrorBuf> {
         use {
-            Expr::{Block, Variable},
+            ExprKind::{Block, Variable},
             Lexeme::Ident,
         };
-        match (lhs, body) {
+        match (&lhs.kind, &body.kind) {
             (
                 Variable(Token {
                     lexeme: Ident(name),
@@ -328,8 +328,8 @@ impl<'a> Interpreter<'a> {
 
     /// Evaluate an expression
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, ErrorBuf> {
-        use Expr::*;
-        match expr {
+        use ExprKind::*;
+        match &expr.kind {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
@@ -653,7 +653,7 @@ impl<'a> Interpreter<'a> {
             None => unreachable!(), // An earlier typing pass can eliminate this case
             Some(Moveable::There(Nameable::Value(_))) => todo!(), // Should return an error
             Some(Moveable::Moved) => todo!(), // Should return a different error
-            // FIXME Ownership gets a little ugly here; let’s save ourself a
+            // FIXME Ownership gets a little ugly here; let’s save ourselves a
             // little trouble for now, although this clone *could* be quite
             // expensive.
             Some(Moveable::There(Nameable::Func(func))) => func.clone(),

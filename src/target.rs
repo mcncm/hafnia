@@ -229,8 +229,14 @@ pub mod latex {
         }
 
         fn insert_multiple(&mut self, gates: Vec<(&usize, String)>) {
-            // NOTE: is there a single iterator adapter in the standard library
-            // for getting both the min and max in one go?
+            // FIXME This methos is pretty unweildy and inelegant. It still
+            // doesn't always find the optimal layout, and its asymptotic isn't
+            // great. There's probably a lovely dynamic programming algorithm
+            // that fixes everything.
+
+            // NOTE: is there a single iterator
+            // adapter in the standard library for getting both the min and max
+            // in one go?
             let min = **gates.iter().map(|(wire, _)| wire).min().unwrap();
             let max = **gates.iter().map(|(wire, _)| wire).max().unwrap();
 
@@ -261,7 +267,7 @@ pub mod latex {
                 self.first_free[wire] = moment + 1;
             }
 
-            // FIXME We'll also do this suboptimally: we'll do a second pass
+            // We'll also do this suboptimally: we'll do a second pass
             // through the range, changing everything still free into Blocked.
             // We *could* do this in a single pass if we sorted `gates`. Note
             // that the range is *ex*clusive, because we can’t have the
@@ -269,9 +275,11 @@ pub mod latex {
             for wire in (min + 1)..max {
                 if self.arr[wire][moment] == LayoutState::None {
                     self.arr[wire][moment] = LayoutState::Blocked;
+                    if self.first_free[wire] == moment {
+                        self.first_free[wire] += 1;
+                    }
                 }
             }
-            // self.add_moment();
         }
     }
 
