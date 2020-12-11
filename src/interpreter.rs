@@ -7,7 +7,7 @@ use crate::parser::ParseError;
 use crate::qram::Qram;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
-use crate::types;
+use crate::types::{self, Type};
 use crate::{
     circuit::{Circuit, Gate, Qubit},
     functions::{Func, UserFunc},
@@ -163,14 +163,19 @@ impl<'a> Interpreter<'a> {
     /// defined in loops, they are redefined every time they are encountered. I
     /// think function definitions should maybe be resolved at some *earlier*
     /// time, before evaluation.
-    fn exec_fn(&mut self, name: &Token, params: &[Token], body: &Expr) -> Result<(), ErrorBuf> {
+    fn exec_fn(
+        &mut self,
+        name: &Token,
+        params: &[(Token, Type)],
+        body: &Expr,
+    ) -> Result<(), ErrorBuf> {
         let name = match &name.lexeme {
             Lexeme::Ident(name) => name.clone(),
             _ => unreachable!(),
         };
         let params = params
             .iter()
-            .map(|param| match &param.lexeme {
+            .map(|(param, _)| match &param.lexeme {
                 Lexeme::Ident(param_name) => param_name.clone(),
                 _ => unreachable!(),
             })
@@ -977,7 +982,7 @@ mod tests {
     fn simple_function() {
         let prog = r#"
         let x = ?false;
-        fn inv(y) {
+        fn inv(y: ?bool) {
             let y = ~y;
         } 
         inv(x);
@@ -1001,7 +1006,7 @@ mod tests {
     fn simple_function_multiple_statements() {
         let prog = r#"
         let x = ?false;
-        fn inv(y) {
+        fn inv(y: ?bool) {
             let y = ~y;
             let y = ~y;
         } 
@@ -1014,7 +1019,7 @@ mod tests {
     fn simple_function_with_return() {
         let prog = r#"
         let x = ?false;
-        fn inv(y) {
+        fn inv(y: ?bool) {
             ~y
         } 
         let x = inv(x);

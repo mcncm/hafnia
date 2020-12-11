@@ -2,6 +2,12 @@ use crate::token::Token;
 use crate::types::Type;
 use std::fmt;
 
+// Each of the AST items in this module is given as a wrapper struct (possibly
+// with a single field) enclosing an internal enum listing the alternatives for
+// that item. This pattern was borrowed from rustc itself, as I found that it
+// resolved the problem of a proliferation of AST types for each semantic
+// analysis pass.
+
 /// Expression node.
 #[derive(Debug, Clone)]
 pub struct Expr {
@@ -153,15 +159,20 @@ pub enum StmtKind {
         // destructuring possible. The same is true of other contexts in which
         // lvalues appear, as in the bound expression in a for loop.
         lhs: Box<Expr>,
-        // A type annotation, as in `let x: u8 = 0;`
+        /// A type annotation, as in `let x: u8 = 0;`
         ty: Option<Box<Type>>,
         // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
         // Stmt, it’s guaranteed to be a Block
         rhs: Box<Expr>,
     },
     Fn {
+        /// Function identifier
         name: Token,
-        params: Vec<Token>,
+        /// Function parameters consisting of name-type pairs
+        params: Vec<(Token, Type)>,
+        /// Return type of the function
+        typ: Option<Type>,
+        /// Body of the function; guaranteed to be a block.
         body: Box<Expr>,
         docstring: Option<String>,
     },

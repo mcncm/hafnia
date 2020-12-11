@@ -195,29 +195,50 @@ impl Parser {
 
     fn function_definition(&mut self) -> Result<Stmt, ParseError> {
         let name = self.consume_ident()?;
-        let mut params = vec![];
         self.consume(
             Lexeme::LParen,
             "expected '(' at beginning of function parameters.",
         )?;
-        if self.peek_lexeme() != Some(&Lexeme::RParen) {
-            loop {
-                params.push(self.consume_ident()?);
-                if !self.match_lexeme(Lexeme::Comma) {
-                    break;
-                }
-            }
-        }
-        self.consume(Lexeme::RParen, "expected closing ')' after parameters.")?;
+        let params = self.finish_function_params()?;
+        let typ = self.function_return_type()?;
         self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
         let body = Box::new(self.block_expr()?);
         let kind = StmtKind::Fn {
             name,
             params,
+            typ,
             body,
             docstring: None,
         };
         Ok(Stmt { kind })
+    }
+
+    fn finish_function_params(&mut self) -> Result<Vec<(Token, Type)>, ParseError> {
+        if self.match_lexeme(RParen) {
+            return Ok(vec![]);
+        }
+
+        let mut params = vec![self.function_param()?];
+        while self.match_lexeme(Comma) {
+            params.push(self.function_param()?);
+        }
+        self.consume(RParen, "Missing ')' at end of tuple type")?;
+
+        Ok(params)
+    }
+
+    fn function_param(&mut self) -> Result<(Token, Type), ParseError> {
+        let name = self.consume_ident()?;
+        self.consume(Colon, "Missing ':' in function parameter")?;
+        let ty = self.type_annotation()?;
+        Ok((name, ty))
+    }
+
+    fn function_return_type(&mut self) -> Result<Option<Type>, ParseError> {
+        if self.match_lexeme(MinusRAngle) {
+            return Ok(Some(self.type_annotation()?));
+        }
+        Ok(None)
     }
 
     /// Returns either an assignment statement, as in:
@@ -385,27 +406,18 @@ impl Parser {
     }
 
     fn type_annotation(&mut self) -> Result<Type, ParseError> {
+        // NOTE: This can be refactored nicely if there is a distinction between
+        // AST type annotations and language types.
         if self.peek_lexeme() == Some(&Question) {
-            self.tokens.next();
+            self.forward();
             let ty = match self.peek_lexeme() {
-                Some(Bool) => {
-                    self.tokens.next();
-                    Type::T_Q_Bool
-                }
-                Some(U8) => {
-                    self.tokens.next();
-                    Type::T_Q_U8
-                }
-                Some(U16) => {
-                    self.tokens.next();
-                    Type::T_Q_U16
-                }
-                Some(U32) => {
-                    self.tokens.next();
-                    Type::T_Q_U32
-                }
+                Some(Bool) => Type::T_Q_Bool,
+                Some(U8) => Type::T_Q_U8,
+                Some(U16) => Type::T_Q_U16,
+                Some(U32) => Type::T_Q_U32,
                 _ => todo!(), // Error for now
             };
+            self.forward();
             return Ok(ty);
         }
 
@@ -426,8 +438,14 @@ impl Parser {
                 self.tokens.next();
                 Type::T_U32
             }
-            Some(LBracket) => self.finish_array_type()?,
-            Some(LParen) => self.finish_tuple_type()?,
+            Some(LBracket) => {
+                self.tokens.next();
+                self.finish_array_type()?
+            }
+            Some(LParen) => {
+                self.tokens.next();
+                self.finish_tuple_type()?
+            }
             _ => todo!(),
         };
 
@@ -671,6 +689,8 @@ mod tests {
         };
     }
 
+    /// This macro compares puts a list of lexemes into a parser and compares
+    /// the output to a literal syntax tree.
     macro_rules! test_parser {
         // If there's only a list of lexemes, just try to parse it!
         ([$($lexeme:expr),+]) => {

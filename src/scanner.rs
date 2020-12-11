@@ -60,6 +60,7 @@ lazy_static! {
         m.insert(('.', '.'), Lexeme::DotDot);
         m.insert(('=', '='), Lexeme::EqualEqual);
         m.insert(('~', '='), Lexeme::TildeEqual);
+        m.insert(('-', '>'), Lexeme::MinusRAngle);
         m
     };
 }
