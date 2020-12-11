@@ -1,4 +1,5 @@
 use crate::token::Token;
+use crate::types::Type;
 use std::fmt;
 
 /// Expression node.
@@ -152,6 +153,8 @@ pub enum StmtKind {
         // destructuring possible. The same is true of other contexts in which
         // lvalues appear, as in the bound expression in a for loop.
         lhs: Box<Expr>,
+        // A type annotation, as in `let x: u8 = 0;`
+        ty: Option<Box<Type>>,
         // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
         // Stmt, it’s guaranteed to be a Block
         rhs: Box<Expr>,

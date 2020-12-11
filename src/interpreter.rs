@@ -7,6 +7,7 @@ use crate::parser::ParseError;
 use crate::qram::Qram;
 use crate::scanner::{ScanError, Scanner};
 use crate::token::{Lexeme, Token};
+use crate::types;
 use crate::{
     circuit::{Circuit, Gate, Qubit},
     functions::{Func, UserFunc},
@@ -90,7 +91,7 @@ impl<'a> Interpreter<'a> {
                 println!("{}", self.evaluate(&expr)?);
                 Ok(())
             },
-            Assn { lhs, rhs } => self.exec_assn(lhs, rhs),
+            Assn { lhs, rhs, .. } => self.exec_assn(lhs, rhs),
             For { bind, iter, body } => self.exec_for(bind, iter, body),
             Fn { name, params, body, .. } => self.exec_fn(name, params, body),
             Expr(expr) => {
@@ -619,7 +620,7 @@ impl<'a> Interpreter<'a> {
         mut ldata: Vec<Value>,
         mut rdata: Vec<Value>,
     ) -> Result<Value, ErrorBuf> {
-        use values::types::Type;
+        use types::Type;
         // Time for some heavy dynamic typing
         let val = match (ldata.len(), rdata.len()) {
             (0, 0) => Value::Array(vec![]),

@@ -4,7 +4,7 @@ use crate::token::{
     Lexeme::{self, *},
     Location, Token,
 };
-use crate::values::types::Type;
+use crate::types::Type;
 use errors::ErrorBuf;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -234,6 +234,11 @@ impl Parser {
     fn assignment(&mut self) -> Result<Stmt, ParseError> {
         self.forward();
         let lhs = Box::new(self.expression()?);
+        let ty = if self.match_lexeme(Colon) {
+            Some(Box::new(self.type_annotation()?))
+        } else {
+            None
+        };
         self.consume(Lexeme::Equal, "missing '=' in assignment")?;
         let rhs = Box::new(self.expression()?);
         // But this could still be a *let expression statement*. We have to check
@@ -245,7 +250,7 @@ impl Parser {
             Ok(StmtKind::Expr(Box::new(expr_kind.into())).into())
         } else {
             self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
-            Ok(StmtKind::Assn { lhs, rhs }.into())
+            Ok(StmtKind::Assn { lhs, rhs, ty }.into())
         }
     }
 
@@ -253,7 +258,7 @@ impl Parser {
         self.forward();
         let expr = self.expression()?;
         self.consume(Lexeme::Semicolon, "missing ';' after statement")?;
-        Ok(StmtKind::Print(Box::new(expr.into())).into())
+        Ok(StmtKind::Print(Box::new(expr)).into())
     }
 
     fn if_expr(&mut self) -> Result<Expr, ParseError> {
@@ -311,7 +316,7 @@ impl Parser {
                     if let Some(&Lexeme::RBrace) = self.peek_lexeme() {
                         final_expr = Some(expr);
                     } else {
-                        stmts.push(StmtKind::Expr(Box::new(expr.into())).into());
+                        stmts.push(StmtKind::Expr(Box::new(expr)).into());
                     }
                 }
             }
@@ -377,6 +382,78 @@ impl Parser {
         };
         self.consume(RBracket, "missing ']' at end of array")?;
         Ok(arr.into())
+    }
+
+    fn type_annotation(&mut self) -> Result<Type, ParseError> {
+        if self.peek_lexeme() == Some(&Question) {
+            self.tokens.next();
+            let ty = match self.peek_lexeme() {
+                Some(Bool) => {
+                    self.tokens.next();
+                    Type::T_Q_Bool
+                }
+                Some(U8) => {
+                    self.tokens.next();
+                    Type::T_Q_U8
+                }
+                Some(U16) => {
+                    self.tokens.next();
+                    Type::T_Q_U16
+                }
+                Some(U32) => {
+                    self.tokens.next();
+                    Type::T_Q_U32
+                }
+                _ => todo!(), // Error for now
+            };
+            return Ok(ty);
+        }
+
+        let ty = match self.peek_lexeme() {
+            Some(Bool) => {
+                self.tokens.next();
+                Type::T_Bool
+            }
+            Some(U8) => {
+                self.tokens.next();
+                Type::T_U8
+            }
+            Some(U16) => {
+                self.tokens.next();
+                Type::T_U16
+            }
+            Some(U32) => {
+                self.tokens.next();
+                Type::T_U32
+            }
+            Some(LBracket) => self.finish_array_type()?,
+            Some(LParen) => self.finish_tuple_type()?,
+            _ => todo!(),
+        };
+
+        Ok(ty)
+    }
+
+    /// Finish parsing an array type.
+    fn finish_array_type(&mut self) -> Result<Type, ParseError> {
+        let ty = self.type_annotation()?;
+        self.consume(RBracket, "missing ']' at end of array type")?;
+        Ok(Type::T_Array(Box::new(ty)))
+    }
+
+    /// Finish parsing a type that may be either a tuple or the unit type.
+    fn finish_tuple_type(&mut self) -> Result<Type, ParseError> {
+        let mut types = vec![];
+        while !self.match_lexeme(RParen) {
+            types.push(self.type_annotation()?);
+            self.consume(Comma, "Missing ',' in tuple type")?;
+        }
+        self.consume(RParen, "Missing ')' at end of tuple type")?;
+        if types.is_empty() {
+            Ok(Type::T_Unit)
+        } else {
+            Ok(Type::T_Tuple(types))
+        }
     }
 
     /// Call a function or index into an array.
@@ -513,7 +590,7 @@ impl Parser {
                 lhs = ExprKind::BinOp {
                     op: outer,
                     left: Box::new(lhs.into()),
-                    right: Box::new(rhs.into()),
+                    right: Box::new(rhs),
                 };
             } else {
                 break;

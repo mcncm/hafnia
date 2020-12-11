@@ -53,7 +53,7 @@ impl Func for UserFunc {
             .map(|(key, val)| (key.clone(), Nameable::Value(val.clone())))
             .collect();
 
-        match &(&*self.body).kind {
+        match &(self.body).kind {
             ExprKind::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), vec![]),
             _ => unreachable!(),
         }
