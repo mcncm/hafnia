@@ -17,8 +17,17 @@ pub fn history_path() -> Option<PathBuf> {
     cavy_dir().map(|dir| dir.join(Path::new(".history")))
 }
 
-/// Specifies what phase of the pipeline to stop at
+/// Encodes which passes to do, including when to stop and which passes to skip.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CompilerPhaseConfig {
+    /// Included because we might want to go on to evaluate, but skip
+    /// typechecking
+    pub typecheck: bool,
+    /// Specifies what phase of the pipeline to stop at
+    pub last_phase: CompilerPhase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompilerPhase {
     Tokenize,
     Parse,
@@ -31,5 +40,5 @@ pub enum CompilerPhase {
 pub struct Flags {
     pub debug: bool,
     pub opt: u8,
-    pub phase: CompilerPhase,
+    pub phase_config: CompilerPhaseConfig,
 }

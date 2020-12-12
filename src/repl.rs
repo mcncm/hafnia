@@ -3,6 +3,7 @@ use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::{Scanner, SourceCode};
+use crate::typecheck;
 use crate::{ast::StmtKind, sys};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -103,28 +104,34 @@ impl<'a> Repl<'a> {
     }
 
     fn exec_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
-        let source = SourceCode::from_src(input);
+        let phase = &self.flags.phase_config.last_phase;
 
+        if phase < &sys::CompilerPhase::Tokenize {
+            return Ok(());
+        }
+        let source = SourceCode::from_src(input);
         let tokens = Scanner::new(&source).tokenize()?;
-        if self.flags.phase <= sys::CompilerPhase::Tokenize {
+
+        if phase < &sys::CompilerPhase::Parse {
             // I wonder if there’s another way to factor this code so that I
             // don’t have to make these tests every time I handle input... Not
             // that it’s actually a performance bottleneck.
             println!("{:?}", tokens);
             return Ok(());
         }
+        let mut stmts = Parser::new(tokens).parse()?;
 
-        let stmts = Parser::new(tokens).parse()?;
-
-        if self.flags.phase <= sys::CompilerPhase::Parse {
+        if phase < &sys::CompilerPhase::Typecheck {
             println!("{:#?}", stmts);
             return Ok(());
         }
-
-        if self.flags.phase <= sys::CompilerPhase::Typecheck {
-            todo!();
+        if self.flags.phase_config.typecheck {
+            typecheck::typecheck(&mut stmts);
         }
 
+        if phase < &sys::CompilerPhase::Evaluate {
+            return Ok(());
+        }
         let len = stmts.len();
         for (n, stmt) in stmts.iter().enumerate() {
             if let StmtKind::Expr(expr) = &stmt.kind {

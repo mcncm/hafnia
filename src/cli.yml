@@ -45,15 +45,16 @@ args:
       short: d
       long: debug
       about: Runs the compiler in debug mode
+  - phase:
+      long: phase
+      required: false
+      value_name: PHASE
+      about: <PHASE> is the last phase of the compiler to run
+      possible_values:
+        - "tokenize"
+        - "parse"
+        - "typecheck"
+        - "evaluate"
   - typecheck:
       long: typecheck
-      about: Stop the compiler at the type-checking phase
-      conflicts_with: parse
-      conflicts_with: tokenize
-  - parse:
-      long: parse
-      about: Stop the compiler at the parsing phase
-      conflicts_with: tokenize
-  - tokenize:
-      long: tokenize
-      about: Stop the compiler at the lexing phase
+      about: Run the static type-checking pass

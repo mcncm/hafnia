@@ -20,14 +20,23 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     let debug = argmatches.is_present("debug");
 
     // Where should we cut the pipeline short?
-    let mut phase = sys::CompilerPhase::Evaluate;
-    if argmatches.is_present("typecheck") {
-        phase = sys::CompilerPhase::Typecheck;
-    } else if argmatches.is_present("parse") {
-        phase = sys::CompilerPhase::Parse;
-    } else if argmatches.is_present("tokenize") {
-        phase = sys::CompilerPhase::Tokenize;
-    }
+    let last_phase = match argmatches.value_of("phase") {
+        Some("tokenize") => sys::CompilerPhase::Tokenize,
+        Some("parse") => sys::CompilerPhase::Parse,
+        Some("typecheck") => sys::CompilerPhase::Typecheck,
+        Some("evaluate") => sys::CompilerPhase::Evaluate,
+        Some(_) => unreachable!(),
+        None => sys::CompilerPhase::Evaluate,
+    };
+
+    // If we've gone on to a late-enough pass, should we do the typechecking
+    // phase or skip it?
+    let typecheck = argmatches.is_present("typecheck");
+
+    let phase_config = sys::CompilerPhaseConfig {
+        last_phase,
+        typecheck,
+    };
 
     let opt = match argmatches.value_of("opt") {
         Some("0") => 0,
@@ -44,7 +53,11 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
         );
     }
 
-    sys::Flags { debug, opt, phase }
+    sys::Flags {
+        debug,
+        opt,
+        phase_config,
+    }
 }
 
 fn get_code(argmatches: &ArgMatches) -> Result<Option<SourceCode>, ErrorBuf> {
@@ -130,10 +143,15 @@ fn main() {
         // A source file was given and read without error
         Ok(Some(src)) => {
             let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));
-            let object_code = compile::compile(src, flags, &arch, target).unwrap_or_else(|errs| {
-                print!("{}", errs);
-                process::exit(1);
-            });
+            let object_code = compile::compile(src, flags, &arch, target)
+                .unwrap_or_else(|errs| {
+                    print!("{}", errs);
+                    process::exit(1);
+                })
+                .unwrap_or_else(|| {
+                    println!("Compiler produced no object code!");
+                    process::exit(0);
+                });
             let mut file = File::create(&object_path).unwrap();
             file.write_all(object_code.as_bytes()).unwrap();
             process::exit(0);

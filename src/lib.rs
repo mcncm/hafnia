@@ -18,5 +18,6 @@ pub mod scanner;
 pub mod sys;
 pub mod target;
 pub mod token;
+pub mod typecheck;
 pub mod types;
 pub mod values;
