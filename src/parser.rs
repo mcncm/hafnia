@@ -317,7 +317,7 @@ impl Parser {
         } else {
             // If there were no commas, we should just regard this as a pair of
             // grouping parentheses.
-            LValueKind::Group(Box::new(head)).into()
+            head
         };
         self.consume(RParen, "expected closing paren ')'")?;
         Ok(lvalue)
@@ -624,7 +624,7 @@ impl Parser {
         } else {
             // If there were no commas, we should have a single expression
             // followed by a close-paren, and return a group.
-            ExprKind::Group(Box::new(head)).into()
+            head
         };
         self.consume(RParen, "expected closing paren ')'")?;
         Ok(expr)

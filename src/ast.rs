@@ -51,7 +51,6 @@ pub enum ExprKind {
     },
     // Extensional arrays of the form [1, 2, 3]
     ExtArr(Vec<Expr>),
-    Group(Box<Expr>),
     Block(Vec<Stmt>, Option<Box<Expr>>),
     If {
         cond: Box<Expr>,
@@ -90,7 +89,6 @@ impl ExprKind {
             Tuple { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
-            Group(_) => true,
             Block(_, _) => false,
             If { .. } => false,
             Let { .. } => false,
@@ -111,7 +109,6 @@ impl fmt::Display for Expr {
             Tuple(items) => format!("'({:#?})", items),
             IntArr { item, reps } => format!("[{}; {}]", item, reps),
             ExtArr(items) => format!("[{:#?}]", items),
-            Group(expr) => format!("{}", expr),
             If {
                 cond,
                 then_branch,
@@ -207,7 +204,6 @@ pub enum LValueKind {
     Ident(Token),
     /// Sequence of the form (a, b, c)
     Tuple(Vec<LValue>),
-    Group(Box<LValue>),
 }
 
 impl fmt::Display for LValueKind {
@@ -219,9 +215,6 @@ impl fmt::Display for LValueKind {
             }
             Tuple(lvalues) => {
                 write!(f, "'({:?})", lvalues)
-            }
-            Group(lvalue) => {
-                write!(f, "'({})", lvalue)
             }
         }
     }

@@ -329,7 +329,6 @@ impl<'a> Interpreter<'a> {
             Tuple(items) => self.eval_tuple(items),
             IntArr { item, reps } => self.eval_int_arr(item, reps),
             ExtArr(items) => self.eval_ext_arr(items),
-            Group(expr) => self.evaluate(expr),
             If {
                 cond,
                 then_branch,
