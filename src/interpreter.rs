@@ -1,6 +1,6 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, LValue, LValueKind, Stmt, StmtKind};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
@@ -102,7 +102,7 @@ impl<'a> Interpreter<'a> {
     }
 
     #[rustfmt::skip]
-    fn exec_assn(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), ErrorBuf> {
+    fn exec_assn(&mut self, lhs: &LValue, rhs: &Expr) -> Result<(), ErrorBuf> {
         let rhs = self.evaluate(rhs)?;
         let bindings = self.destruct_bind(lhs, &rhs)?;
         for (name, val) in bindings {
@@ -114,7 +114,7 @@ impl<'a> Interpreter<'a> {
     /// Recursively build a set of bindings from a valid lvalue and rvalue.
     fn destruct_bind(
         &mut self,
-        lhs: &Expr,
+        lhs: &LValue,
         rhs: &Value,
     ) -> Result<HashMap<String, Nameable>, ErrorBuf> {
         Ok(self.destruct_bind_inner(lhs, rhs)?.into_iter().collect())
@@ -128,24 +128,23 @@ impl<'a> Interpreter<'a> {
     /// because it should perhaps be done in an earlier pass.
     fn destruct_bind_inner(
         &mut self,
-        lhs: &Expr,
+        lhs: &LValue,
         rhs: &Value,
     ) -> Result<Vec<(String, Nameable)>, ErrorBuf> {
-        use {ExprKind::Variable, Lexeme::Ident};
         let mut bindings = vec![];
 
         match (&lhs.kind, &rhs) {
             (
-                Variable(Token {
-                    lexeme: Ident(name),
+                LValueKind::Ident(Token {
+                    lexeme: Lexeme::Ident(name),
                     ..
                 }),
                 _,
             ) => {
                 bindings.push((name.clone(), Nameable::Value(rhs.clone())));
             }
-            (ExprKind::Seq(binders), Value::Array(values))
-            | (ExprKind::Seq(binders), Value::Tuple(values)) => {
+            (LValueKind::Tuple(binders), Value::Array(values))
+            | (LValueKind::Tuple(binders), Value::Tuple(values)) => {
                 if binders.len() != values.len() {
                     todo!(); // Should be an error
                 }
@@ -250,7 +249,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn exec_for(&mut self, bind: &Expr, iter: &Expr, body: &Expr) -> Result<(), ErrorBuf> {
+    fn exec_for(&mut self, bind: &LValue, iter: &Expr, body: &Expr) -> Result<(), ErrorBuf> {
         self.coevaluate(iter, &mut |self_, iter_val| {
             self_.eval_for_inner(bind, &iter_val, body)
         })?;
@@ -261,7 +260,7 @@ impl<'a> Interpreter<'a> {
     // expressions; we're just dumping the return values.
     fn eval_for_inner(
         &mut self,
-        bind: &Expr,
+        bind: &LValue,
         iter: &Value,
         body: &Expr,
     ) -> Result<Value, ErrorBuf> {
@@ -289,7 +288,7 @@ impl<'a> Interpreter<'a> {
         Ok(Value::Unit)
     }
 
-    fn eval_let(&mut self, lhs: &Expr, rhs: &Expr, body: &Expr) -> Result<Value, ErrorBuf> {
+    fn eval_let(&mut self, lhs: &LValue, rhs: &Expr, body: &Expr) -> Result<Value, ErrorBuf> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
         // checker rules by making a second mutable borrow.
@@ -301,30 +300,17 @@ impl<'a> Interpreter<'a> {
         })
     }
 
-    fn eval_let_inner(&mut self, lhs: &Expr, rhs: &Value, body: &Expr) -> Result<Value, ErrorBuf> {
-        use {
-            ExprKind::{Block, Variable},
-            Lexeme::Ident,
-        };
-        match (&lhs.kind, &body.kind) {
-            (
-                Variable(Token {
-                    lexeme: Ident(name),
-                    ..
-                }),
-                Block(stmts, expr),
-            ) => {
-                let mut bindings = HashMap::new();
-                // FIXME these `to_owned` and `clone` *shouldn't* be necessary.
-                bindings.insert(name.to_owned(), Nameable::Value(rhs.clone()));
-                self.eval_block(stmts, expr, Some(bindings), vec![])
-            }
-
-            (_, Block(_, _)) => {
-                panic!("Only support identifier lhs.");
-            }
-
-            (_, _) => unreachable!(),
+    fn eval_let_inner(
+        &mut self,
+        lhs: &LValue,
+        rhs: &Value,
+        body: &Expr,
+    ) -> Result<Value, ErrorBuf> {
+        use ExprKind::Block;
+        let bindings = self.destruct_bind(lhs, rhs)?;
+        match &body.kind {
+            Block(stmts, expr) => self.eval_block(stmts, expr, Some(bindings), vec![]),
+            _ => unreachable!(),
         }
     }
 
@@ -340,7 +326,7 @@ impl<'a> Interpreter<'a> {
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
             Variable(variable) => self.eval_variable(variable),
-            Seq(items) => self.eval_seq(items),
+            Tuple(items) => self.eval_tuple(items),
             IntArr { item, reps } => self.eval_int_arr(item, reps),
             ExtArr(items) => self.eval_ext_arr(items),
             Group(expr) => self.evaluate(expr),
@@ -430,7 +416,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_seq(&mut self, items: &[Expr]) -> Result<Value, ErrorBuf> {
+    fn eval_tuple(&mut self, items: &[Expr]) -> Result<Value, ErrorBuf> {
         let mut data = vec![];
         for item in items.iter() {
             data.push(self.evaluate(item)?);

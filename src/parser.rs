@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, LValue, LValueKind, Stmt, StmtKind};
 use crate::errors;
 use crate::token::{
     Lexeme::{self, *},
@@ -254,7 +254,7 @@ impl Parser {
     /// ```
     fn assignment(&mut self) -> Result<Stmt, ParseError> {
         self.forward();
-        let lhs = Box::new(self.expression()?);
+        let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
             Some(Box::new(self.type_annotation()?))
         } else {
@@ -273,6 +273,54 @@ impl Parser {
             self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
             Ok(StmtKind::Assn { lhs, rhs, ty }.into())
         }
+    }
+
+    /// Recursively build an LValue
+    fn lvalue(&mut self) -> Result<LValue, ParseError> {
+        // TODO should check that all names are unique
+        match self.peek_lexeme() {
+            Some(Lexeme::Ident(_)) => Ok(LValueKind::Ident(self.tokens.next().unwrap()).into()),
+            Some(LParen) => {
+                self.forward();
+                self.finish_lvalue_tuple()
+            }
+            _ => todo!(),
+        }
+    }
+
+    /// Having already encoundered an open-paren, finish building the lvalue.
+    /// This algorithm is consistent with that for tuple expressions: nonempty
+    /// tuple patterns may have a trailing comma if they contain more than one
+    /// element; they must have a trailing comma if they have exactly one
+    /// element. This is the same as Rust.
+    ///
+    /// NOTE We should inline this because it’s only called from `lvalue`, with which
+    /// it is mutually recursive.
+    #[inline(always)]
+    fn finish_lvalue_tuple(&mut self) -> Result<LValue, ParseError> {
+        if self.match_lexeme(Lexeme::RParen) {
+            return Ok(LValueKind::Tuple(vec![]).into());
+        }
+
+        let head = self.lvalue()?;
+        let lvalue = if let Some(&Comma) = self.peek_lexeme() {
+            // Tuples with one element should have a single trailing comma to
+            // disambiguate from groups.
+            let mut items = vec![head];
+            while self.match_lexeme(Comma) {
+                if let Some(&RParen) = &self.peek_lexeme() {
+                    break;
+                }
+                items.push(self.lvalue()?);
+            }
+            LValueKind::Tuple(items).into()
+        } else {
+            // If there were no commas, we should just regard this as a pair of
+            // grouping parentheses.
+            LValueKind::Group(Box::new(head)).into()
+        };
+        self.consume(RParen, "expected closing paren ')'")?;
+        Ok(lvalue)
     }
 
     fn print_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -310,7 +358,7 @@ impl Parser {
 
     fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
         self.forward();
-        let bind = Box::new(self.expression()?);
+        let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In, "expected 'in' in 'for' statement")?;
         let iter = Box::new(self.expression()?);
         self.consume(Lexeme::LBrace, "expected '{' opening 'for' body.")?;
@@ -558,7 +606,7 @@ impl Parser {
     fn finish_group(&mut self) -> Result<Expr, ParseError> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
         if self.match_lexeme(Lexeme::RParen) {
-            return Ok(ExprKind::Seq(vec![]).into());
+            return Ok(ExprKind::Tuple(vec![]).into());
         }
 
         let head = self.expression()?;
@@ -572,7 +620,7 @@ impl Parser {
                 }
                 items.push(self.expression()?);
             }
-            ExprKind::Seq(items).into()
+            ExprKind::Tuple(items).into()
         } else {
             // If there were no commas, we should have a single expression
             // followed by a close-paren, and return a group.

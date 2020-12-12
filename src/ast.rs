@@ -43,7 +43,7 @@ pub enum ExprKind {
     Literal(Token),
     Variable(Token),
     // Sequences of the form (1, 2, 3)
-    Seq(Vec<Expr>),
+    Tuple(Vec<Expr>),
     // Intensional arrays of the form [1; 4]
     IntArr {
         item: Box<Expr>,
@@ -59,7 +59,7 @@ pub enum ExprKind {
         else_branch: Option<Box<Expr>>,
     },
     Let {
-        lhs: Box<Expr>,
+        lhs: Box<LValue>,
         rhs: Box<Expr>,
         body: Box<Expr>,
     },
@@ -87,7 +87,7 @@ impl ExprKind {
             UnOp { .. } => true,
             Literal(_) => true,
             Variable(_) => true,
-            Seq { .. } => true,
+            Tuple { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
             Group(_) => true,
@@ -108,7 +108,7 @@ impl fmt::Display for Expr {
             UnOp { op, right } => format!("({} {})", op, right),
             Literal(token) => format!("{}", token),
             Variable(token) => format!("{}", token),
-            Seq(items) => format!("'({:#?})", items),
+            Tuple(items) => format!("'({:#?})", items),
             IntArr { item, reps } => format!("[{}; {}]", item, reps),
             ExtArr(items) => format!("[{:#?}]", items),
             Group(expr) => format!("{}", expr),
@@ -158,7 +158,7 @@ pub enum StmtKind {
         // lvalues might not just be names! In particular, we would like to make
         // destructuring possible. The same is true of other contexts in which
         // lvalues appear, as in the bound expression in a for loop.
-        lhs: Box<Expr>,
+        lhs: Box<LValue>,
         /// A type annotation, as in `let x: u8 = 0;`
         ty: Option<Box<Type>>,
         // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
@@ -177,8 +177,52 @@ pub enum StmtKind {
         docstring: Option<String>,
     },
     For {
-        bind: Box<Expr>,
+        bind: Box<LValue>,
         iter: Box<Expr>,
         body: Box<Expr>,
     },
+}
+
+/// Something that can be assigned to
+#[derive(Debug, Clone)]
+pub struct LValue {
+    pub kind: LValueKind,
+}
+
+impl fmt::Display for LValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use LValueKind::*;
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl From<LValueKind> for LValue {
+    fn from(kind: LValueKind) -> Self {
+        Self { kind }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LValueKind {
+    Ident(Token),
+    /// Sequence of the form (a, b, c)
+    Tuple(Vec<LValue>),
+    Group(Box<LValue>),
+}
+
+impl fmt::Display for LValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use LValueKind::*;
+        match &self {
+            Ident(token) => {
+                write!(f, "{}", token)
+            }
+            Tuple(lvalues) => {
+                write!(f, "'({:?})", lvalues)
+            }
+            Group(lvalue) => {
+                write!(f, "'({})", lvalue)
+            }
+        }
+    }
 }
