@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, LValue, LValueKind, Stmt, StmtKind};
+use crate::ast::{Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
 use crate::errors;
 use crate::token::{
     Lexeme::{self, *},
@@ -58,13 +58,6 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
-
-/// A generic binary enum (which for some reason isn't in the standard library.
-/// In this module it's used when returning either an expression or a statement.
-pub enum Either<L, R> {
-    Left(L),
-    Right(R),
-}
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
@@ -155,45 +148,41 @@ impl Parser {
 
     /// A declaration, which is either a definition or a statement
     pub fn declaration(&mut self) -> Result<Option<Stmt>, ParseError> {
+        if self.peek_lexeme() == None {
+            return Ok(None);
+        }
+
         // TODO Check for assignment (currently in `self.statement`)
         if self.match_lexeme(Lexeme::Fn) {
-            Ok(Some(self.function_definition()?))
+            let def = self.function_definition()?;
+            let stmt = StmtKind::Item(def).into();
+            Ok(Some(stmt))
         } else {
-            self.statement()
+            Ok(Some(self.statement()?))
         }
     }
 
     /// Produces a statement
-    pub fn statement(&mut self) -> Result<Option<Stmt>, ParseError> {
-        match self.stmt_or_expr() {
-            Ok(Some(Either::Left(stmt))) => Ok(Some(stmt)),
-            Ok(Some(Either::Right(expr))) => {
-                // If we got an expression, return an expression statement
-                if expr.kind.requires_semicolon() {
-                    self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
-                }
-                let kind = StmtKind::Expr(Box::new(expr));
-                let stmt = Stmt { kind };
-                Ok(Some(stmt))
-            }
-            // Any other combination of Some/None, Ok/Err: propagate it
-            Ok(None) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Produces either a statement or a (bare) expression.
-    pub fn stmt_or_expr(&mut self) -> Result<Option<Either<Stmt, Expr>>, ParseError> {
+    pub fn statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_lexeme() {
-            Some(Print) => Ok(Some(Either::Left(self.print_stmt()?))),
-            Some(Let) => Ok(Some(Either::Left(self.assignment()?))),
-            Some(For) => Ok(Some(Either::Left(self.for_stmt()?))),
-            None => Ok(None),
-            _ => Ok(Some(Either::Right(self.expression()?))),
+            Some(Print) => Ok(self.print_stmt()?),
+            Some(Let) => Ok(self.local()?),
+            // Must be an expression next!
+            Some(_) => {
+                let expr = Box::new(self.expression()?);
+                if expr.kind.requires_semicolon() & self.match_lexeme(Semicolon) {
+                    Ok(StmtKind::ExprSemi(expr).into())
+                } else {
+                    Ok(StmtKind::Expr(expr).into())
+                }
+            }
+            // You should always have another token available because this is
+            // called from within `declaration`.
+            None => unreachable!(),
         }
     }
 
-    fn function_definition(&mut self) -> Result<Stmt, ParseError> {
+    fn function_definition(&mut self) -> Result<Item, ParseError> {
         let name = self.consume_ident()?;
         self.consume(
             Lexeme::LParen,
@@ -202,15 +191,15 @@ impl Parser {
         let params = self.finish_function_params()?;
         let typ = self.function_return_type()?;
         self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
-        let body = Box::new(self.block_expr()?);
-        let kind = StmtKind::Fn {
+        let body = Box::new(self.block()?);
+        let kind = ItemKind::Fn {
             name,
             params,
             typ,
             body,
             docstring: None,
         };
-        Ok(Stmt { kind })
+        Ok(Item { kind })
     }
 
     fn finish_function_params(&mut self) -> Result<Vec<(Token, Type)>, ParseError> {
@@ -252,7 +241,7 @@ impl Parser {
     ///     x + 1
     /// }
     /// ```
-    fn assignment(&mut self) -> Result<Stmt, ParseError> {
+    fn local(&mut self) -> Result<Stmt, ParseError> {
         self.forward();
         let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
@@ -266,12 +255,12 @@ impl Parser {
         // for this case.
         if self.match_lexeme(Lexeme::In) {
             self.consume(Lexeme::LBrace, "expected '{' opening 'let' expression.")?;
-            let body = Box::new(self.block_expr()?);
+            let body = Box::new(self.block()?);
             let expr_kind = ExprKind::Let { lhs, rhs, body };
             Ok(StmtKind::Expr(Box::new(expr_kind.into())).into())
         } else {
             self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
-            Ok(StmtKind::Assn { lhs, rhs, ty }.into())
+            Ok(StmtKind::Local { lhs, rhs, ty }.into())
         }
     }
 
@@ -338,7 +327,7 @@ impl Parser {
             Lexeme::LBrace,
             "expected '{' opening direct branch of conditional.",
         )?;
-        let then_branch = Box::new(self.block_expr()?);
+        let then_branch = Box::new(self.block()?);
 
         let mut else_branch = None;
         if self.match_lexeme(Lexeme::Else) {
@@ -346,7 +335,7 @@ impl Parser {
                 Lexeme::LBrace,
                 "expected '{' opening indirect branch of conditional.",
             )?;
-            else_branch = Some(Box::new(self.block_expr()?));
+            else_branch = Some(Box::new(self.block()?));
         }
         let kind = ExprKind::If {
             cond,
@@ -356,42 +345,31 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn for_expr(&mut self) -> Result<Expr, ParseError> {
         self.forward();
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In, "expected 'in' in 'for' statement")?;
         let iter = Box::new(self.expression()?);
         self.consume(Lexeme::LBrace, "expected '{' opening 'for' body.")?;
-        let body = Box::new(self.block_expr()?);
-        let kind = StmtKind::For { bind, iter, body };
+        let body = Box::new(self.block()?);
+        let kind = ExprKind::For { bind, iter, body };
         Ok(kind.into())
     }
 
     fn block_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut stmts = vec![];
-        let mut final_expr = None;
+        Ok(ExprKind::Block(self.block()?).into())
+    }
+
+    fn block(&mut self) -> Result<Block, ParseError> {
+        let mut stmts: Vec<Stmt> = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
             if lexeme == &Lexeme::RBrace {
                 break;
             }
-            // Unwrap: should be safe because we cheked already that there is
-            // another lexeme, so we should get either some declaration or an
-            // error.
-            match self.stmt_or_expr()?.unwrap() {
-                Either::Left(stmt) => {
-                    stmts.push(stmt);
-                }
-                Either::Right(expr) => {
-                    if let Some(&Lexeme::RBrace) = self.peek_lexeme() {
-                        final_expr = Some(expr);
-                    } else {
-                        stmts.push(StmtKind::Expr(Box::new(expr)).into());
-                    }
-                }
-            }
+            stmts.push(self.statement()?);
         }
         self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
-        Ok(ExprKind::Block(stmts, final_expr.map(Box::new)).into())
+        Ok(Block { stmts })
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -403,6 +381,7 @@ impl Parser {
     pub fn expression(&mut self) -> Result<Expr, ParseError> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
+            Some(Lexeme::For) => self.for_expr(),
             Some(Lexeme::LBrace) => self.block_expr(),
             Some(_) => {
                 let lhs = self.unary()?;
@@ -702,7 +681,6 @@ mod tests {
                     test_s_expr! { *right, $right };
                 }
                 _ => {
-                    println!("ast: {}", $ast);
                     panic!("AST is not a BinOp!");
                 }
             }
@@ -715,7 +693,6 @@ mod tests {
                     test_s_expr! { *right, $right };
                 }
                 _ => {
-                    println!("ast: {}", $ast);
                     panic!("AST is not a UnOp!");
                 }
             }
@@ -730,7 +707,6 @@ mod tests {
                     assert_eq!(token.lexeme, $literal);
                 }
                 _ => {
-                    println!("ast: {}, expr: {}", $ast, $literal);
                     panic!("AST is not a Literal or Ident!");
                 }
             }

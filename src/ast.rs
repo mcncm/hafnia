@@ -51,16 +51,21 @@ pub enum ExprKind {
     },
     // Extensional arrays of the form [1, 2, 3]
     ExtArr(Vec<Expr>),
-    Block(Vec<Stmt>, Option<Box<Expr>>),
+    Block(Block),
     If {
         cond: Box<Expr>,
-        then_branch: Box<Expr>,
-        else_branch: Option<Box<Expr>>,
+        then_branch: Box<Block>,
+        else_branch: Option<Box<Block>>,
+    },
+    For {
+        bind: Box<LValue>,
+        iter: Box<Expr>,
+        body: Box<Block>,
     },
     Let {
         lhs: Box<LValue>,
         rhs: Box<Expr>,
-        body: Box<Expr>,
+        body: Box<Block>,
     },
     Call {
         // For the time being, functions are not values, so the callee is not an
@@ -89,8 +94,9 @@ impl ExprKind {
             Tuple { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
-            Block(_, _) => false,
+            Block(_) => false,
             If { .. } => false,
+            For { .. } => false,
             Let { .. } => false,
             Call { .. } => true,
             Index { .. } => true,
@@ -98,40 +104,10 @@ impl ExprKind {
     }
 }
 
-impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ExprKind::*;
-        let s_expr = match &self.kind {
-            BinOp { left, op, right } => format!("({} {} {})", op, left, right),
-            UnOp { op, right } => format!("({} {})", op, right),
-            Literal(token) => format!("{}", token),
-            Variable(token) => format!("{}", token),
-            Tuple(items) => format!("'({:#?})", items),
-            IntArr { item, reps } => format!("[{}; {}]", item, reps),
-            ExtArr(items) => format!("[{:#?}]", items),
-            If {
-                cond,
-                then_branch,
-                else_branch,
-            } => format!("(if {} {} {:#?})", cond, then_branch, else_branch),
-            Let { lhs, rhs, body } => format!("(let ({} {}) {})", lhs, rhs, body),
-            Block(stmts, expr) => match expr {
-                Some(expr) => {
-                    format!("(block {:?} {})", stmts, *expr)
-                }
-                None => {
-                    format!("(block {:?})", stmts)
-                }
-            },
-            Call { callee, args, .. } => {
-                format!("({} {:?})", callee, args)
-            }
-            Index { head, index, .. } => {
-                format!("(nth {} {})", head, index)
-            }
-        };
-        write!(f, "{}", s_expr)
-    }
+// A brace-delimited code block
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
 }
 
 /// Statement node.
@@ -150,18 +126,34 @@ impl From<StmtKind> for Stmt {
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     Print(Box<Expr>),
+    /// An expression without a semicolon.
     Expr(Box<Expr>),
-    Assn {
-        // lvalues might not just be names! In particular, we would like to make
-        // destructuring possible. The same is true of other contexts in which
-        // lvalues appear, as in the bound expression in a for loop.
+    /// An expression with a semicolon.
+    ExprSemi(Box<Expr>),
+    /// A variable declaration. The nomenclature here has been taken from
+    /// rustc’s ast.rs.
+    Local {
+        /// lvalues might not just be names! In particular, we would like to make
+        /// destructuring possible. The same is true of other contexts in which
+        /// lvalues appear, as in the bound expression in a for loop.
         lhs: Box<LValue>,
         /// A type annotation, as in `let x: u8 = 0;`
         ty: Option<Box<Type>>,
-        // This should really be an Either<Box<Expr>, Box<Stmt>> where if it’s a
-        // Stmt, it’s guaranteed to be a Block
         rhs: Box<Expr>,
     },
+    Item(Item),
+}
+
+/// An item. For now this wrapper doesn't do anything, but it does make this AST
+/// node more symmetric with respect to the others; future refactoring will also
+/// be easier, if more fields are added.
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub kind: ItemKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum ItemKind {
     Fn {
         /// Function identifier
         name: Token,
@@ -170,13 +162,8 @@ pub enum StmtKind {
         /// Return type of the function
         typ: Option<Type>,
         /// Body of the function; guaranteed to be a block.
-        body: Box<Expr>,
+        body: Box<Block>,
         docstring: Option<String>,
-    },
-    For {
-        bind: Box<LValue>,
-        iter: Box<Expr>,
-        body: Box<Expr>,
     },
 }
 
@@ -184,13 +171,6 @@ pub enum StmtKind {
 #[derive(Debug, Clone)]
 pub struct LValue {
     pub kind: LValueKind,
-}
-
-impl fmt::Display for LValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use LValueKind::*;
-        write!(f, "{}", self.kind)
-    }
 }
 
 impl From<LValueKind> for LValue {
@@ -204,18 +184,4 @@ pub enum LValueKind {
     Ident(Token),
     /// Sequence of the form (a, b, c)
     Tuple(Vec<LValue>),
-}
-
-impl fmt::Display for LValueKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use LValueKind::*;
-        match &self {
-            Ident(token) => {
-                write!(f, "{}", token)
-            }
-            Tuple(lvalues) => {
-                write!(f, "'({:?})", lvalues)
-            }
-        }
-    }
 }

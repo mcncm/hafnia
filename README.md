@@ -11,7 +11,8 @@ Cavy is a little imperative programming language for quantum computers.
 
 For everyday programmers, it's designed to be accessible without cheating you
 out of correctness. For working scientists, it's meant to give you more powerful
-tools of abstraction than you're likely used to.
+tools of abstraction than you're likely used to, and aspires to run on any
+platform you might need.
 
 You'll feel right at home here if you're familiar with Rust, but Cavy is a much
 simpler language. The compiler generates code in multiple executable and
@@ -22,9 +23,9 @@ language. It even has an [Emacs mode](https://github.com/mcncm/cavy-mode)!
 
 This is not the only quantum programming language out there. Both academic and
 corporate researchers have written their own, some of which I've drawn
-inspiration from. For the most part, the existing options are a good deal harder
-to use. Some are not at all abstracted from the quantum circuit model. Some are
-closely tied to one platform. Many are either embedded in some difficult
+inspiration from. For the most part, I find the existing options harder to use.
+Some are not at all abstracted from the quantum circuit model. Some are closely
+tied to one platform. Many are either embedded in some difficult
 metalanguage<sup>1</sup>, or are better understood as bare-bones
 circuit-building libraries. They're all perfectly nice, though--I just wanted
 one with Cavy's features! I hope you enjoy it, too.
@@ -36,7 +37,7 @@ documented yet.**
 [1] Cavy can also be used in this way, but need not be!
 
 # Examples
-Because Cavy is a small language, so we can get the gist of it by looking at
+Because Cavy is a small language, we can get the gist of it by looking at
 some simple examples. These are also meant to teach the major points of
 departure of quantum mechanics from the classical intuition of most programmers.
 
@@ -65,11 +66,11 @@ terminological coincidence (or is it?), this is exactly the
 quantum states by the
 [linearity](https://en.wikipedia.org/wiki/Quantum_superposition) of quantum
 mechanics. In Cavy, the _relevance_ (must-use) constraint is relaxed; as in
-Rust, values are "dropped" when they go out of scope. However, Cavy imposes an
-additional rule, which is that linear variables _have no concrete value_ that
-you can interact with until the variable is unwrapped in a specific way. If
-this were not so, it would cause all kinds of physical paradoxes, and we don't
-want to break the universe--we're just here to program!
+Rust, values are "dropped" when they go out of scope. However, we’re constrained
+by an extra rule, that linear values _have no concrete value_ until they’re
+unwrapped in a specific way. If this were not so, it would cause all kinds of
+physical paradoxes, and we don't want to break the universe--we're just here to
+program!
 
 Next is the `split` builtin function, which splits the wavefunction of the
 just-initialized qubyte into an equal superposition of quantum sates |0⟩ + |1⟩ +
@@ -99,7 +100,7 @@ q = split(q);          // Branch it... again?
 let c = !q;
 ```
 
-If acting on a qubit with `split` were like flipping a coin, This program's
+If acting on a qubit with `split` were like flipping a coin, this program's
 output would be a random bit, since a coin flipped twice still has even odds of
 landing heads or tails. But quantum randomness is not like classical randomness.
 In fact, the output of this program is *always* `false`. When the second `split`

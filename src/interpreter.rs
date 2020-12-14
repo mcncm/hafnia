@@ -1,6 +1,6 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Expr, ExprKind, LValue, LValueKind, Stmt, StmtKind};
+use crate::ast::{Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
@@ -91,18 +91,26 @@ impl<'a> Interpreter<'a> {
                 println!("{}", self.evaluate(&expr)?);
                 Ok(())
             },
-            Assn { lhs, rhs, .. } => self.exec_assn(lhs, rhs),
-            For { bind, iter, body } => self.exec_for(bind, iter, body),
-            Fn { name, params, body, .. } => self.exec_fn(name, params, body),
-            Expr(expr) => {
+            Local { lhs, rhs, .. } => self.exec_local(lhs, rhs),
+            Item(item) => self.exec_item(item),
+            Expr(expr) | ExprSemi(expr) => {
                 self.evaluate(expr)?;
                 Ok(())
             }
         }
     }
 
+    fn exec_item(&mut self, item: &Item) -> Result<(), ErrorBuf> {
+        match &item.kind {
+            ItemKind::Fn {
+                name, params, body, ..
+            } => self.exec_fn(name, params, body),
+        }
+    }
+
+    /// Create a local binnnding
     #[rustfmt::skip]
-    fn exec_assn(&mut self, lhs: &LValue, rhs: &Expr) -> Result<(), ErrorBuf> {
+    fn exec_local(&mut self, lhs: &LValue, rhs: &Expr) -> Result<(), ErrorBuf> {
         let rhs = self.evaluate(rhs)?;
         let bindings = self.destruct_bind(lhs, &rhs)?;
         for (name, val) in bindings {
@@ -166,7 +174,7 @@ impl<'a> Interpreter<'a> {
         &mut self,
         name: &Token,
         params: &[(Token, Type)],
-        body: &Expr,
+        body: &Block,
     ) -> Result<(), ErrorBuf> {
         let name = match &name.lexeme {
             Lexeme::Ident(name) => name.clone(),
@@ -195,8 +203,8 @@ impl<'a> Interpreter<'a> {
     fn eval_if(
         &mut self,
         cond: &Expr,
-        then_branch: &Expr,
-        else_branch: &Option<Box<Expr>>,
+        then_branch: &Block,
+        else_branch: &Option<Box<Block>>,
     ) -> Result<Value, ErrorBuf> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
@@ -212,10 +220,9 @@ impl<'a> Interpreter<'a> {
     fn eval_if_inner(
         &mut self,
         cond_val: &Value,
-        then_branch: &Expr,
-        else_branch: &Option<Box<Expr>>,
+        then_branch: &Block,
+        else_branch: &Option<Box<Block>>,
     ) -> Result<Value, ErrorBuf> {
-        use ExprKind::Block;
         match cond_val {
             // FIXME This is less than half of an implementation!
             Value::Q_Bool(u) => {
@@ -225,10 +232,10 @@ impl<'a> Interpreter<'a> {
                 // the same type, and it might only fail contingently at
                 // runtime. Also, there isn’t as strong of a distinction between
                 // If statements and If expressions as feels appropriate.
-                match (&then_branch.kind, &else_branch) {
-                    (Block(then_body, then_expr), None) => {
+                match &else_branch {
+                    None => {
                         let controls = vec![*u];
-                        self.eval_block(then_body, then_expr, None, controls)?;
+                        self.eval_block(then_branch, None, controls)?;
                         Ok(Value::Unit)
                     }
                     _ => {
@@ -238,9 +245,9 @@ impl<'a> Interpreter<'a> {
             }
             Value::Bool(_) => {
                 if cond_val.is_truthy() {
-                    self.evaluate(then_branch)
+                    self.eval_block(then_branch, None, vec![])
                 } else if let Some(else_branch) = else_branch {
-                    self.evaluate(else_branch)
+                    self.eval_block(else_branch, None, vec![])
                 } else {
                     Ok(Value::Unit)
                 }
@@ -249,11 +256,11 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn exec_for(&mut self, bind: &LValue, iter: &Expr, body: &Expr) -> Result<(), ErrorBuf> {
+    fn eval_for(&mut self, bind: &LValue, iter: &Expr, body: &Block) -> Result<Value, ErrorBuf> {
         self.coevaluate(iter, &mut |self_, iter_val| {
             self_.eval_for_inner(bind, &iter_val, body)
         })?;
-        Ok(())
+        Ok(Value::Unit)
     }
 
     // Yes, this one is called `eval` because the blocks are actually
@@ -262,7 +269,7 @@ impl<'a> Interpreter<'a> {
         &mut self,
         bind: &LValue,
         iter: &Value,
-        body: &Expr,
+        body: &Block,
     ) -> Result<Value, ErrorBuf> {
         use ExprKind::{Block, Variable};
         use Lexeme::Ident;
@@ -274,21 +281,14 @@ impl<'a> Interpreter<'a> {
             _ => panic!(),
         };
 
-        match &body.kind {
-            // NOTE it's not ideal that this accepts a Block that may return
-            // something, then simply *ignores* the return value.
-            Block(stmts, expr) => {
-                for item in iter.iter() {
-                    let bindings = self.destruct_bind(bind, item)?;
-                    self.eval_block(stmts, expr, Some(bindings), vec![])?;
-                }
-            }
-            _ => panic!("Violated a typing invariant"),
-        };
+        for item in iter.iter() {
+            let bindings = self.destruct_bind(bind, item)?;
+            self.eval_block(&body, Some(bindings), vec![])?;
+        }
         Ok(Value::Unit)
     }
 
-    fn eval_let(&mut self, lhs: &LValue, rhs: &Expr, body: &Expr) -> Result<Value, ErrorBuf> {
+    fn eval_let(&mut self, lhs: &LValue, rhs: &Expr, body: &Block) -> Result<Value, ErrorBuf> {
         // Note that `self` is passed as a parameter to the closure, rather than
         // captured from the environment. The latter would violate the borrow
         // checker rules by making a second mutable borrow.
@@ -304,14 +304,11 @@ impl<'a> Interpreter<'a> {
         &mut self,
         lhs: &LValue,
         rhs: &Value,
-        body: &Expr,
+        body: &Block,
     ) -> Result<Value, ErrorBuf> {
         use ExprKind::Block;
         let bindings = self.destruct_bind(lhs, rhs)?;
-        match &body.kind {
-            Block(stmts, expr) => self.eval_block(stmts, expr, Some(bindings), vec![]),
-            _ => unreachable!(),
-        }
+        self.eval_block(&body, Some(bindings), vec![])
     }
 
     ///////////////////////////
@@ -334,8 +331,9 @@ impl<'a> Interpreter<'a> {
                 then_branch,
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
+            For { bind, iter, body } => self.eval_for(bind, iter, body),
             Let { lhs, rhs, body } => self.eval_let(lhs, rhs, body),
-            Block(stmts, expr) => self.eval_block(stmts, expr, None, vec![]),
+            Block(block) => self.eval_block(block, None, vec![]),
             Call { callee, args, .. } => self.eval_call(callee, args),
             Index { head, index, .. } => self.eval_index(head, index),
         }
@@ -346,28 +344,37 @@ impl<'a> Interpreter<'a> {
     /// of the compiler API.
     pub fn eval_block(
         &mut self,
-        stmts: &[Stmt],
-        expr: &Option<Box<Expr>>,
+        block: &Block,
         bindings: Option<HashMap<Key, Nameable>>,
         controls: Vec<Qubit>,
     ) -> Result<Value, ErrorBuf> {
         self.env.open_scope(bindings, controls);
-        let val = self.eval_block_inner(stmts, expr);
+        let val = self.eval_block_inner(&block.stmts);
         self.env.close_scope();
         val
     }
 
-    fn eval_block_inner(
-        &mut self,
-        stmts: &[Stmt],
-        expr: &Option<Box<Expr>>,
-    ) -> Result<Value, ErrorBuf> {
-        for stmt in stmts.iter() {
+    fn eval_block_inner(&mut self, stmts: &[Stmt]) -> Result<Value, ErrorBuf> {
+        let (last, rest) = match stmts.split_last() {
+            Some((last, rest)) => (last, rest),
+            None => {
+                return Ok(Value::Unit);
+            }
+        };
+
+        for stmt in rest.iter() {
             self.execute(stmt)?;
         }
-        match expr {
-            Some(expr) => self.evaluate(expr),
-            None => Ok(Value::Unit),
+
+        match &last.kind {
+            StmtKind::Expr(expr) => {
+                let value = self.evaluate(expr)?;
+                Ok(value)
+            }
+            _ => {
+                self.execute(last)?;
+                Ok(Value::Unit)
+            }
         }
     }
 

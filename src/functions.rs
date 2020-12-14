@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expr, ExprKind},
+    ast::{Block, Expr, ExprKind},
     environment::{Key, Nameable},
     errors::ErrorBuf,
     interpreter::Interpreter,
@@ -27,7 +27,7 @@ pub trait Func: Debug {
 #[derive(Debug, Clone)]
 pub struct UserFunc {
     pub params: Vec<String>,
-    pub body: Box<Expr>,
+    pub body: Box<Block>,
     pub doc: Option<String>,
 }
 
@@ -53,10 +53,7 @@ impl Func for UserFunc {
             .map(|(key, val)| (key.clone(), Nameable::Value(val.clone())))
             .collect();
 
-        match &(self.body).kind {
-            ExprKind::Block(body, expr) => interp.eval_block(&body, &expr, Some(bindings), vec![]),
-            _ => unreachable!(),
-        }
+        interp.eval_block(&self.body, Some(bindings), vec![])
     }
 
     fn doc(&self) -> &Option<String> {
