@@ -34,7 +34,7 @@ pub fn compile<'a, C>(
     }
 
     if flags.phase_config.typecheck {
-        typecheck(&mut stmts);
+        typecheck(&mut stmts)?;
     }
 
     if last_phase < CompilerPhase::Evaluate {

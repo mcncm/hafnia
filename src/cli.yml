@@ -20,6 +20,7 @@ args:
       possible_values:
         - qasm
         - latex
+        - latex_standalone
   - opt:
       short: O
       long: opt

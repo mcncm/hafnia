@@ -111,9 +111,12 @@ pub mod latex {
     // here: there is some functionality in the `diagram` function of `Latex`
     // that should probably go in the `new` constructor of `LayoutArray`.
 
-    /// This backend emits a circuit in qcircuit format
+    /// This backend emits a circuit in quantikz format
     #[derive(Debug)]
-    pub struct Latex;
+    pub struct Latex {
+        /// Include preamble and `\begin{document}...\end{document}`?
+        pub standalone: bool,
+    }
 
     /// The three cell states in a common quantum circuit: in `Some(T)`, the
     /// cell is occupied by a gate. In `None`, there is no gate or blocking
@@ -337,11 +340,13 @@ pub mod latex {
         type ObjectCode = String;
 
         fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode {
+            let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
+            let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
             format!(
-                "{}{}{}",
-                Self::HEADER,
+                r"{}{}{}",
+                header,
                 self.diagram(&interp.circuit),
-                Self::FOOTER
+                footer
             )
         }
     }

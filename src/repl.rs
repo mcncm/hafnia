@@ -126,7 +126,7 @@ impl<'a> Repl<'a> {
             return Ok(());
         }
         if self.flags.phase_config.typecheck {
-            typecheck::typecheck(&mut stmts);
+            typecheck::typecheck(&mut stmts)?;
         }
 
         if phase < &sys::CompilerPhase::Evaluate {

@@ -102,7 +102,8 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
 fn get_target(argmatches: &ArgMatches) -> &dyn target::Target<ObjectCode = String> {
     match argmatches.value_of("target") {
         Some("qasm") => &target::qasm::Qasm {},
-        Some("latex") => &target::latex::Latex {},
+        Some("latex") => &target::latex::Latex { standalone: false },
+        Some("latex_standalone") => &target::latex::Latex { standalone: true },
         Some(_) => unreachable!(),
         None => &target::qasm::Qasm {},
     }
