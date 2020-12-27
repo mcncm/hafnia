@@ -1,13 +1,15 @@
-use crate::ast::{Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
+use crate::ast::{self, Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
 use crate::errors;
+use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
-    Location, Token,
+    Token,
 };
 use crate::types::Type;
 use errors::ErrorBuf;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -48,7 +50,7 @@ impl fmt::Display for ParseError {
         match &self.token {
             Some(token) => {
                 write!(f, "Parsing error at `{}` [{}]: {}",
-                       token, token.loc, self.msg)
+                       token, token.span, self.msg)
             } ,
             None => {
                 write!(f, "Parsing error: {}", self.msg)
@@ -131,14 +133,14 @@ impl Parser {
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
-    fn consume_ident(&mut self) -> Result<Token, ParseError> {
+    fn consume_ident(&mut self) -> Result<String, ParseError> {
         // TODO This unwrap isn’t safe; you could be at EOF
         let token = self.tokens.next().ok_or(ParseError {
             msg: "unexpected EOF",
             token: None,
         })?;
         match token.lexeme {
-            Lexeme::Ident(_) => Ok(token),
+            Lexeme::Ident(name) => Ok(name),
             _ => Err(ParseError {
                 msg: "expected identifier.",
                 token: Some(token),
@@ -199,10 +201,13 @@ impl Parser {
             body,
             docstring: None,
         };
-        Ok(Item { kind })
+        Ok(Item {
+            kind,
+            span: Span::default(),
+        })
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(Token, Type)>, ParseError> {
+    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>, ParseError> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -216,7 +221,7 @@ impl Parser {
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(Token, Type), ParseError> {
+    fn function_param(&mut self) -> Result<(String, Type), ParseError> {
         let name = self.consume_ident()?;
         self.consume(Colon, "Missing ':' in function parameter")?;
         let ty = self.type_annotation()?;
@@ -268,7 +273,11 @@ impl Parser {
     fn lvalue(&mut self) -> Result<LValue, ParseError> {
         // TODO should check that all names are unique
         match self.peek_lexeme() {
-            Some(Lexeme::Ident(_)) => Ok(LValueKind::Ident(self.tokens.next().unwrap()).into()),
+            Some(Lexeme::Ident(_)) => {
+                let token = self.tokens.next().unwrap();
+                let ident = ast::Ident::try_from(token).unwrap();
+                Ok(LValueKind::Ident(ident).into())
+            }
             Some(LParen) => {
                 self.forward();
                 self.finish_lvalue_tuple()
@@ -508,8 +517,8 @@ impl Parser {
 
         // This is a function call
         if self.match_lexeme(LParen) {
-            if let ExprKind::Variable(Token { lexeme: Ident(name), loc }) = expr.kind {
-                return self.finish_call(Token { lexeme: Ident(name), loc });
+            if let ExprKind::Ident(ident @ ast::Ident { .. }) = expr.kind {
+                return self.finish_call(ident);
             } else {
                 return Ok(expr);
             }
@@ -527,7 +536,7 @@ impl Parser {
 
     // Inline(always) because there is only one call site.
     #[inline(always)]
-    fn finish_call(&mut self, callee: Token) -> Result<Expr, ParseError> {
+    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr, ParseError> {
         let mut args = vec![];
         if self.peek_lexeme() != Some(&RParen) {
             loop {
@@ -539,7 +548,7 @@ impl Parser {
         }
         let paren = self.consume(RParen, "expected closing paren ')'")?;
         let kind = ExprKind::Call {
-            callee: Box::new(callee),
+            callee,
             args,
             paren,
         };
@@ -566,7 +575,9 @@ impl Parser {
                 Ok(kind.into())
             }
             Ident(_) => {
-                let kind = ExprKind::Variable(self.tokens.next().unwrap());
+                let token = self.tokens.next().unwrap();
+                let ident = ast::Ident::try_from(token).unwrap();
+                let kind = ExprKind::Ident(ident);
                 Ok(kind.into())
             }
             LParen => {
@@ -663,7 +674,7 @@ mod tests {
     fn token(lexeme: Lexeme) -> Token {
         Token {
             lexeme,
-            loc: Location::default(),
+            span: Span::default(),
         }
     }
 
@@ -703,8 +714,10 @@ mod tests {
                 Literal(token) => {
                     assert_eq!(token.lexeme, $literal);
                 }
-                Variable(token) => {
-                    assert_eq!(token.lexeme, $literal);
+                ExprKind::Ident(ident) => {
+                    // For backwards compatibility of this test: convert the Ident back into a Lexeme::Ident.
+                    let lexeme = Lexeme::Ident(ident.name.clone());
+                    assert_eq!(lexeme, $literal);
                 }
                 _ => {
                     panic!("AST is not a Literal or Ident!");
@@ -773,8 +786,8 @@ mod tests {
     fn single_var_1() {
         let name = "foo";
         test_parser! {
-            [Ident(name.to_owned())],
-            {Ident(name.to_owned())}
+            [Lexeme::Ident(name.to_owned())],
+            {Lexeme::Ident(name.to_owned())}
         };
     }
 
@@ -784,8 +797,8 @@ mod tests {
     #[should_panic]
     fn single_var_2() {
         test_parser! {
-            [Ident("foo".to_owned())],
-            {Ident("bar".to_owned())}
+            [Lexeme::Ident("foo".to_owned())],
+            {Lexeme::Ident("bar".to_owned())}
         };
     }
 

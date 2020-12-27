@@ -2,7 +2,8 @@ use crate::arch::Arch;
 use crate::errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
-use crate::scanner::{Scanner, SourceCode};
+use crate::scanner::Scanner;
+use crate::source::{SrcObject, SrcStore};
 use crate::typecheck;
 use crate::{ast::StmtKind, sys};
 use lazy_static::lazy_static;
@@ -50,6 +51,7 @@ macro_rules! command_table {
 }
 
 pub struct Repl<'a> {
+    src_store: SrcStore,
     interpreter: Interpreter<'a>,
     flags: &'a sys::Flags,
     commands: HashMap<&'a str, CmdSpec<'a>>,
@@ -68,6 +70,7 @@ impl<'a> Repl<'a> {
         ];
 
         Repl {
+            src_store: SrcStore::default(),
             interpreter: Interpreter::new(&arch),
             flags,
             commands,
@@ -109,7 +112,7 @@ impl<'a> Repl<'a> {
         if phase < &sys::CompilerPhase::Tokenize {
             return Ok(());
         }
-        let source = SourceCode::from_src(input);
+        let source = self.src_store.insert_input(input);
         let tokens = Scanner::new(&source).tokenize()?;
 
         if phase < &sys::CompilerPhase::Parse {

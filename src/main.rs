@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::fs;
 use std::io::prelude::*;
 use std::panic;
@@ -8,7 +7,7 @@ use std::process;
 use cavy::arch;
 use cavy::errors::ErrorBuf;
 use cavy::repl::Repl;
-use cavy::scanner::SourceCode;
+use cavy::source::{SrcObject, SrcStore};
 use cavy::target;
 use cavy::{compile, sys};
 
@@ -60,11 +59,14 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
     }
 }
 
-fn get_code(argmatches: &ArgMatches) -> Result<Option<SourceCode>, ErrorBuf> {
+fn get_code<'s>(
+    argmatches: &ArgMatches,
+    src_store: &'s mut SrcStore,
+) -> Result<Option<SrcObject<'s>>, ErrorBuf> {
     match argmatches.value_of("input") {
         Some(path) => {
             let path = PathBuf::from(&path);
-            Ok(Some(path.try_into()?))
+            Ok(src_store.insert_path(path)?)
         }
         None => Ok(None),
     }
@@ -115,6 +117,7 @@ fn main() {
     let argmatches = app.get_matches();
     let flags = get_flags(&argmatches);
     let target = get_target(&argmatches);
+    let mut src_store = SrcStore::default();
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed.
@@ -140,7 +143,7 @@ fn main() {
         }
     };
 
-    match get_code(&argmatches) {
+    match get_code(&argmatches, &mut src_store) {
         // A source file was given and read without error
         Ok(Some(src)) => {
             let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));

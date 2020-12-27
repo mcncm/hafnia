@@ -1,5 +1,7 @@
+use crate::source::Span;
 use crate::token::Token;
 use crate::types::Type;
+use std::convert::TryFrom;
 use std::fmt;
 
 // Each of the AST items in this module is given as a wrapper struct (possibly
@@ -8,11 +10,39 @@ use std::fmt;
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
 
+/// Identifier node
+#[derive(Debug, Clone)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+/// We will sometimes want to convert a token whose lexeme is definitely a
+/// `Lexeme::Ident` into this standalone `Ident` node. This implementation will
+/// make that easier to do.
+impl TryFrom<Token> for Ident {
+    /// This is "really" an internal implementation whose use will be pretty
+    /// limited; it is supposed to be immediately unwrapped wherever it is used.
+    type Error = ();
+
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        use crate::token::Lexeme;
+        match token.lexeme {
+            Lexeme::Ident(name) => Ok(Self {
+                name,
+                span: token.span,
+            }),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Expression node.
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
     pub tags: ExprTags,
+    pub span: Span,
 }
 
 impl From<ExprKind> for Expr {
@@ -20,6 +50,7 @@ impl From<ExprKind> for Expr {
         Self {
             kind,
             tags: ExprTags::default(),
+            span: Span::default(),
         }
     }
 }
@@ -41,15 +72,16 @@ pub enum ExprKind {
         right: Box<Expr>,
     },
     Literal(Token),
-    Variable(Token),
-    // Sequences of the form (1, 2, 3)
+    /// Identifiers
+    Ident(Ident),
+    /// Sequences of the form (1, 2, 3)
     Tuple(Vec<Expr>),
-    // Intensional arrays of the form [1; 4]
+    /// Intensional arrays of the form [1; 4]
     IntArr {
         item: Box<Expr>,
         reps: Box<Expr>,
     },
-    // Extensional arrays of the form [1, 2, 3]
+    /// Extensional arrays of the form [1, 2, 3]
     ExtArr(Vec<Expr>),
     Block(Block),
     If {
@@ -71,7 +103,7 @@ pub enum ExprKind {
         // For the time being, functions are not values, so the callee is not an
         // expression, but just a name. Arguments should also be expressions,
         // but they are currently also just identifiers.
-        callee: Box<Token>,
+        callee: Ident,
         args: Vec<Expr>,
         paren: Token,
     },
@@ -90,7 +122,7 @@ impl ExprKind {
             BinOp { .. } => true,
             UnOp { .. } => true,
             Literal(_) => true,
-            Variable(_) => true,
+            Ident(_) => true,
             Tuple { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
@@ -114,11 +146,15 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub struct Stmt {
     pub kind: StmtKind,
+    pub span: Span,
 }
 
 impl From<StmtKind> for Stmt {
     fn from(kind: StmtKind) -> Self {
-        Self { kind }
+        Self {
+            kind,
+            span: Span::default(),
+        }
     }
 }
 
@@ -158,15 +194,16 @@ impl StmtKind {
 #[derive(Debug, Clone)]
 pub struct Item {
     pub kind: ItemKind,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub enum ItemKind {
     Fn {
         /// Function identifier
-        name: Token,
+        name: String,
         /// Function parameters consisting of name-type pairs
-        params: Vec<(Token, Type)>,
+        params: Vec<(String, Type)>,
         /// Return type of the function
         typ: Option<Type>,
         /// Body of the function; guaranteed to be a block.
@@ -179,17 +216,22 @@ pub enum ItemKind {
 #[derive(Debug, Clone)]
 pub struct LValue {
     pub kind: LValueKind,
+    pub span: Span,
 }
 
 impl From<LValueKind> for LValue {
     fn from(kind: LValueKind) -> Self {
-        Self { kind }
+        Self {
+            kind,
+            span: Span::default(),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum LValueKind {
-    Ident(Token),
+    /// A simple identifier
+    Ident(Ident),
     /// Sequence of the form (a, b, c)
     Tuple(Vec<LValue>),
 }

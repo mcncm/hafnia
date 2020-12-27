@@ -15,7 +15,7 @@ impl fmt::Display for TypeError {
         match &self.token {
             Some(token) => {
                 write!(f, "Type error at \"{}\" [{}]: {}",
-                    token, token.loc, self.msg)
+                    token, token.span, self.msg)
             } ,
             None => {
                 write!(f, "Type error: {}", self.msg)

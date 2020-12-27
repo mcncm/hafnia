@@ -1,5 +1,6 @@
+use crate::source::Span;
+use crate::source::SrcObject;
 use std::fmt;
-use std::path::PathBuf;
 
 pub type Unsigned = u32;
 
@@ -69,31 +70,24 @@ impl fmt::Display for Lexeme {
     }
 }
 
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
-pub struct Location {
-    pub pos: usize,  // starting position in source file
-    pub line: usize, // line number in source file
-    pub col: usize,  // column number in source file
-    pub file: Option<PathBuf>,
-}
-
-impl fmt::Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.file {
-            Some(file) => write!(f, "{}:{} ({:?})", self.col, self.line, file),
-            None => write!(f, "{}:{} (input)", self.col, self.line),
-        }
-    }
-}
-
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Token {
     pub lexeme: Lexeme,
-    pub loc: Location,
+    pub span: Span,
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.lexeme)
     }
+}
+
+/// It is terribly useful for the AST to contain Ident structs without
+/// necessitating an extra `match`. Breaking this out saves a lot of indentation
+/// depth elsewhere in this code.
+#[derive(Debug, Clone)]
+pub struct Ident {
+    /// The actual name associated with the identifier
+    pub name: String,
+    pub span: Span,
 }

@@ -1,7 +1,8 @@
+use crate::source::{Span, SrcId, SrcObject, SrcPoint};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
     errors::ErrorBuf,
-    token::{Lexeme, Location, Token, Unsigned},
+    token::{Lexeme, Token, Unsigned},
 };
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -72,7 +73,7 @@ fn is_ident_char(ch: char) -> bool {
 
 #[derive(Debug)]
 pub struct ScanError {
-    loc: Location,
+    loc: Span,
     msg: &'static str,
     chars: String,
 }
@@ -88,69 +89,28 @@ impl fmt::Display for ScanError {
 
 impl std::error::Error for ScanError {}
 
-pub struct SourceCode {
-    pub code: String,
-    // TODO: should replace this with a &Path or &PathBuf, but this leads to a lot
-    // of lifetime wrangling I don't want to deal with right now.
-    pub file: Option<PathBuf>,
-}
-
-impl SourceCode {
-    pub fn from_src(src: &str) -> Self {
-        Self {
-            code: src.to_string(),
-            file: None,
-        }
-    }
-}
-
-impl TryFrom<PathBuf> for SourceCode {
-    type Error = ErrorBuf;
-
-    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let code = match std::fs::read_to_string(&path) {
-            Ok(code) => code,
-            Err(err) => {
-                return Err(ErrorBuf(vec![Box::new(err)]));
-            }
-        };
-
-        let src = Self {
-            code,
-            // FIXME This should be a PathBuf, but there were some difficulties
-            // with lifetimes last time I tried to do that.
-            file: Some(path),
-        };
-
-        Ok(src)
-    }
-}
-
-struct ScanHead<'a> {
-    src: Peekable<Chars<'a>>,
-    file: &'a Option<PathBuf>,
+struct ScanHead<'src> {
+    src: Peekable<Chars<'src>>,
     pub pos: usize,  // absolute position in source
     pub line: usize, // line number in source
     pub col: usize,  // column number in source
 }
 
-impl<'a> ScanHead<'a> {
-    fn new(src: &'a SourceCode) -> Self {
-        ScanHead {
-            src: src.code.chars().peekable(),
-            file: &src.file,
+impl<'src> ScanHead<'src> {
+    fn new(src: Peekable<Chars<'src>>) -> Self {
+        Self {
+            src,
             pos: 0,
             line: 1,
             col: 1,
         }
     }
 
-    fn loc(&self) -> Location {
-        Location {
+    fn loc(&self) -> SrcPoint {
+        SrcPoint {
             pos: self.pos,
             line: self.line,
             col: self.col,
-            file: self.file.as_ref().cloned(),
         }
     }
 
@@ -188,7 +148,7 @@ impl<'a> ScanHead<'a> {
     }
 }
 
-impl<'a> Iterator for ScanHead<'a> {
+impl<'src> Iterator for ScanHead<'src> {
     type Item = char;
 
     // Advance the scan head to the next character, filtering whitespace.
@@ -202,10 +162,12 @@ impl<'a> Iterator for ScanHead<'a> {
     }
 }
 
-pub struct Scanner<'a> {
+pub struct Scanner<'src> {
     // Scanner data
-    scan_head: ScanHead<'a>,
+    scan_head: ScanHead<'src>,
+    src_id: SrcId,
     token_buf: Vec<char>,
+    token_start: SrcPoint,
     tokens: Vec<Token>,
     errors: ErrorBuf,
 }
@@ -213,19 +175,26 @@ pub struct Scanner<'a> {
 // Adds a lexed token to a Scanner's `tokens` vector.
 macro_rules! push_token {
     ($self:ident, $tok:ident$(($($arg:expr),*))?) => {
+        let span = Span {
+            start: $self.token_start.clone(),
+            end: $self.scan_head.loc(),
+            src_id: $self.src_id,
+        };
         $self.tokens.push(Token {
             lexeme: $tok$(($($arg),+))?,
-            loc: $self.scan_head.loc(),
+            span,
         });
         $self.token_buf.clear();
     };
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(src: &'a SourceCode) -> Self {
+impl<'s> Scanner<'s> {
+    pub fn new(src: &'s SrcObject) -> Self {
         Scanner {
-            scan_head: ScanHead::new(src),
+            scan_head: ScanHead::new(src.code.chars().peekable()),
+            src_id: src.id,
             token_buf: vec![],
+            token_start: SrcPoint::zero(),
             tokens: vec![],
             errors: ErrorBuf::new(),
         }
@@ -242,6 +211,11 @@ impl<'a> Scanner<'a> {
     // token buffer.
     fn scrub_token(&mut self, msg: &'static str) {
         let loc = self.synchronize_to_whitespace();
+        let loc = Span {
+            start: loc.clone(),
+            end: loc,
+            src_id: self.src_id,
+        };
         self.errors.push(Box::new(ScanError {
             loc,
             msg,
@@ -252,7 +226,7 @@ impl<'a> Scanner<'a> {
 
     // Advance the scan head to the next whitespace character, and return
     // position before advancing.
-    pub fn synchronize_to_whitespace(&mut self) -> Location {
+    pub fn synchronize_to_whitespace(&mut self) -> SrcPoint {
         let loc = self.scan_head.loc();
         while let Some(ch) = self.scan_head.peek() {
             if !ch.is_ascii_whitespace() {
@@ -374,7 +348,7 @@ mod tests {
                 )*
             )?
 
-            let src = SourceCode::from_src($code);
+            let src = SrcObject::from($code);
             let scanner = Scanner::new(&src);
             let tokens = scanner.tokenize().unwrap();
 

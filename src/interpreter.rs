@@ -1,11 +1,14 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
+use crate::ast::{
+    Block, Expr, ExprKind, Ident, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind,
+};
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::errors::ErrorBuf;
 use crate::parser::ParseError;
 use crate::qram::Qram;
 use crate::scanner::{ScanError, Scanner};
+use crate::source::Span;
 use crate::token::{Lexeme, Token};
 use crate::types::{self, Type};
 use crate::{
@@ -23,16 +26,16 @@ use std::{
 #[derive(Debug)]
 pub struct InterpreterError {
     msg: String,
-    token: Option<Token>,
+    loc: Option<Span>,
 }
 
 impl fmt::Display for InterpreterError {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.token {
-            Some(token) => {
-                write!(f, "Interpreter error at `{}` [{}]: {}",
-                       token, token.loc, self.msg)
+        match &self.loc {
+            Some(loc) => {
+                write!(f, "Interpreter error at {}: {}",
+                       loc, self.msg)
             } ,
             None => {
                 write!(f, "Interpreter error: {}", self.msg)
@@ -142,14 +145,8 @@ impl<'a> Interpreter<'a> {
         let mut bindings = vec![];
 
         match (&lhs.kind, &rhs) {
-            (
-                LValueKind::Ident(Token {
-                    lexeme: Lexeme::Ident(name),
-                    ..
-                }),
-                _,
-            ) => {
-                bindings.push((name.clone(), Nameable::Value(rhs.clone())));
+            (LValueKind::Ident(ident), _) => {
+                bindings.push((ident.name.clone(), Nameable::Value(rhs.clone())));
             }
             (LValueKind::Tuple(binders), Value::Array(values))
             | (LValueKind::Tuple(binders), Value::Tuple(values)) => {
@@ -172,20 +169,13 @@ impl<'a> Interpreter<'a> {
     /// time, before evaluation.
     fn exec_fn(
         &mut self,
-        name: &Token,
-        params: &[(Token, Type)],
+        name: &str,
+        params: &[(String, Type)],
         body: &Block,
     ) -> Result<(), ErrorBuf> {
-        let name = match &name.lexeme {
-            Lexeme::Ident(name) => name.clone(),
-            _ => unreachable!(),
-        };
         let params = params
             .iter()
-            .map(|(param, _)| match &param.lexeme {
-                Lexeme::Ident(param_name) => param_name.clone(),
-                _ => unreachable!(),
-            })
+            .map(|(param, _)| param.clone())
             .collect::<Vec<String>>();
         let body = Box::new(body.clone());
 
@@ -195,7 +185,8 @@ impl<'a> Interpreter<'a> {
             doc: None,
         };
 
-        self.env.insert(name, Nameable::Func(Rc::new(func)));
+        self.env
+            .insert(name.to_string(), Nameable::Func(Rc::new(func)));
 
         Ok(())
     }
@@ -271,9 +262,7 @@ impl<'a> Interpreter<'a> {
         iter: &Value,
         body: &Block,
     ) -> Result<Value, ErrorBuf> {
-        use ExprKind::{Block, Variable};
         use Lexeme::Ident;
-
         // Unwrap the data for now. I suspect we *don’t* want to be iterating over
         // tuples, for instance.
         let iter = match iter {
@@ -322,7 +311,7 @@ impl<'a> Interpreter<'a> {
             BinOp { left, op, right } => self.eval_binop(left, op, right),
             UnOp { op, right } => self.eval_unop(op, right),
             Literal(literal) => self.eval_literal(literal),
-            Variable(variable) => self.eval_variable(variable),
+            Ident(ident) => self.eval_ident(ident),
             Tuple(items) => self.eval_tuple(items),
             IntArr { item, reps } => self.eval_int_arr(item, reps),
             ExtArr(items) => self.eval_ext_arr(items),
@@ -389,36 +378,32 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_variable(&mut self, variable: &Token) -> Result<Value, ErrorBuf> {
+    fn eval_ident(&mut self, ident: &Ident) -> Result<Value, ErrorBuf> {
         use crate::token::Lexeme;
         use Moveable::*;
-        match &variable.lexeme {
-            Lexeme::Ident(name) => {
-                // About this unwrap: we will at some point in the (hopefully
-                // near) future track whether this operation is safe statically,
-                // and always know when there is a value in the environment.
-                match self.env.get(&name) {
-                    Some(There(Nameable::Value(val))) => Ok(val),
-                    Some(Moved) => {
-                        let err = InterpreterError {
-                            msg: format!("the variable `{}` has been moved.", name),
-                            token: Some(variable.clone()),
-                        };
-                        Err(ErrorBuf(vec![Box::new(err)]))
-                    }
-                    None => {
-                        let err = InterpreterError {
-                            msg: format!("the name `{}` is unbound.", name),
-                            token: Some(variable.clone()),
-                        };
-                        Err(ErrorBuf(vec![Box::new(err)]))
-                    }
-                    // In the near-term this should just be an error; in the
-                    // long term, there should be first-class functions.
-                    _ => unimplemented!(),
-                }
+        let name = &ident.name;
+        // About this unwrap: we will at some point in the (hopefully
+        // near) future track whether this operation is safe statically,
+        // and always know when there is a value in the environment.
+        match self.env.get(&name) {
+            Some(There(Nameable::Value(val))) => Ok(val),
+            Some(Moved) => {
+                let err = InterpreterError {
+                    msg: format!("the variable `{}` has been moved.", name),
+                    loc: Some(ident.span.clone()),
+                };
+                Err(ErrorBuf(vec![Box::new(err)]))
             }
-            _ => panic!("Invariant violation!"),
+            None => {
+                let err = InterpreterError {
+                    msg: format!("the name `{}` is unbound.", name),
+                    loc: Some(ident.span.clone()),
+                };
+                Err(ErrorBuf(vec![Box::new(err)]))
+            }
+            // In the near-term this should just be an error; in the
+            // long term, there should be first-class functions.
+            _ => unimplemented!(),
         }
     }
 
@@ -636,18 +621,10 @@ impl<'a> Interpreter<'a> {
         Ok(val)
     }
 
-    fn eval_call(&mut self, callee: &Token, args: &[Expr]) -> Result<Value, ErrorBuf> {
-        let callee = match callee {
-            Token {
-                lexeme: Lexeme::Ident(id),
-                loc: _,
-            } => id,
-            _ => panic!("Violated a typing invariant"),
-        };
-
+    fn eval_call(&mut self, callee: &Ident, args: &[Expr]) -> Result<Value, ErrorBuf> {
         let args: Vec<Value> = args.iter().map(|arg| self.evaluate(arg).unwrap()).collect();
 
-        let func = match self.env.get(callee) {
+        let func = match self.env.get(&callee.name) {
             None => unreachable!(), // An earlier typing pass can eliminate this case
             Some(Moveable::There(Nameable::Value(_))) => todo!(), // Should return an error
             Some(Moveable::Moved) => todo!(), // Should return a different error
@@ -757,8 +734,8 @@ mod tests {
     use super::*;
     use crate::circuit::Gate::*;
     use crate::parser::Parser;
-    use crate::scanner::SourceCode;
-    use crate::token::{Lexeme, Location};
+    use crate::source::SrcObject;
+    use crate::token::Lexeme;
     use crate::values::Value;
 
     //////////////////////////////////////////////////////
@@ -768,7 +745,7 @@ mod tests {
     fn token(lexeme: Lexeme) -> Token {
         Token {
             lexeme,
-            loc: Location::default(),
+            span: Span::default(),
         }
     }
 
@@ -778,7 +755,7 @@ mod tests {
         ($code:expr ; $tok:ident$(($($arg:expr),+))?) => {
             let expected_value = Value::$tok $(($($arg),+))?;
 
-            let src = SourceCode::from_src($code);
+            let src = SrcObject::from($code);
             let tokens = Scanner::new(&src).tokenize().unwrap();
             let ast = Parser::new(tokens).expression().unwrap();
             let arch = Arch::default();
@@ -789,7 +766,7 @@ mod tests {
     }
 
     fn test_program(prog: &'static str, expected_gates: Vec<Gate>) {
-        let src = SourceCode::from_src(prog);
+        let src = SrcObject::from(prog);
 
         let tokens = Scanner::new(&src).tokenize().unwrap();
         let stmts = Parser::new(tokens).parse().unwrap();

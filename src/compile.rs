@@ -4,15 +4,16 @@ use crate::{
     errors::ErrorBuf,
     interpreter::Interpreter,
     parser::Parser,
-    scanner::{Scanner, SourceCode},
+    scanner::Scanner,
+    source::SrcObject,
     sys::{CompilerPhase, Flags},
     target::Target,
     typecheck::typecheck,
 };
 use std::{error::Error, path::PathBuf};
 
-pub fn compile<'a, C>(
-    src: SourceCode,
+pub fn compile<'a, 's, C>(
+    src: SrcObject<'s>,
     flags: Flags,
     arch: &'a Arch,
     target: &dyn Target<'a, ObjectCode = C>,

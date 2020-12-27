@@ -1,5 +1,6 @@
 use crate::ast::{Expr, ExprKind, Item, ItemKind, LValue, Stmt, StmtKind};
 use crate::errors::ErrorBuf;
+use crate::functions::{Func, UserFunc};
 use crate::types::Type;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -32,7 +33,7 @@ fn hoist_items(stmts: &mut Vec<Stmt>) {
 
 /// Typecheck a statement. This will be executed after hoisting, so all items
 /// will have been hoisted to the top.
-fn type_stmt(stmt: &Stmt, table: &mut SymbolTable) -> Result<(), ErrorBuf> {
+fn type_stmt<'ast>(stmt: &'ast Stmt, table: &mut SymbolTable<'ast>) -> Result<(), ErrorBuf> {
     use StmtKind::*;
     match &stmt.kind {
         // No-op
@@ -62,7 +63,10 @@ pub struct Symbol {
     ty: Type,
 }
 
-pub enum SymbolKind {}
+pub enum SymbolKind {
+    Fn(Box<dyn Func>),
+    Var,
+}
 
 #[derive(Default)]
 pub struct SymbolTable<'ast> {
@@ -73,7 +77,30 @@ pub struct SymbolTable<'ast> {
 }
 
 impl<'ast> SymbolTable<'ast> {
-    fn insert_item(&mut self, _item: &Item) {}
+    fn insert_item(&mut self, item: &'ast Item) {
+        match &item.kind {
+            ItemKind::Fn {
+                name,
+                params: _params,
+                typ,
+                body,
+                docstring,
+            } => {
+                let _ty = typ.as_ref().unwrap_or(&Type::T_Unit);
+                let func = Box::new(UserFunc {
+                    params: vec![],
+                    // FIXME temporarily defeating the borrow checker
+                    body: body.clone(),
+                    doc: docstring.clone(),
+                });
+                let symb = Symbol {
+                    ty: Type::T_Unit,
+                    kind: SymbolKind::Fn(func),
+                };
+                self.symbols.insert(&name, symb);
+            }
+        }
+    }
 
     fn insert_local(&mut self, _lhs: &LValue, _ty: &Option<Box<Type>>, _rhs: &Expr) {}
 }
