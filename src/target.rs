@@ -339,6 +339,7 @@ pub mod latex {
     impl<'a> Target<'a> for Latex {
         type ObjectCode = String;
 
+        #[rustfmt::skip]
         fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode {
             let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
             let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };

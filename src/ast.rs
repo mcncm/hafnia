@@ -144,6 +144,14 @@ pub enum StmtKind {
     Item(Item),
 }
 
+impl StmtKind {
+    /// Checks whether the statement is an item. This is used for hoisting in
+    /// semantic analysis phases.
+    pub fn is_item(&self) -> bool {
+        matches!(self, StmtKind::Item(_))
+    }
+}
+
 /// An item. For now this wrapper doesn't do anything, but it does make this AST
 /// node more symmetric with respect to the others; future refactoring will also
 /// be easier, if more fields are added.
