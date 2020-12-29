@@ -123,15 +123,13 @@ fn main() {
     // `release` profile, *and* the --debug flag has been passed.
     #[cfg(not(debug_assertions))]
     {
-        use cavy::errors;
-        panic::set_hook(Box::new(errors::panic_hook));
+        panic::set_hook(Box::new(sys::panic_hook));
     }
 
     #[cfg(debug_assertions)]
     {
-        use cavy::errors;
         if !flags.debug {
-            panic::set_hook(Box::new(errors::panic_hook));
+            panic::set_hook(Box::new(sys::panic_hook));
         }
     }
 
