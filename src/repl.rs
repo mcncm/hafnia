@@ -151,7 +151,9 @@ impl<'a> Repl<'a> {
     }
 
     fn handle_errors(&self, errors: ErrorBuf) {
-        eprintln!("{}", errors);
+        for err in errors.0.iter() {
+            println!("{}", self.src_store.format_err(err.as_ref()));
+        }
     }
 
     fn greet(&self) {

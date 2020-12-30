@@ -1,5 +1,5 @@
 /// Data strucures for holding and manipulating source code
-use crate::cavy_errors::ErrorBuf;
+use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -53,7 +53,8 @@ impl SrcStore {
 
     /// Try to insert a path to a source file and retrieve a source object
     pub fn insert_path(&mut self, path: PathBuf) -> Result<Option<SrcObject>, ErrorBuf> {
-        let src_file = SrcKind::try_from(path)?;
+        // FIXME handle this error a bit better.
+        let src_file = SrcKind::try_from(path).unwrap();
         let id = self.new_id();
         self.table.insert(id, src_file);
         // FIXME defeating the borrow checker...
@@ -77,6 +78,14 @@ impl SrcStore {
             code: src.as_src(),
         })
     }
+
+    pub fn format_err(&self, err: &dyn Diagnostic) -> String {
+        format!("{}", err.message())
+    }
+
+    fn format_span(&self, _span: &Span) -> String {
+        todo!();
+    }
 }
 
 enum SrcKind {
@@ -97,15 +106,10 @@ impl SrcKind {
 }
 
 impl TryFrom<PathBuf> for SrcKind {
-    type Error = ErrorBuf;
+    type Error = std::io::Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let code = match std::fs::read_to_string(&path) {
-            Ok(code) => code,
-            Err(err) => {
-                return Err(ErrorBuf(vec![Box::new(err)]));
-            }
-        };
+        let code = std::fs::read_to_string(&path)?;
 
         let src = Self::File {
             code,

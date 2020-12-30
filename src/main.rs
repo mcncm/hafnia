@@ -147,7 +147,9 @@ fn main() {
             let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));
             let object_code = compile::compile(src, flags, &arch, target)
                 .unwrap_or_else(|errs| {
-                    print!("{}", errs);
+                    for err in errs.0.iter() {
+                        src_store.format_err(err.as_ref());
+                    }
                     process::exit(1);
                 })
                 .unwrap_or_else(|| {

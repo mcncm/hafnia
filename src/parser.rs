@@ -1,5 +1,5 @@
 use crate::ast::{self, Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
-use crate::cavy_errors::{self, ErrorBuf};
+use crate::cavy_errors::{self, ErrorBuf, Result};
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
@@ -9,7 +9,6 @@ use crate::types::Type;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::error::Error;
 use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -75,7 +74,7 @@ impl Parser {
     }
 
     /// Consumes the parser, generating a list of statements
-    pub fn parse(mut self) -> Result<Vec<Stmt>, ErrorBuf> {
+    pub fn parse(mut self) -> std::result::Result<Vec<Stmt>, ErrorBuf> {
         let mut stmts = vec![];
         loop {
             match self.declaration() {
@@ -94,7 +93,7 @@ impl Parser {
         }
     }
 
-    fn consume(&mut self, lexeme: Lexeme) -> Result<Token, Box<dyn Error>> {
+    fn consume(&mut self, lexeme: Lexeme) -> Result<Token> {
         let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
             // FIXME this default is flagrantly incorrect
             span: Span::default(),
@@ -111,7 +110,7 @@ impl Parser {
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
-    fn consume_ident(&mut self) -> Result<String, Box<dyn Error>> {
+    fn consume_ident(&mut self) -> Result<String> {
         // TODO This unwrap isn’t safe; you could be at EOF
         let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
             // FIXME This span is blatantly wrong
@@ -127,7 +126,7 @@ impl Parser {
     }
 
     /// A declaration, which is either a definition or a statement
-    pub fn declaration(&mut self) -> Result<Option<Stmt>, Box<dyn Error>> {
+    pub fn declaration(&mut self) -> Result<Option<Stmt>> {
         if self.peek_lexeme() == None {
             return Ok(None);
         }
@@ -143,7 +142,7 @@ impl Parser {
     }
 
     /// Produces a statement
-    pub fn statement(&mut self) -> Result<Stmt, Box<dyn Error>> {
+    pub fn statement(&mut self) -> Result<Stmt> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
             Some(Let) => Ok(self.local()?),
@@ -162,7 +161,7 @@ impl Parser {
         }
     }
 
-    fn function_definition(&mut self) -> Result<Item, Box<dyn Error>> {
+    fn function_definition(&mut self) -> Result<Item> {
         let name = self.consume_ident()?;
         self.consume(Lexeme::LParen)?;
         let params = self.finish_function_params()?;
@@ -182,7 +181,7 @@ impl Parser {
         })
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>, Box<dyn Error>> {
+    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -196,14 +195,14 @@ impl Parser {
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(String, Type), Box<dyn Error>> {
+    fn function_param(&mut self) -> Result<(String, Type)> {
         let name = self.consume_ident()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
         Ok((name, ty))
     }
 
-    fn function_return_type(&mut self) -> Result<Option<Type>, Box<dyn Error>> {
+    fn function_return_type(&mut self) -> Result<Option<Type>> {
         if self.match_lexeme(MinusRAngle) {
             return Ok(Some(self.type_annotation()?));
         }
@@ -221,7 +220,7 @@ impl Parser {
     ///     x + 1
     /// }
     /// ```
-    fn local(&mut self) -> Result<Stmt, Box<dyn Error>> {
+    fn local(&mut self) -> Result<Stmt> {
         self.forward();
         let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
@@ -245,7 +244,7 @@ impl Parser {
     }
 
     /// Recursively build an LValue
-    fn lvalue(&mut self) -> Result<LValue, Box<dyn Error>> {
+    fn lvalue(&mut self) -> Result<LValue> {
         // TODO should check that all names are unique
         match self.peek_lexeme() {
             Some(Lexeme::Ident(_)) => {
@@ -270,7 +269,7 @@ impl Parser {
     /// NOTE We should inline this because it’s only called from `lvalue`, with which
     /// it is mutually recursive.
     #[inline(always)]
-    fn finish_lvalue_tuple(&mut self) -> Result<LValue, Box<dyn Error>> {
+    fn finish_lvalue_tuple(&mut self) -> Result<LValue> {
         if self.match_lexeme(Lexeme::RParen) {
             return Ok(LValueKind::Tuple(vec![]).into());
         }
@@ -296,14 +295,14 @@ impl Parser {
         Ok(lvalue)
     }
 
-    fn print_stmt(&mut self) -> Result<Stmt, Box<dyn Error>> {
+    fn print_stmt(&mut self) -> Result<Stmt> {
         self.forward();
         let expr = self.expression()?;
         self.consume(Lexeme::Semicolon)?;
         Ok(StmtKind::Print(Box::new(expr)).into())
     }
 
-    fn if_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn if_expr(&mut self) -> Result<Expr> {
         self.forward();
         // Here we assume that
         let cond = Box::new(self.expression()?);
@@ -323,7 +322,7 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn for_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn for_expr(&mut self) -> Result<Expr> {
         self.forward();
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
@@ -334,11 +333,11 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn block_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn block_expr(&mut self) -> Result<Expr> {
         Ok(ExprKind::Block(self.block()?).into())
     }
 
-    fn block(&mut self) -> Result<Block, Box<dyn Error>> {
+    fn block(&mut self) -> Result<Block> {
         let mut stmts: Vec<Stmt> = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
             if lexeme == &Lexeme::RBrace {
@@ -350,13 +349,13 @@ impl Parser {
         Ok(Block { stmts })
     }
 
-    fn expr_stmt(&mut self) -> Result<Stmt, Box<dyn Error>> {
+    fn expr_stmt(&mut self) -> Result<Stmt> {
         let res = StmtKind::Expr(Box::new(self.expression()?));
         self.consume(Lexeme::Semicolon)?;
         Ok(res.into())
     }
 
-    pub fn expression(&mut self) -> Result<Expr, Box<dyn Error>> {
+    pub fn expression(&mut self) -> Result<Expr> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
@@ -369,7 +368,7 @@ impl Parser {
         }
     }
 
-    fn unary(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn unary(&mut self) -> Result<Expr> {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.tokens.next().unwrap();
             let right = self.unary()?;
@@ -384,7 +383,7 @@ impl Parser {
         self.call()
     }
 
-    fn finish_array(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn finish_array(&mut self) -> Result<Expr> {
         // Empty array:
         if self.match_lexeme(RBracket) {
             return Ok(ExprKind::ExtArr(vec![]).into());
@@ -410,7 +409,7 @@ impl Parser {
         Ok(arr.into())
     }
 
-    fn type_annotation(&mut self) -> Result<Type, Box<dyn Error>> {
+    fn type_annotation(&mut self) -> Result<Type> {
         // NOTE: This can be refactored nicely if there is a distinction between
         // AST type annotations and language types.
         if self.peek_lexeme() == Some(&Question) {
@@ -458,14 +457,14 @@ impl Parser {
     }
 
     /// Finish parsing an array type.
-    fn finish_array_type(&mut self) -> Result<Type, Box<dyn Error>> {
+    fn finish_array_type(&mut self) -> Result<Type> {
         let ty = self.type_annotation()?;
         self.consume(RBracket)?;
         Ok(Type::T_Array(Box::new(ty)))
     }
 
     /// Finish parsing a type that may be either a tuple or the unit type.
-    fn finish_tuple_type(&mut self) -> Result<Type, Box<dyn Error>> {
+    fn finish_tuple_type(&mut self) -> Result<Type> {
         let mut types = vec![];
         while !self.match_lexeme(RParen) {
             types.push(self.type_annotation()?);
@@ -481,7 +480,7 @@ impl Parser {
 
     /// Call a function or index into an array.
     #[rustfmt::skip]
-    fn call(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn call(&mut self) -> Result<Expr> {
         let mut expr = self.primary()?;
 
         // This is a function call
@@ -505,7 +504,7 @@ impl Parser {
 
     // Inline(always) because there is only one call site.
     #[inline(always)]
-    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr, Box<dyn Error>> {
+    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr> {
         let mut args = vec![];
         if self.peek_lexeme() != Some(&RParen) {
             loop {
@@ -525,7 +524,7 @@ impl Parser {
     }
 
     #[inline(always)]
-    fn finish_index(&mut self, head: Expr) -> Result<Expr, Box<dyn Error>> {
+    fn finish_index(&mut self, head: Expr) -> Result<Expr> {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
         let bracket = self.consume(RBracket)?;
@@ -537,7 +536,7 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn primary(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn primary(&mut self) -> Result<Expr> {
         let token = self.tokens.next().unwrap();
         match token.lexeme {
             Nat(_) | True | False => {
@@ -561,7 +560,7 @@ impl Parser {
 
     /// After reaching an `(` in the position of a primary token, we must have
     /// either a group or a sequence.
-    fn finish_group(&mut self) -> Result<Expr, Box<dyn Error>> {
+    fn finish_group(&mut self) -> Result<Expr> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
         if self.match_lexeme(Lexeme::RParen) {
             return Ok(ExprKind::Tuple(vec![]).into());
@@ -588,7 +587,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, Box<dyn Error>> {
+    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr> {
         let mut lhs = lhs.kind;
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {

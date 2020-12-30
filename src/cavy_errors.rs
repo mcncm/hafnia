@@ -1,12 +1,27 @@
+use crate::source::Span;
 use crate::sys;
 use std::error::Error;
 use std::fmt;
 
 /// The main trait for language errors encountered in lexing, parsing, semantic
 /// analysis, and code generation.
-pub trait Diagnostic: Error {
+pub trait Diagnostic: std::fmt::Debug {
     fn level(&self) -> &DiagnosticLevel {
         &DiagnosticLevel::Error
+    }
+
+    /// Formats the leading line of the error, warning, or lint message.
+    fn message(&self) -> String;
+
+    /// Retrieves the main Span corresponding to the error
+    fn main_span(&self) -> &Span;
+}
+
+/// Like `std::error::Error`, we would often like to enjoy automatic conversion
+/// to a boxed error type.
+impl<'a, T: Diagnostic + 'a> From<T> for Box<dyn Diagnostic + 'a> {
+    fn from(value: T) -> Self {
+        Box::new(value)
     }
 }
 
@@ -21,7 +36,7 @@ pub enum DiagnosticLevel {
 /// Let’s simplify error propagation with with a typedef. This should be an
 /// acceptable thing to do; it mimics `io::Result`, and it's seen in plenty of
 /// projects.
-pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
+pub type Result<T> = std::result::Result<T, Box<dyn Diagnostic>>;
 
 /// It is common to want to report multiple errors from a single compiler pass;
 /// therefore it will be helpful to have such a buffer to push errors into as
@@ -31,46 +46,20 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 /// it’s actually recursive, and an `ErrorBuf` of `ErrorBuf`s might be
 /// nonsensical. I could break the recursion by implementing my own Error type
 /// for `ErrorBuf` instead of the standard library one.
-pub struct ErrorBuf(pub Vec<Box<dyn Error>>);
+#[derive(Debug)]
+pub struct ErrorBuf(pub Vec<Box<dyn Diagnostic>>);
 
 impl ErrorBuf {
     pub fn new() -> Self {
         Self(vec![])
     }
 
-    pub fn push(&mut self, err: Box<dyn Error>) {
+    pub fn push(&mut self, err: Box<dyn Diagnostic>) {
         self.0.push(err)
     }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-}
-
-impl fmt::Debug for ErrorBuf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl fmt::Display for ErrorBuf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut repr = String::from("Errors:\n");
-        for (n, err) in self.0.iter().enumerate() {
-            repr.push_str(&format!("{}.\t{}\n", n, err));
-        }
-        write!(f, "{}", repr)
-    }
-}
-
-/// These are all default implementations for the trait, for the time being.
-impl Error for ErrorBuf {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
-    }
-
-    fn description(&self) -> &str {
-        "description() is deprecated; use Display"
     }
 }
 
@@ -89,11 +78,9 @@ mod tests {
 
     #[test]
     fn test_example_error() {
-        let err = ExampleError {
+        let _err = ExampleError {
             span: Span::default(),
             data: 3,
         };
-        let some_string = format!("{}", err);
-        assert_eq!(some_string, "thing failed: 3");
     }
 }

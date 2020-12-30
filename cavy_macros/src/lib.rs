@@ -20,7 +20,7 @@ pub fn diagnostic(input: TokenStream) -> TokenStream {
 fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     let name = &ast.ident;
     let DiagnosticData {
-        main_span: _,
+        main_span,
         msg,
         fmt_fields,
     } = DiagnosticData::new(&ast);
@@ -32,13 +32,16 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
             }
         }
 
-        impl std::fmt::Display for #name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, #msg, #(#fmt_fields = self.#fmt_fields,)*)
+        impl Diagnostic for #name {
+            fn message(&self) -> String {
+                format!(#msg, #(#fmt_fields = self.#fmt_fields,)*)
+            }
+
+            fn main_span(&self) -> &Span {
+                &self.#main_span
             }
         }
 
-        impl Error for #name { }
     };
     expanded.into()
 }
