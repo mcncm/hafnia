@@ -112,8 +112,8 @@ impl<'a> Repl<'a> {
         if phase < &sys::CompilerPhase::Tokenize {
             return Ok(());
         }
-        let source = self.src_store.insert_input(input);
-        let tokens = Scanner::new(&source).tokenize()?;
+        let mut source = self.src_store.insert_input(input);
+        let tokens = Scanner::new(&mut source).tokenize()?;
 
         if phase < &sys::CompilerPhase::Parse {
             // I wonder if there’s another way to factor this code so that I

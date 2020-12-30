@@ -637,7 +637,7 @@ mod errors {
 
     #[derive(Diagnostic)]
     pub struct ExpectedToken {
-        #[msg = "expected token `{expected}`, found `{actual}`"]
+        #[msg = "expected `{expected}`, found `{actual}`"]
         pub span: Span,
         /// The expected lexeme
         pub expected: Lexeme,
@@ -647,7 +647,7 @@ mod errors {
 
     #[derive(Diagnostic)]
     pub struct ExpectedIdentifier {
-        #[msg = "expected identifier; found `{actual}`"]
+        #[msg = "expected identifier, found `{actual}`"]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,

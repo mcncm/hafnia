@@ -72,16 +72,21 @@ fn is_ident_char(ch: char) -> bool {
 }
 
 struct ScanHead<'src> {
+    /// The source code, borrowed immutably from the SrcObject
     src: Peekable<Chars<'src>>,
+    /// The newlines from the SrcObject, to be filled in as the ScanHead passes
+    /// over them.
+    newlines: &'src mut Vec<usize>,
     pub pos: usize,  // absolute position in source
     pub line: usize, // line number in source
     pub col: usize,  // column number in source
 }
 
 impl<'src> ScanHead<'src> {
-    fn new(src: Peekable<Chars<'src>>) -> Self {
+    fn new(src: Peekable<Chars<'src>>, newlines: &'src mut Vec<usize>) -> Self {
         Self {
             src,
+            newlines,
             pos: 0,
             line: 1,
             col: 1,
@@ -104,6 +109,7 @@ impl<'src> ScanHead<'src> {
             self.pos += 1;
             self.col += 1;
             if ch == '\n' {
+                self.newlines.push(self.pos);
                 self.line += 1;
                 self.col = 1;
             }
@@ -121,23 +127,38 @@ impl<'src> ScanHead<'src> {
         }
     }
 
+    /// Advance until reaching a newline character. This might not work if
+    /// newlines are `\r\n`.
     pub fn advance_to_newline(&mut self) {
         self.advance_to('\n');
     }
 
+    /// Advance until the next raw character is not a whitespace character
+    fn advance_to_non_whitespace(&mut self) {
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_whitespace() {
+                self.next_raw_char();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Noke that this isn't an implementation of Peekable; the return type is
+    /// different from that of `next`. This is probably a flaw.
     fn peek(&mut self) -> Option<&char> {
         self.src.peek()
     }
 }
 
 impl<'src> Iterator for ScanHead<'src> {
-    type Item = char;
+    type Item = (SrcPoint, char);
 
     // Advance the scan head to the next character, filtering whitespace.
-    fn next(&mut self) -> Option<char> {
-        while let Some(ch) = self.next_raw_char() {
+    fn next(&mut self) -> Option<(SrcPoint, char)> {
+        while let (pt, Some(ch)) = (self.loc(), self.next_raw_char()) {
             if !ch.is_ascii_whitespace() {
-                return Some(ch);
+                return Some((pt, ch));
             }
         }
         None
@@ -145,7 +166,14 @@ impl<'src> Iterator for ScanHead<'src> {
 }
 
 pub struct TokenBuf {
+    /// The point of the first char in the currenly buffer
     start: SrcPoint,
+    /// The current point in the current buffer. Note that this is not always in
+    /// a "valid" state: at the beginning of parsing, both `start` and `point`
+    /// are the zero point, but there are no characters in the buffer. Only when
+    /// the first character is pushed does that state become valid. However, it
+    /// should never result in an incorrect span ending up in the AST.
+    point: SrcPoint,
     // NOTE this doesn't need to be a Vec<char>; it could just be a pointer
     // pair, if you replace the source code iterator with a simple &str.
     chars: Vec<char>,
@@ -155,12 +183,15 @@ impl TokenBuf {
     fn new() -> Self {
         Self {
             start: SrcPoint::default(),
+            // Again, this state is invalid at program start--but it's not a problem!
+            point: SrcPoint::default(),
             chars: vec![],
         }
     }
 
-    fn push(&mut self, ch: char) {
-        self.chars.push(ch);
+    fn push(&mut self, ch: (SrcPoint, char)) {
+        self.point = ch.0;
+        self.chars.push(ch.1);
     }
 
     fn digest(&mut self) -> String {
@@ -184,23 +215,20 @@ pub struct Scanner<'src> {
 // Adds a lexed token to a Scanner's `tokens` vector.
 macro_rules! push_token {
     ($self:ident, $tok:ident$(($($arg:expr),*))?) => {
-        let span = Span {
-            start: $self.token_buf.start.clone(),
-            end: $self.scan_head.loc(),
-            src_id: $self.src_id,
-        };
+        let span = $self.token_span();
         $self.tokens.push(Token {
             lexeme: $tok$(($($arg),+))?,
             span,
         });
+        $self.scan_head.advance_to_non_whitespace();
         $self.token_buf.clear();
     };
 }
 
 impl<'s> Scanner<'s> {
-    pub fn new(src: &'s SrcObject) -> Self {
+    pub fn new(src: &'s mut SrcObject) -> Self {
         Scanner {
-            scan_head: ScanHead::new(src.code.chars().peekable()),
+            scan_head: ScanHead::new(src.code.chars().peekable(), &mut src.newlines),
             src_id: src.id,
             token_buf: TokenBuf::new(),
             tokens: vec![],
@@ -222,14 +250,14 @@ impl<'s> Scanner<'s> {
     fn token_span(&self) -> Span {
         Span {
             start: self.token_buf.start,
-            end: self.scan_head.loc(),
+            end: self.token_buf.point,
             src_id: self.src_id,
         }
     }
 
     fn next_char(&mut self) -> Option<char> {
-        self.scan_head.next().map(|ch| {
-            self.token_buf.push(ch);
+        self.scan_head.next().map(|(pt, ch)| {
+            self.token_buf.push((pt, ch));
             ch
         })
     }
@@ -267,11 +295,19 @@ impl<'s> Scanner<'s> {
     /// tokens or of representable errors that the caller is expected, in one
     /// way or another, to display to the user.
     pub fn tokenize(mut self) -> Result<Vec<Token>, ErrorBuf> {
-        // The invariant for this loop is that we're beginning a new token on
-        // each iteration. However, there's no way to add an assertion for this
-        // condition while using `while let` syntax. This is probably fine for now.
-        self.token_buf.start = self.scan_head.loc();
-        while let Some(ch) = self.next_char() {
+        let mut ch;
+        loop {
+            // The invariant for this loop is that we're beginning a new token
+            // on each iteration. However, there's no way to add an assertion
+            // for this condition while using `while let` syntax. This is
+            // probably fine for now.
+            self.token_buf.start = self.scan_head.loc();
+            if let Some(next_ch) = self.next_char() {
+                ch = next_ch;
+            } else {
+                break;
+            }
+
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
                 if let Some(lexeme) = TCTOKENS.get(&(ch, following)) {
@@ -401,8 +437,8 @@ mod tests {
                 )*
             )?
 
-            let src = SrcObject::from($code);
-            let scanner = Scanner::new(&src);
+            let mut src = SrcObject::from($code);
+            let scanner = Scanner::new(&mut src);
             let tokens = scanner.tokenize().unwrap();
 
             assert_eq!(tokens.len(), expected_tokens.len(), "expected same number of tokens.");
@@ -416,6 +452,11 @@ mod tests {
                 assert_eq!(token, expected_token, "tokens are not the same.");
             }
         };
+    }
+
+    fn check_span(token: &Token, start: usize, end: usize) {
+        assert_eq!(token.span.start.pos, start);
+        assert_eq!(token.span.end.pos, end);
     }
 
     //////////////////////////////////
@@ -536,6 +577,22 @@ mod tests {
     fn ident_keywords() {
         lex_test!("if else for let fn print true false";
                   If, Else, For, Let, Fn, Print, True, False);
+    }
+
+    ///////////
+    // Spans //
+    ///////////
+
+    #[test]
+    fn spans_correct() {
+        let mut src = SrcObject::from("fn hello()");
+        let scanner = Scanner::new(&mut src);
+        let tokens = scanner.tokenize().unwrap();
+        assert_eq!(tokens.len(), 4);
+        check_span(&tokens[0], 0, 1);
+        check_span(&tokens[1], 3, 7);
+        check_span(&tokens[2], 8, 8);
+        check_span(&tokens[3], 9, 9);
     }
 
     //////////////

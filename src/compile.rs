@@ -13,7 +13,7 @@ use crate::{
 use std::{error::Error, path::PathBuf};
 
 pub fn compile<'a, 's, C>(
-    src: SrcObject<'s>,
+    mut src: SrcObject<'s>,
     flags: Flags,
     arch: &'a Arch,
     target: &dyn Target<'a, ObjectCode = C>,
@@ -23,7 +23,7 @@ pub fn compile<'a, 's, C>(
     if last_phase < CompilerPhase::Tokenize {
         return Ok(None);
     }
-    let tokens = Scanner::new(&src).tokenize()?;
+    let tokens = Scanner::new(&mut src).tokenize()?;
 
     if last_phase < CompilerPhase::Parse {
         return Ok(None);

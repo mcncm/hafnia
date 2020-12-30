@@ -15,6 +15,9 @@ pub trait Diagnostic: std::fmt::Debug {
 
     /// Retrieves the main Span corresponding to the error
     fn main_span(&self) -> &Span;
+
+    /// Returns the error code
+    fn code(&self) -> &str;
 }
 
 /// Like `std::error::Error`, we would often like to enjoy automatic conversion

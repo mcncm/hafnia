@@ -739,8 +739,8 @@ mod tests {
         ($code:expr ; $tok:ident$(($($arg:expr),+))?) => {
             let expected_value = Value::$tok $(($($arg),+))?;
 
-            let src = SrcObject::from($code);
-            let tokens = Scanner::new(&src).tokenize().unwrap();
+            let mut src = SrcObject::from($code);
+            let tokens = Scanner::new(&mut src).tokenize().unwrap();
             let ast = Parser::new(tokens).expression().unwrap();
             let arch = Arch::default();
             let actual_value = Interpreter::new(&arch).evaluate(&ast);
@@ -750,9 +750,9 @@ mod tests {
     }
 
     fn test_program(prog: &'static str, expected_gates: Vec<Gate>) {
-        let src = SrcObject::from(prog);
+        let mut src = SrcObject::from(prog);
 
-        let tokens = Scanner::new(&src).tokenize().unwrap();
+        let tokens = Scanner::new(&mut src).tokenize().unwrap();
         let stmts = Parser::new(tokens).parse().unwrap();
         let arch = Arch::default();
         let mut interp = Interpreter::new(&arch);
