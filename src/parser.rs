@@ -1,15 +1,15 @@
 use crate::ast::{self, Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
-use crate::errors;
+use crate::cavy_errors::{self, ErrorBuf};
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
     Token,
 };
 use crate::types::Type;
-use errors::ErrorBuf;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::error::Error;
 use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -37,29 +37,6 @@ lazy_static! {
         m
     };
 }
-
-#[derive(Debug)]
-pub struct ParseError {
-    msg: &'static str,
-    token: Option<Token>,
-}
-
-impl fmt::Display for ParseError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.token {
-            Some(token) => {
-                write!(f, "Parsing error at `{}` [{}]: {}",
-                       token, token.span, self.msg)
-            } ,
-            None => {
-                write!(f, "Parsing error: {}", self.msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
@@ -103,7 +80,7 @@ impl Parser {
         loop {
             match self.declaration() {
                 Ok(Some(stmt)) => stmts.push(stmt),
-                Err(err) => self.errors.push(Box::new(err)),
+                Err(err) => self.errors.push(err),
                 Ok(None) => {
                     break;
                 }
@@ -117,39 +94,40 @@ impl Parser {
         }
     }
 
-    fn consume(&mut self, lexeme: Lexeme, msg: &'static str) -> Result<Token, ParseError> {
-        let token = self.tokens.next().ok_or(ParseError {
-            msg: "unexpected EOF",
-            token: None,
+    fn consume(&mut self, lexeme: Lexeme) -> Result<Token, Box<dyn Error>> {
+        let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
+            // FIXME this default is flagrantly incorrect
+            span: Span::default(),
         })?;
         if token.lexeme == lexeme {
             return Ok(token);
         }
-        Err(ParseError {
-            msg,
-            token: Some(token),
-        })
+        Err(Box::new(errors::ExpectedToken {
+            span: token.span,
+            expected: lexeme,
+            actual: token.lexeme,
+        }))
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
-    fn consume_ident(&mut self) -> Result<String, ParseError> {
+    fn consume_ident(&mut self) -> Result<String, Box<dyn Error>> {
         // TODO This unwrap isn’t safe; you could be at EOF
-        let token = self.tokens.next().ok_or(ParseError {
-            msg: "unexpected EOF",
-            token: None,
+        let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
+            // FIXME This span is blatantly wrong
+            span: Span::default(),
         })?;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(name),
-            _ => Err(ParseError {
-                msg: "expected identifier.",
-                token: Some(token),
-            }),
+            lexeme => Err(Box::new(errors::ExpectedIdentifier {
+                span: token.span,
+                actual: lexeme,
+            })),
         }
     }
 
     /// A declaration, which is either a definition or a statement
-    pub fn declaration(&mut self) -> Result<Option<Stmt>, ParseError> {
+    pub fn declaration(&mut self) -> Result<Option<Stmt>, Box<dyn Error>> {
         if self.peek_lexeme() == None {
             return Ok(None);
         }
@@ -165,7 +143,7 @@ impl Parser {
     }
 
     /// Produces a statement
-    pub fn statement(&mut self) -> Result<Stmt, ParseError> {
+    pub fn statement(&mut self) -> Result<Stmt, Box<dyn Error>> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
             Some(Let) => Ok(self.local()?),
@@ -184,15 +162,12 @@ impl Parser {
         }
     }
 
-    fn function_definition(&mut self) -> Result<Item, ParseError> {
+    fn function_definition(&mut self) -> Result<Item, Box<dyn Error>> {
         let name = self.consume_ident()?;
-        self.consume(
-            Lexeme::LParen,
-            "expected '(' at beginning of function parameters.",
-        )?;
+        self.consume(Lexeme::LParen)?;
         let params = self.finish_function_params()?;
         let typ = self.function_return_type()?;
-        self.consume(Lexeme::LBrace, "expected opening '{' for function body.")?;
+        self.consume(Lexeme::LBrace)?;
         let body = Box::new(self.block()?);
         let kind = ItemKind::Fn {
             name,
@@ -207,7 +182,7 @@ impl Parser {
         })
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>, ParseError> {
+    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>, Box<dyn Error>> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -216,19 +191,19 @@ impl Parser {
         while self.match_lexeme(Comma) {
             params.push(self.function_param()?);
         }
-        self.consume(RParen, "Missing ')' at end of tuple type")?;
+        self.consume(RParen)?;
 
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(String, Type), ParseError> {
+    fn function_param(&mut self) -> Result<(String, Type), Box<dyn Error>> {
         let name = self.consume_ident()?;
-        self.consume(Colon, "Missing ':' in function parameter")?;
+        self.consume(Colon)?;
         let ty = self.type_annotation()?;
         Ok((name, ty))
     }
 
-    fn function_return_type(&mut self) -> Result<Option<Type>, ParseError> {
+    fn function_return_type(&mut self) -> Result<Option<Type>, Box<dyn Error>> {
         if self.match_lexeme(MinusRAngle) {
             return Ok(Some(self.type_annotation()?));
         }
@@ -246,7 +221,7 @@ impl Parser {
     ///     x + 1
     /// }
     /// ```
-    fn local(&mut self) -> Result<Stmt, ParseError> {
+    fn local(&mut self) -> Result<Stmt, Box<dyn Error>> {
         self.forward();
         let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
@@ -254,23 +229,23 @@ impl Parser {
         } else {
             None
         };
-        self.consume(Lexeme::Equal, "missing '=' in assignment")?;
+        self.consume(Lexeme::Equal)?;
         let rhs = Box::new(self.expression()?);
         // But this could still be a *let expression statement*. We have to check
         // for this case.
         if self.match_lexeme(Lexeme::In) {
-            self.consume(Lexeme::LBrace, "expected '{' opening 'let' expression.")?;
+            self.consume(Lexeme::LBrace)?;
             let body = Box::new(self.block()?);
             let expr_kind = ExprKind::Let { lhs, rhs, body };
             Ok(StmtKind::Expr(Box::new(expr_kind.into())).into())
         } else {
-            self.consume(Lexeme::Semicolon, "missing ';' after assignment")?;
+            self.consume(Lexeme::Semicolon)?;
             Ok(StmtKind::Local { lhs, rhs, ty }.into())
         }
     }
 
     /// Recursively build an LValue
-    fn lvalue(&mut self) -> Result<LValue, ParseError> {
+    fn lvalue(&mut self) -> Result<LValue, Box<dyn Error>> {
         // TODO should check that all names are unique
         match self.peek_lexeme() {
             Some(Lexeme::Ident(_)) => {
@@ -295,7 +270,7 @@ impl Parser {
     /// NOTE We should inline this because it’s only called from `lvalue`, with which
     /// it is mutually recursive.
     #[inline(always)]
-    fn finish_lvalue_tuple(&mut self) -> Result<LValue, ParseError> {
+    fn finish_lvalue_tuple(&mut self) -> Result<LValue, Box<dyn Error>> {
         if self.match_lexeme(Lexeme::RParen) {
             return Ok(LValueKind::Tuple(vec![]).into());
         }
@@ -317,33 +292,27 @@ impl Parser {
             // grouping parentheses.
             head
         };
-        self.consume(RParen, "expected closing paren ')'")?;
+        self.consume(RParen)?;
         Ok(lvalue)
     }
 
-    fn print_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn print_stmt(&mut self) -> Result<Stmt, Box<dyn Error>> {
         self.forward();
         let expr = self.expression()?;
-        self.consume(Lexeme::Semicolon, "missing ';' after statement")?;
+        self.consume(Lexeme::Semicolon)?;
         Ok(StmtKind::Print(Box::new(expr)).into())
     }
 
-    fn if_expr(&mut self) -> Result<Expr, ParseError> {
+    fn if_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
         self.forward();
         // Here we assume that
         let cond = Box::new(self.expression()?);
-        self.consume(
-            Lexeme::LBrace,
-            "expected '{' opening direct branch of conditional.",
-        )?;
+        self.consume(Lexeme::LBrace)?;
         let then_branch = Box::new(self.block()?);
 
         let mut else_branch = None;
         if self.match_lexeme(Lexeme::Else) {
-            self.consume(
-                Lexeme::LBrace,
-                "expected '{' opening indirect branch of conditional.",
-            )?;
+            self.consume(Lexeme::LBrace)?;
             else_branch = Some(Box::new(self.block()?));
         }
         let kind = ExprKind::If {
@@ -354,22 +323,22 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn for_expr(&mut self) -> Result<Expr, ParseError> {
+    fn for_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
         self.forward();
         let bind = Box::new(self.lvalue()?);
-        self.consume(Lexeme::In, "expected 'in' in 'for' statement")?;
+        self.consume(Lexeme::In)?;
         let iter = Box::new(self.expression()?);
-        self.consume(Lexeme::LBrace, "expected '{' opening 'for' body.")?;
+        self.consume(Lexeme::LBrace)?;
         let body = Box::new(self.block()?);
         let kind = ExprKind::For { bind, iter, body };
         Ok(kind.into())
     }
 
-    fn block_expr(&mut self) -> Result<Expr, ParseError> {
+    fn block_expr(&mut self) -> Result<Expr, Box<dyn Error>> {
         Ok(ExprKind::Block(self.block()?).into())
     }
 
-    fn block(&mut self) -> Result<Block, ParseError> {
+    fn block(&mut self) -> Result<Block, Box<dyn Error>> {
         let mut stmts: Vec<Stmt> = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
             if lexeme == &Lexeme::RBrace {
@@ -377,17 +346,17 @@ impl Parser {
             }
             stmts.push(self.statement()?);
         }
-        self.consume(Lexeme::RBrace, "missing '}' at end of block")?;
+        self.consume(Lexeme::RBrace)?;
         Ok(Block { stmts })
     }
 
-    fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn expr_stmt(&mut self) -> Result<Stmt, Box<dyn Error>> {
         let res = StmtKind::Expr(Box::new(self.expression()?));
-        self.consume(Lexeme::Semicolon, "missing ';' after expression statement")?;
+        self.consume(Lexeme::Semicolon)?;
         Ok(res.into())
     }
 
-    pub fn expression(&mut self) -> Result<Expr, ParseError> {
+    pub fn expression(&mut self) -> Result<Expr, Box<dyn Error>> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
@@ -400,7 +369,7 @@ impl Parser {
         }
     }
 
-    fn unary(&mut self) -> Result<Expr, ParseError> {
+    fn unary(&mut self) -> Result<Expr, Box<dyn Error>> {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.tokens.next().unwrap();
             let right = self.unary()?;
@@ -415,7 +384,7 @@ impl Parser {
         self.call()
     }
 
-    fn finish_array(&mut self) -> Result<Expr, ParseError> {
+    fn finish_array(&mut self) -> Result<Expr, Box<dyn Error>> {
         // Empty array:
         if self.match_lexeme(RBracket) {
             return Ok(ExprKind::ExtArr(vec![]).into());
@@ -437,11 +406,11 @@ impl Parser {
             }
             ExprKind::ExtArr(items)
         };
-        self.consume(RBracket, "missing ']' at end of array")?;
+        self.consume(RBracket)?;
         Ok(arr.into())
     }
 
-    fn type_annotation(&mut self) -> Result<Type, ParseError> {
+    fn type_annotation(&mut self) -> Result<Type, Box<dyn Error>> {
         // NOTE: This can be refactored nicely if there is a distinction between
         // AST type annotations and language types.
         if self.peek_lexeme() == Some(&Question) {
@@ -489,20 +458,20 @@ impl Parser {
     }
 
     /// Finish parsing an array type.
-    fn finish_array_type(&mut self) -> Result<Type, ParseError> {
+    fn finish_array_type(&mut self) -> Result<Type, Box<dyn Error>> {
         let ty = self.type_annotation()?;
-        self.consume(RBracket, "missing ']' at end of array type")?;
+        self.consume(RBracket)?;
         Ok(Type::T_Array(Box::new(ty)))
     }
 
     /// Finish parsing a type that may be either a tuple or the unit type.
-    fn finish_tuple_type(&mut self) -> Result<Type, ParseError> {
+    fn finish_tuple_type(&mut self) -> Result<Type, Box<dyn Error>> {
         let mut types = vec![];
         while !self.match_lexeme(RParen) {
             types.push(self.type_annotation()?);
-            self.consume(Comma, "Missing ',' in tuple type")?;
+            self.consume(Comma)?;
         }
-        self.consume(RParen, "Missing ')' at end of tuple type")?;
+        self.consume(RParen)?;
         if types.is_empty() {
             Ok(Type::T_Unit)
         } else {
@@ -512,7 +481,7 @@ impl Parser {
 
     /// Call a function or index into an array.
     #[rustfmt::skip]
-    fn call(&mut self) -> Result<Expr, ParseError> {
+    fn call(&mut self) -> Result<Expr, Box<dyn Error>> {
         let mut expr = self.primary()?;
 
         // This is a function call
@@ -536,7 +505,7 @@ impl Parser {
 
     // Inline(always) because there is only one call site.
     #[inline(always)]
-    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr, ParseError> {
+    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr, Box<dyn Error>> {
         let mut args = vec![];
         if self.peek_lexeme() != Some(&RParen) {
             loop {
@@ -546,7 +515,7 @@ impl Parser {
                 }
             }
         }
-        let paren = self.consume(RParen, "expected closing paren ')'")?;
+        let paren = self.consume(RParen)?;
         let kind = ExprKind::Call {
             callee,
             args,
@@ -556,10 +525,10 @@ impl Parser {
     }
 
     #[inline(always)]
-    fn finish_index(&mut self, head: Expr) -> Result<Expr, ParseError> {
+    fn finish_index(&mut self, head: Expr) -> Result<Expr, Box<dyn Error>> {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
-        let bracket = self.consume(RBracket, "missing ']' at end of index")?;
+        let bracket = self.consume(RBracket)?;
         let kind = ExprKind::Index {
             head,
             index,
@@ -568,32 +537,31 @@ impl Parser {
         Ok(kind.into())
     }
 
-    fn primary(&mut self) -> Result<Expr, ParseError> {
-        match self.peek_lexeme().unwrap() {
+    fn primary(&mut self) -> Result<Expr, Box<dyn Error>> {
+        let token = self.tokens.next().unwrap();
+        match token.lexeme {
             Nat(_) | True | False => {
-                let kind = ExprKind::Literal(self.tokens.next().unwrap());
+                let kind = ExprKind::Literal(token);
                 Ok(kind.into())
             }
             Ident(_) => {
-                let token = self.tokens.next().unwrap();
                 let ident = ast::Ident::try_from(token).unwrap();
                 let kind = ExprKind::Ident(ident);
                 Ok(kind.into())
             }
-            LParen => {
-                self.forward();
-                self.finish_group()
-            }
-            _ => Err(ParseError {
-                token: self.tokens.next(),
-                msg: "not a primary token.",
-            }),
+            LParen => self.finish_group(),
+
+            lexeme => Err(Box::new(errors::ExpectedPrimaryToken {
+                // Guaranteed not to be EOF!
+                span: token.span,
+                actual: lexeme,
+            })),
         }
     }
 
     /// After reaching an `(` in the position of a primary token, we must have
     /// either a group or a sequence.
-    fn finish_group(&mut self) -> Result<Expr, ParseError> {
+    fn finish_group(&mut self) -> Result<Expr, Box<dyn Error>> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
         if self.match_lexeme(Lexeme::RParen) {
             return Ok(ExprKind::Tuple(vec![]).into());
@@ -616,11 +584,11 @@ impl Parser {
             // followed by a close-paren, and return a group.
             head
         };
-        self.consume(RParen, "expected closing paren ')'")?;
+        self.consume(RParen)?;
         Ok(expr)
     }
 
-    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, ParseError> {
+    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr, Box<dyn Error>> {
         let mut lhs = lhs.kind;
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {
@@ -657,6 +625,47 @@ impl Parser {
 
     fn synchronize(&mut self, _err: &str) {
         todo!();
+    }
+}
+
+mod errors {
+    use crate::cavy_errors::Diagnostic;
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+    // This will become redundant when diagnostics only implement `Diagnostic`
+    use super::Lexeme;
+    use std::error::Error;
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedToken {
+        #[msg = "expected token `{expected}`, found `{actual}`"]
+        pub span: Span,
+        /// The expected lexeme
+        pub expected: Lexeme,
+        /// The lexeme actually found
+        pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedIdentifier {
+        #[msg = "expected identifier; found `{actual}`"]
+        pub span: Span,
+        /// The lexeme actually found
+        pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct UnexpectedEOF {
+        #[msg = "unexpected end of file"]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedPrimaryToken {
+        #[msg = "expected primary token, found `{actual}`"]
+        pub span: Span,
+        /// The lexeme actually found
+        pub actual: Lexeme,
     }
 }
 

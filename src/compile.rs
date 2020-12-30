@@ -1,7 +1,7 @@
 use crate::{
     arch::Arch,
+    cavy_errors::ErrorBuf,
     circuit::Circuit,
-    errors::ErrorBuf,
     interpreter::Interpreter,
     parser::Parser,
     scanner::Scanner,

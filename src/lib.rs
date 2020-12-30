@@ -5,10 +5,10 @@
 pub mod alloc;
 pub mod arch;
 pub mod ast;
+pub mod cavy_errors;
 pub mod circuit;
 pub mod compile;
 pub mod environment;
-pub mod errors;
 pub mod functions;
 pub mod interpreter;
 pub mod parser;

@@ -3,11 +3,10 @@ use crate::arch::Arch;
 use crate::ast::{
     Block, Expr, ExprKind, Ident, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind,
 };
+use crate::cavy_errors::ErrorBuf;
 use crate::environment::{Environment, Key, Moveable, Nameable};
-use crate::errors::ErrorBuf;
-use crate::parser::ParseError;
 use crate::qram::Qram;
-use crate::scanner::{ScanError, Scanner};
+use crate::scanner::Scanner;
 use crate::source::Span;
 use crate::token::{Lexeme, Token};
 use crate::types::{self, Type};
@@ -22,29 +21,6 @@ use std::{
     fmt, mem,
     rc::Rc,
 };
-
-#[derive(Debug)]
-pub struct InterpreterError {
-    msg: String,
-    loc: Option<Span>,
-}
-
-impl fmt::Display for InterpreterError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.loc {
-            Some(loc) => {
-                write!(f, "Interpreter error at {}: {}",
-                       loc, self.msg)
-            } ,
-            None => {
-                write!(f, "Interpreter error: {}", self.msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for InterpreterError {}
 
 pub struct Interpreter<'a> {
     pub env: Environment,
@@ -388,17 +364,11 @@ impl<'a> Interpreter<'a> {
         match self.env.get(&name) {
             Some(There(Nameable::Value(val))) => Ok(val),
             Some(Moved) => {
-                let err = InterpreterError {
-                    msg: format!("the variable `{}` has been moved.", name),
-                    loc: Some(ident.span.clone()),
-                };
+                let err = errors::InterpreterError { span: ident.span };
                 Err(ErrorBuf(vec![Box::new(err)]))
             }
             None => {
-                let err = InterpreterError {
-                    msg: format!("the name `{}` is unbound.", name),
-                    loc: Some(ident.span.clone()),
-                };
+                let err = errors::InterpreterError { span: ident.span };
                 Err(ErrorBuf(vec![Box::new(err)]))
             }
             // In the near-term this should just be an error; in the
@@ -726,6 +696,20 @@ impl<'a> Interpreter<'a> {
             self.contra_stack.push(gate.clone().conjugate());
         }
         self.circuit.push_back(gate);
+    }
+}
+
+mod errors {
+    use crate::cavy_errors::Diagnostic;
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+    // This will become redundant when diagnostics only implement `Diagnostic`
+    use std::error::Error;
+
+    #[derive(Diagnostic)]
+    pub struct InterpreterError {
+        #[msg = "interpreter error"]
+        pub span: Span,
     }
 }
 

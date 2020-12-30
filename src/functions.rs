@@ -1,7 +1,7 @@
 use crate::{
     ast::{Block, Expr, ExprKind},
+    cavy_errors::ErrorBuf,
     environment::{Key, Nameable},
-    errors::ErrorBuf,
     interpreter::Interpreter,
     values::Value,
 };

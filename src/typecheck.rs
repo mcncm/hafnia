@@ -1,5 +1,5 @@
 use crate::ast::{Expr, ExprKind, Item, ItemKind, LValue, Stmt, StmtKind};
-use crate::errors::ErrorBuf;
+use crate::cavy_errors::ErrorBuf;
 use crate::functions::{Func, UserFunc};
 use crate::types::Type;
 use std::collections::HashMap;

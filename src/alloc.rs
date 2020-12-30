@@ -1,6 +1,6 @@
 use crate::arch::Arch;
+use crate::cavy_errors::ErrorBuf;
 use crate::circuit::Qubit;
-use crate::errors::ErrorBuf;
 use crate::values::Value;
 use std::convert::TryInto;
 

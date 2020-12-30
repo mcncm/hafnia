@@ -12,7 +12,7 @@ use syn::{parse_macro_input, DeriveInput};
 /// Builds a Cavy error struct implementing Diagnostic. This is supposed to
 /// resemble rustc's `SessionDiagnostic` in both form and function.
 #[proc_macro_derive(Diagnostic, attributes(msg))]
-pub fn cavy_error(input: TokenStream) -> TokenStream {
+pub fn diagnostic(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     impl_cavy_error_macro(input)
 }
@@ -37,6 +37,8 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
                 write!(f, #msg, #(#fmt_fields = self.#fmt_fields,)*)
             }
         }
+
+        impl Error for #name { }
     };
     expanded.into()
 }
@@ -87,8 +89,6 @@ impl<'ast> DiagnosticData<'ast> {
                             } else {
                                 panic!("two main spans in diagnostic");
                             }
-                        } else {
-                            panic!("unexpected attribute '{}'", ident);
                         }
                     }
                     _ => panic!("unexpected attribute in diagnostic"),

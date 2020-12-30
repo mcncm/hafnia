@@ -1,7 +1,7 @@
 use crate::source::{Span, SrcId, SrcObject, SrcPoint};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
-    errors::ErrorBuf,
+    cavy_errors::ErrorBuf,
     token::{Lexeme, Token, Unsigned},
 };
 use lazy_static::lazy_static;
@@ -70,24 +70,6 @@ lazy_static! {
 fn is_ident_char(ch: char) -> bool {
     ch.is_alphanumeric() | (ch == '_')
 }
-
-#[derive(Debug)]
-pub struct ScanError {
-    loc: Span,
-    msg: &'static str,
-    chars: String,
-}
-
-impl fmt::Display for ScanError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Scanning error in '{}' [{}]: {}",
-              self.chars, self.loc, self.msg
-        )
-    }
-}
-
-impl std::error::Error for ScanError {}
 
 struct ScanHead<'src> {
     src: Peekable<Chars<'src>>,
@@ -162,12 +144,39 @@ impl<'src> Iterator for ScanHead<'src> {
     }
 }
 
+pub struct TokenBuf {
+    start: SrcPoint,
+    // NOTE this doesn't need to be a Vec<char>; it could just be a pointer
+    // pair, if you replace the source code iterator with a simple &str.
+    chars: Vec<char>,
+}
+
+impl TokenBuf {
+    fn new() -> Self {
+        Self {
+            start: SrcPoint::default(),
+            chars: vec![],
+        }
+    }
+
+    fn push(&mut self, ch: char) {
+        self.chars.push(ch);
+    }
+
+    fn digest(&mut self) -> String {
+        self.chars.iter().collect()
+    }
+
+    fn clear(&mut self) {
+        self.chars.clear();
+    }
+}
+
 pub struct Scanner<'src> {
     // Scanner data
     scan_head: ScanHead<'src>,
     src_id: SrcId,
-    token_buf: Vec<char>,
-    token_start: SrcPoint,
+    token_buf: TokenBuf,
     tokens: Vec<Token>,
     errors: ErrorBuf,
 }
@@ -176,7 +185,7 @@ pub struct Scanner<'src> {
 macro_rules! push_token {
     ($self:ident, $tok:ident$(($($arg:expr),*))?) => {
         let span = Span {
-            start: $self.token_start.clone(),
+            start: $self.token_buf.start.clone(),
             end: $self.scan_head.loc(),
             src_id: $self.src_id,
         };
@@ -193,10 +202,28 @@ impl<'s> Scanner<'s> {
         Scanner {
             scan_head: ScanHead::new(src.code.chars().peekable()),
             src_id: src.id,
-            token_buf: vec![],
-            token_start: SrcPoint::zero(),
+            token_buf: TokenBuf::new(),
             tokens: vec![],
             errors: ErrorBuf::new(),
+        }
+    }
+
+    /// Get a single-character Span at the current point
+    fn loc_span(&self) -> Span {
+        let pt = self.scan_head.loc();
+        Span {
+            start: pt,
+            end: pt,
+            src_id: self.src_id,
+        }
+    }
+
+    /// The current Span between from token start to the current point
+    fn token_span(&self) -> Span {
+        Span {
+            start: self.token_buf.start,
+            end: self.scan_head.loc(),
+            src_id: self.src_id,
         }
     }
 
@@ -207,29 +234,27 @@ impl<'s> Scanner<'s> {
         })
     }
 
-    // abort this token; advance to the next whitespace character and empty the
-    // token buffer.
-    fn scrub_token(&mut self, msg: &'static str) {
-        let loc = self.synchronize_to_whitespace();
-        let loc = Span {
-            start: loc.clone(),
-            end: loc,
-            src_id: self.src_id,
-        };
-        self.errors.push(Box::new(ScanError {
-            loc,
-            msg,
-            chars: self.token_buf.iter().collect(),
-        }));
-        self.token_buf.clear();
-    }
-
-    // Advance the scan head to the next whitespace character, and return
-    // position before advancing.
+    /// Advance the scan head to the next whitespace character, and return
+    /// position before advancing.
     pub fn synchronize_to_whitespace(&mut self) -> SrcPoint {
         let loc = self.scan_head.loc();
         while let Some(ch) = self.scan_head.peek() {
             if !ch.is_ascii_whitespace() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        loc
+    }
+
+    /// Advance the scan head to the next non-alphanumeric character, and return
+    /// position before advancing. Here, 'alphanumeric' is understood as an
+    /// 'identifier' character, which includes `_`.
+    pub fn synchronize_to_non_alphanum(&mut self) -> SrcPoint {
+        let loc = self.scan_head.loc();
+        while let Some(ch) = self.scan_head.peek() {
+            if is_ident_char(*ch) {
                 self.next_char();
             } else {
                 break;
@@ -245,6 +270,7 @@ impl<'s> Scanner<'s> {
         // The invariant for this loop is that we're beginning a new token on
         // each iteration. However, there's no way to add an assertion for this
         // condition while using `while let` syntax. This is probably fine for now.
+        self.token_buf.start = self.scan_head.loc();
         while let Some(ch) = self.next_char() {
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
@@ -256,7 +282,7 @@ impl<'s> Scanner<'s> {
                     continue;
                 } else if (ch, following) == ('/', '/') {
                     // In a comment: proceed to the next line
-                    self.token_buf.pop(); // The buffer has a '/' in it.
+                    self.token_buf.clear(); // The buffer has a '/' in it.
                     self.scan_head.advance_to_newline();
                     continue;
                 }
@@ -291,8 +317,12 @@ impl<'s> Scanner<'s> {
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
                 self.next_char();
-            } else if ch.is_alphabetic() {
-                self.scrub_token("Numeric tokens may not contain alphabetic characters.");
+            } else if is_ident_char(*ch) {
+                self.errors.push(Box::new(errors::NonDigitInNumber {
+                    span: self.loc_span(),
+                }));
+                self.synchronize_to_non_alphanum();
+                self.token_buf.clear();
                 return;
             } else {
                 break;
@@ -300,11 +330,14 @@ impl<'s> Scanner<'s> {
         }
 
         // Shouldn't fail except for numbers larger than an `Unsigned`!
-        let value: Result<Unsigned, _> = self.token_buf.iter().collect::<String>().parse();
+        let value: Result<Unsigned, _> = self.token_buf.digest().parse();
         if let Ok(value) = value {
             push_token!(self, Nat(value));
         } else {
-            self.scrub_token("Failed to parse numeric token.");
+            self.errors.push(Box::new(errors::UnparsableNumber {
+                span: self.token_span(),
+            }));
+            self.token_buf.clear();
         }
     }
 
@@ -320,13 +353,33 @@ impl<'s> Scanner<'s> {
             }
         }
 
-        let ident: String = self.token_buf.iter().collect();
+        let ident: String = self.token_buf.digest();
         if let Some(keyword) = KEYWORDS.get(ident.as_str()) {
             let keyword = keyword.clone();
             push_token!(self, keyword);
         } else {
             push_token!(self, Ident(ident));
         }
+    }
+}
+
+mod errors {
+    use crate::cavy_errors::Diagnostic;
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+    // This will become redundant when diagnostics only implement `Diagnostic`
+    use std::error::Error;
+
+    #[derive(Diagnostic)]
+    pub struct NonDigitInNumber {
+        #[msg = "numeric literals may only contain digits"]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct UnparsableNumber {
+        #[msg = "unparsable number"]
+        pub span: Span,
     }
 }
 

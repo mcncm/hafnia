@@ -1,5 +1,5 @@
 use crate::arch::Arch;
-use crate::errors::{self, ErrorBuf};
+use crate::cavy_errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::Scanner;

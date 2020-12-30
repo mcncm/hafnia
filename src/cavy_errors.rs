@@ -4,7 +4,7 @@ use std::fmt;
 
 /// The main trait for language errors encountered in lexing, parsing, semantic
 /// analysis, and code generation.
-pub trait Diagnostic: fmt::Debug + fmt::Display {
+pub trait Diagnostic: Error {
     fn level(&self) -> &DiagnosticLevel {
         &DiagnosticLevel::Error
     }

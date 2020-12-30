@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use cavy::arch;
-use cavy::errors::ErrorBuf;
+use cavy::cavy_errors::ErrorBuf;
 use cavy::repl::Repl;
 use cavy::source::{SrcObject, SrcStore};
 use cavy::target;
