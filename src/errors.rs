@@ -2,6 +2,22 @@ use crate::sys;
 use std::error::Error;
 use std::fmt;
 
+/// The main trait for language errors encountered in lexing, parsing, semantic
+/// analysis, and code generation.
+pub trait Diagnostic: fmt::Debug + fmt::Display {
+    fn level(&self) -> &DiagnosticLevel {
+        &DiagnosticLevel::Error
+    }
+}
+
+/// The kinds of diagnostics that can be emitted by the compiler.
+pub enum DiagnosticLevel {
+    /// Considered an error; will cause compilation to fail.
+    Error,
+    /// Considered a warning or lint; will not end compilation.
+    Warn,
+}
+
 /// Let’s simplify error propagation with with a typedef. This should be an
 /// acceptable thing to do; it mimics `io::Result`, and it's seen in plenty of
 /// projects.
@@ -55,5 +71,29 @@ impl Error for ErrorBuf {
 
     fn description(&self) -> &str {
         "description() is deprecated; use Display"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+
+    #[derive(Diagnostic)]
+    struct ExampleError {
+        #[msg = "thing failed: {data}"]
+        span: Span,
+        data: u8,
+    }
+
+    #[test]
+    fn test_example_error() {
+        let err = ExampleError {
+            span: Span::default(),
+            data: 3,
+        };
+        let some_string = format!("{}", err);
+        assert_eq!(some_string, "thing failed: 3");
     }
 }
