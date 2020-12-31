@@ -1,7 +1,7 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
 use crate::ast::{
-    Block, Expr, ExprKind, Ident, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind,
+    Annot, Block, Expr, ExprKind, Ident, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind,
 };
 use crate::cavy_errors::ErrorBuf;
 use crate::environment::{Environment, Key, Moveable, Nameable};
@@ -146,7 +146,7 @@ impl<'a> Interpreter<'a> {
     fn exec_fn(
         &mut self,
         name: &str,
-        params: &[(String, Type)],
+        params: &[(String, Annot)],
         body: &Block,
     ) -> Result<(), ErrorBuf> {
         let params = params

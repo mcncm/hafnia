@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Item, ItemKind, LValue, Stmt, StmtKind};
+use crate::ast::*;
 use crate::cavy_errors::ErrorBuf;
 use crate::functions::{Func, UserFunc};
 use crate::types::Type;
@@ -81,12 +81,11 @@ impl<'ast> SymbolTable<'ast> {
         match &item.kind {
             ItemKind::Fn {
                 name,
-                params: _params,
-                typ,
+                params: _,
+                typ: _,
                 body,
                 docstring,
             } => {
-                let _ty = typ.as_ref().unwrap_or(&Type::T_Unit);
                 let func = Box::new(UserFunc {
                     params: vec![],
                     // FIXME temporarily defeating the borrow checker
@@ -94,7 +93,7 @@ impl<'ast> SymbolTable<'ast> {
                     doc: docstring.clone(),
                 });
                 let symb = Symbol {
-                    ty: Type::T_Unit,
+                    ty: Type::unit(),
                     kind: SymbolKind::Fn(func),
                 };
                 self.symbols.insert(&name, symb);
@@ -102,5 +101,5 @@ impl<'ast> SymbolTable<'ast> {
         }
     }
 
-    fn insert_local(&mut self, _lhs: &LValue, _ty: &Option<Box<Type>>, _rhs: &Expr) {}
+    fn insert_local(&mut self, _lhs: &LValue, _ty: &Option<Annot>, _rhs: &Expr) {}
 }

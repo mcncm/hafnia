@@ -1,6 +1,5 @@
 use crate::source::Span;
 use crate::token::Token;
-use crate::types::Type;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -174,7 +173,7 @@ pub enum StmtKind {
         /// lvalues appear, as in the bound expression in a for loop.
         lhs: Box<LValue>,
         /// A type annotation, as in `let x: u8 = 0;`
-        ty: Option<Box<Type>>,
+        ty: Option<Annot>,
         rhs: Box<Expr>,
     },
     Item(Item),
@@ -203,9 +202,9 @@ pub enum ItemKind {
         /// Function identifier
         name: String,
         /// Function parameters consisting of name-type pairs
-        params: Vec<(String, Type)>,
+        params: Vec<(String, Annot)>,
         /// Return type of the function
-        typ: Option<Type>,
+        typ: Option<Annot>,
         /// Body of the function; guaranteed to be a block.
         body: Box<Block>,
         docstring: Option<String>,
@@ -234,4 +233,34 @@ pub enum LValueKind {
     Ident(Ident),
     /// Sequence of the form (a, b, c)
     Tuple(Vec<LValue>),
+}
+
+/// Type annotations. These are distinct from, and not convertible to types. The
+/// reason is that there may be identical type annotations that resolve to
+/// different types within different scopes.
+#[derive(Debug, Clone)]
+pub struct Annot {
+    pub kind: AnnotKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum AnnotKind {
+    Unit,
+
+    Bool,
+    U8,
+    U16,
+    U32,
+
+    Tuple(Vec<Annot>),
+    Array(Box<Annot>),
+
+    /// Linearization of a type annotation: e.g. `?u8`
+    Question(Box<Annot>),
+    /// Delinearization of a type annotation: e.g. `!Cat`
+    Bang(Box<Annot>),
+
+    /// User-defined types
+    Ident(Ident),
 }

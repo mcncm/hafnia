@@ -50,22 +50,22 @@ impl Value {
     }
 
     pub fn type_of(&self) -> crate::types::Type {
-        use crate::types::Type::*;
+        use crate::types::Type;
         use Value::*;
         match self {
-            Unit => T_Unit,
+            Unit => Type::Tuple(vec![]),
 
-            Bool(_) => T_Bool,
-            U8(_) => T_U8,
-            U16(_) => T_U16,
-            U32(_) => T_U32,
+            Bool(_) => Type::Bool,
+            U8(_) => Type::U8,
+            U16(_) => Type::U16,
+            U32(_) => Type::U32,
 
-            Q_Bool(_) => T_Q_Bool,
-            Q_U8(_) => T_Q_U8,
-            Q_U16(_) => T_Q_U16,
-            Q_U32(_) => T_Q_U32,
+            Q_Bool(_) => Type::Q_Bool,
+            Q_U8(_) => Type::Q_U8,
+            Q_U16(_) => Type::Q_U16,
+            Q_U32(_) => Type::Q_U32,
 
-            Tuple(data) => T_Tuple(data.iter().map(|elem| elem.type_of()).collect()),
+            Tuple(data) => Type::Tuple(data.iter().map(|elem| elem.type_of()).collect()),
 
             // NOTE: This here reveals the inadequacy of values, rather than
             // expressions, having types. We can’t know the type of an expression
@@ -73,12 +73,12 @@ impl Value {
             // cannot evaluate the expression, because it might have side-effects
             // like allocation. We must make some peculiar compromise like arrays
             // being untyped, or empty arrays having their own type.
-            Array(data) => T_Array(match data.len() {
-                0 => Box::new(T_Unit),
+            Array(data) => Type::Array(match data.len() {
+                0 => Box::new(Type::unit()),
                 _ => Box::new(data[0].type_of()),
             }),
 
-            Measured(val) => T_Measured(Box::new(val.type_of())),
+            Measured(val) => Type::Measured(Box::new(val.type_of())),
         }
     }
 

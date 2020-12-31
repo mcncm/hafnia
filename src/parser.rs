@@ -1,4 +1,4 @@
-use crate::ast::{self, Block, Expr, ExprKind, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind};
+use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Result};
 use crate::source::Span;
 use crate::token::{
@@ -94,7 +94,7 @@ impl Parser {
     }
 
     fn consume(&mut self, lexeme: Lexeme) -> Result<Token> {
-        let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
+        let token = self.tokens.next().ok_or(errors::UnexpectedEof {
             // FIXME this default is flagrantly incorrect
             span: Span::default(),
         })?;
@@ -112,7 +112,7 @@ impl Parser {
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
     fn consume_ident(&mut self) -> Result<String> {
         // TODO This unwrap isn’t safe; you could be at EOF
-        let token = self.tokens.next().ok_or(errors::UnexpectedEOF {
+        let token = self.tokens.next().ok_or(errors::UnexpectedEof {
             // FIXME This span is blatantly wrong
             span: Span::default(),
         })?;
@@ -181,7 +181,7 @@ impl Parser {
         })
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(String, Type)>> {
+    fn finish_function_params(&mut self) -> Result<Vec<(String, Annot)>> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -195,14 +195,14 @@ impl Parser {
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(String, Type)> {
+    fn function_param(&mut self) -> Result<(String, Annot)> {
         let name = self.consume_ident()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
         Ok((name, ty))
     }
 
-    fn function_return_type(&mut self) -> Result<Option<Type>> {
+    fn function_return_type(&mut self) -> Result<Option<Annot>> {
         if self.match_lexeme(MinusRAngle) {
             return Ok(Some(self.type_annotation()?));
         }
@@ -224,7 +224,7 @@ impl Parser {
         self.forward();
         let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
-            Some(Box::new(self.type_annotation()?))
+            Some(self.type_annotation()?)
         } else {
             None
         };
@@ -409,46 +409,42 @@ impl Parser {
         Ok(arr.into())
     }
 
-    fn type_annotation(&mut self) -> Result<Type> {
-        // NOTE: This can be refactored nicely if there is a distinction between
-        // AST type annotations and language types.
-        if self.peek_lexeme() == Some(&Question) {
-            self.forward();
-            let ty = match self.peek_lexeme() {
-                Some(Bool) => Type::T_Q_Bool,
-                Some(U8) => Type::T_Q_U8,
-                Some(U16) => Type::T_Q_U16,
-                Some(U32) => Type::T_Q_U32,
-                _ => todo!(), // Error for now
-            };
-            self.forward();
-            return Ok(ty);
-        }
+    fn type_annotation(&mut self) -> Result<Annot> {
+        // Get another token. We're anticipating being able to form a type
+        // annotation here, so it's an error if none is available.
+        let Token { lexeme, span } = self.tokens.next().ok_or(errors::UnexpectedEof {
+            // FIXME this default is flagrantly incorrect
+            span: Span::default(),
+        })?;
 
-        let ty = match self.peek_lexeme() {
-            Some(Bool) => {
-                self.tokens.next();
-                Type::T_Bool
-            }
-            Some(U8) => {
-                self.tokens.next();
-                Type::T_U8
-            }
-            Some(U16) => {
-                self.tokens.next();
-                Type::T_U16
-            }
-            Some(U32) => {
-                self.tokens.next();
-                Type::T_U32
-            }
-            Some(LBracket) => {
-                self.tokens.next();
-                self.finish_array_type()?
-            }
-            Some(LParen) => {
-                self.tokens.next();
-                self.finish_tuple_type()?
+        // TODO How to make this more succinct: a macro? It doesn't seem
+        // possible for macros to expand to match arms. An or-pattern? Not
+        // stable yet.
+        let ty = match lexeme {
+            Bool => Annot {
+                span,
+                kind: AnnotKind::Bool,
+            },
+            U8 => Annot {
+                span,
+                kind: AnnotKind::U8,
+            },
+            U16 => Annot {
+                span,
+                kind: AnnotKind::U16,
+            },
+            U32 => Annot {
+                span,
+                kind: AnnotKind::U32,
+            },
+            LBracket => self.finish_array_type(span)?,
+            LParen => self.finish_tuple_type(span)?,
+            Question => {
+                let ty_inner = self.type_annotation()?;
+                Annot {
+                    span: span.join(&ty_inner.span).unwrap(),
+                    kind: AnnotKind::Question(Box::new(ty_inner)),
+                }
             }
             _ => todo!(),
         };
@@ -457,25 +453,31 @@ impl Parser {
     }
 
     /// Finish parsing an array type.
-    fn finish_array_type(&mut self) -> Result<Type> {
-        let ty = self.type_annotation()?;
-        self.consume(RBracket)?;
-        Ok(Type::T_Array(Box::new(ty)))
+    fn finish_array_type(&mut self, opening: Span) -> Result<Annot> {
+        let ty = Box::new(self.type_annotation()?);
+        let closing = self.consume(RBracket)?;
+        let span = opening.join(&closing.span).unwrap();
+        Ok(Annot {
+            span,
+            kind: AnnotKind::Array(ty),
+        })
     }
 
     /// Finish parsing a type that may be either a tuple or the unit type.
-    fn finish_tuple_type(&mut self) -> Result<Type> {
+    fn finish_tuple_type(&mut self, opening: Span) -> Result<Annot> {
         let mut types = vec![];
         while !self.match_lexeme(RParen) {
             types.push(self.type_annotation()?);
             self.consume(Comma)?;
         }
-        self.consume(RParen)?;
-        if types.is_empty() {
-            Ok(Type::T_Unit)
+        let closing = self.consume(RParen)?;
+        let span = opening.join(&closing.span).unwrap();
+        let kind = if types.is_empty() {
+            AnnotKind::Unit
         } else {
-            Ok(Type::T_Tuple(types))
-        }
+            AnnotKind::Tuple(types)
+        };
+        Ok(Annot { span, kind })
     }
 
     /// Call a function or index into an array.
@@ -654,7 +656,7 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    pub struct UnexpectedEOF {
+    pub struct UnexpectedEof {
         #[msg = "unexpected end of file"]
         pub span: Span,
     }

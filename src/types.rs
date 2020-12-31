@@ -34,60 +34,62 @@ struct StructuralDiscipline {
 #[allow(non_camel_case_types)]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    T_Unit,
-
-    T_Bool,
-    T_U8,
-    T_U16,
-    T_U32,
+    Bool,
+    U8,
+    U16,
+    U32,
 
     // Linear types
-    T_Q_Bool,
-    T_Q_U8,
-    T_Q_U16,
-    T_Q_U32,
+    Q_Bool,
+    Q_U8,
+    Q_U16,
+    Q_U32,
 
     // Tuple
-    T_Tuple(Vec<Type>),
+    Tuple(Vec<Type>),
 
     // Array
-    T_Array(Box<Type>),
+    Array(Box<Type>),
 
     // Struct
-    T_Struct(HashMap<String, Type>),
+    Struct(HashMap<String, Type>),
 
     // Type of measured value
-    T_Measured(Box<Type>),
+    Measured(Box<Type>),
 }
 
 impl Type {
+    /// Create an instance of the unit type
+    pub fn unit() -> Self {
+        Type::Tuple(vec![])
+    }
+
     /// Check the structural properties of each type
     #[rustfmt::skip]
     fn discipline(&self) -> StructuralDiscipline {
         use Type::*;
         match self {
-            T_Unit =>            StructuralDiscipline { linear: false },
-            T_Bool =>            StructuralDiscipline { linear: false },
-            T_U8 =>              StructuralDiscipline { linear: false },
-            T_U16 =>             StructuralDiscipline { linear: false },
-            T_U32 =>             StructuralDiscipline { linear: false },
+            Bool =>            StructuralDiscipline { linear: false },
+            U8 =>              StructuralDiscipline { linear: false },
+            U16 =>             StructuralDiscipline { linear: false },
+            U32 =>             StructuralDiscipline { linear: false },
 
-            T_Q_Bool =>          StructuralDiscipline { linear: true },
-            T_Q_U8 =>            StructuralDiscipline { linear: true },
-            T_Q_U16 =>           StructuralDiscipline { linear: true },
-            T_Q_U32 =>           StructuralDiscipline { linear: true },
+            Q_Bool =>          StructuralDiscipline { linear: true },
+            Q_U8 =>            StructuralDiscipline { linear: true },
+            Q_U16 =>           StructuralDiscipline { linear: true },
+            Q_U32 =>           StructuralDiscipline { linear: true },
 
-            T_Array(ty) =>      ty.discipline(),
+            Array(ty) =>      ty.discipline(),
 
             // Tuples and structs are as constrained as their most constrained member
-            T_Tuple(types) =>    StructuralDiscipline {
+            Tuple(types) =>    StructuralDiscipline {
                 linear: types.iter().any(|val| val.discipline().linear),
             },
-            T_Struct(members) => StructuralDiscipline {
+            Struct(members) => StructuralDiscipline {
                 linear: members.values().any(|val| val.discipline().linear),
             },
 
-            T_Measured(_) =>     StructuralDiscipline { linear: false },
+            Measured(_) =>     StructuralDiscipline { linear: false },
         }
     }
 
@@ -103,28 +105,26 @@ impl fmt::Display for Type {
         use Type::*;
 
         match self {
-            T_Unit => write!(f, "()"),
+            Bool => write!(f, "bool"),
+            U8 =>   write!(f, "u8"),
+            U16 =>  write!(f, "u16"),
+            U32 =>  write!(f, "u32"),
 
-            T_Bool => write!(f, "bool"),
-            T_U8 =>   write!(f, "u8"),
-            T_U16 =>  write!(f, "u16"),
-            T_U32 =>  write!(f, "u32"),
+            Q_Bool => write!(f, "?bool"),
+            Q_U8 =>   write!(f, "?u8"),
+            Q_U16 =>  write!(f, "?u16"),
+            Q_U32 =>  write!(f, "?u32"),
 
-            T_Q_Bool => write!(f, "?bool"),
-            T_Q_U8 =>   write!(f, "?u8"),
-            T_Q_U16 =>  write!(f, "?u16"),
-            T_Q_U32 =>  write!(f, "?u32"),
+            Array(ty) => write!(f, "[{}]", ty),
 
-            T_Array(ty) => write!(f, "[{}]", ty),
-
-            T_Tuple(types) => {
+            Tuple(types) => {
                 let repr = types.iter().map(|typ| format!("{}", typ)).collect::<Vec<String>>().join(", ");
                 write!(f, "({})", repr)
             }
 
-            T_Struct { .. } => todo!(),
+            Struct { .. } => todo!(),
 
-            T_Measured(typ) => write!(f, "!{{{}}}", typ),
+            Measured(typ) => write!(f, "!{{{}}}", typ),
         }
     }
 }
@@ -137,21 +137,21 @@ mod tests {
     /// Arrays of nonlinear types should be nonlinear
     #[test]
     fn arrays_inherit_linearity_1() {
-        let qubit_array_type = T_Array(Box::new(T_Bool));
+        let qubit_array_type = Array(Box::new(Bool));
         assert!(!qubit_array_type.is_linear());
     }
 
     /// Arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_2() {
-        let qubit_array_type = T_Array(Box::new(T_Q_Bool));
+        let qubit_array_type = Array(Box::new(Q_Bool));
         assert!(qubit_array_type.is_linear());
     }
 
     /// Arrays of arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_3() {
-        let qubit_array_type = T_Array(Box::new(T_Array(Box::new(T_Q_Bool))));
+        let qubit_array_type = Array(Box::new(Array(Box::new(Q_Bool))));
         assert!(qubit_array_type.is_linear());
     }
 
@@ -159,17 +159,17 @@ mod tests {
     #[test]
     fn structs_inherit_linearity_1() {
         let mut fields = HashMap::new();
-        fields.insert(String::from("foo"), T_U8);
-        fields.insert(String::from("bar"), T_U16);
-        assert!(!T_Struct(fields).is_linear());
+        fields.insert(String::from("foo"), U8);
+        fields.insert(String::from("bar"), U16);
+        assert!(!Struct(fields).is_linear());
     }
 
     /// Structs with some linear field are linear
     #[test]
     fn structs_inherit_linearity_2() {
         let mut fields = HashMap::new();
-        fields.insert(String::from("foo"), T_U8);
-        fields.insert(String::from("bar"), T_Q_U8);
-        assert!(T_Struct(fields).is_linear());
+        fields.insert(String::from("foo"), U8);
+        fields.insert(String::from("bar"), Q_U8);
+        assert!(Struct(fields).is_linear());
     }
 }

@@ -1,4 +1,5 @@
-/// Data strucures for holding and manipulating source code
+//! Data strucures for holding and manipulating source code
+
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -260,6 +261,32 @@ pub struct Span {
     pub end: SrcPoint,
     /// Containing source object id
     pub src_id: SrcId,
+}
+
+impl Span {
+    /// Join two spans, as in the diagram below:
+    ///
+    /// ```text
+    /// [------]   [--]
+    ///        V
+    /// [-------------]
+    /// ```
+    ///
+    /// If the spans come from separate files, there's no meaningful way to
+    /// order them, so this function is partial.
+    pub fn join(&self, other: &Span) -> Option<Span> {
+        if self.src_id != other.src_id {
+            None
+        } else {
+            let start = std::cmp::min(self.start, other.start);
+            let end = std::cmp::max(self.start, other.end);
+            Some(Span {
+                start,
+                end,
+                src_id: self.src_id,
+            })
+        }
+    }
 }
 
 impl fmt::Display for Span {
