@@ -406,6 +406,7 @@ impl Parser {
     fn unary(&mut self) -> Result<Expr> {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.next().unwrap();
+            let op = UnOp::try_from(op).unwrap();
             let right = self.unary()?;
             let kind = ExprKind::UnOp {
                 op,
@@ -644,8 +645,10 @@ impl Parser {
                         break;
                     }
                 }
+
+                let op = BinOp::try_from(outer).unwrap();
                 lhs = ExprKind::BinOp {
-                    op: outer,
+                    op,
                     left: Box::new(lhs.into()),
                     right: Box::new(rhs),
                 };
@@ -732,28 +735,24 @@ mod tests {
     /// enclosed in curly braces.
     macro_rules! test_s_expr {
         // BinOp
-        ($ast:expr, ({$op:expr} $left:tt $right:tt)) => {
+        ($ast:expr, ({$op:ident} $left:tt $right:tt)) => {
             match &$ast.kind {
-                BinOp { op, left, right } => {
-                    assert_eq!(op.lexeme, $op);
+                ExprKind::BinOp { op, left, right } => {
+                    assert_eq!(op.kind, BinOpKind::$op);
                     test_s_expr! { *left, $left };
                     test_s_expr! { *right, $right };
                 }
-                _ => {
-                    panic!("AST is not a BinOp!");
-                }
+                _ => panic!("unexpected AST node")
             }
         };
         // UnOp
-        ($ast:expr, ({$op:expr} $right:tt)) => {
+        ($ast:expr, ({$op:ident} $right:tt)) => {
             match &$ast.kind {
-                UnOp { op, right } => {
-                    assert_eq!(op.lexeme, $op);
+                ExprKind::UnOp { op, right } => {
+                    assert_eq!(op.kind, UnOpKind::$op);
                     test_s_expr! { *right, $right };
                 }
-                _ => {
-                    panic!("AST is not a UnOp!");
-                }
+                _ => panic!("unexpected AST node")
             }
         };
         // Literals and variables
@@ -767,9 +766,7 @@ mod tests {
                     let lexeme = Lexeme::Ident(ident.name.clone());
                     assert_eq!(lexeme, $literal);
                 }
-                _ => {
-                    panic!("AST is not a Literal or Ident!");
-                }
+                _ => panic!("unexpected AST node")
             }
         };
     }
@@ -858,7 +855,7 @@ mod tests {
     fn tilde_false() {
         test_parser! {
             [Tilde, False],
-            ({Tilde} {False})
+            ({Not} {False})
         }
     }
 
@@ -866,7 +863,7 @@ mod tests {
     fn bang_true() {
         test_parser! {
             [Bang, True],
-            ({Bang} {True})
+            ({Delin} {True})
         }
     }
 
@@ -874,7 +871,7 @@ mod tests {
     fn tilde_tilde_false() {
         test_parser! {
             [Tilde, Tilde, False],
-            ({Tilde} ({Tilde} {False}))
+            ({Not} ({Not} {False}))
         }
     }
 
@@ -882,7 +879,7 @@ mod tests {
     fn tilde_bang_false() {
         test_parser! {
             [Tilde, Bang, False],
-            ({Tilde} ({Bang} {False}))
+            ({Not} ({Delin} {False}))
         }
     }
 
@@ -902,7 +899,7 @@ mod tests {
     fn star_simple() {
         test_parser! {
             [Nat(1), Star, Nat(1)],
-            ({Star} {Nat(1)} {Nat(1)})
+            ({Times} {Nat(1)} {Nat(1)})
         }
     }
 
@@ -922,8 +919,8 @@ mod tests {
     fn star_left_assoc() {
         test_parser! {
             [Nat(1), Star, Nat(2), Star, Nat(3)],
-            ({Star}
-             ({Star} {Nat(1)} {Nat(2)})
+            ({Times}
+             ({Times} {Nat(1)} {Nat(2)})
              {Nat(3)})
         }
     }
@@ -934,7 +931,7 @@ mod tests {
         test_parser! {
             [Nat(1), Star, Nat(2), Plus, Nat(3)],
             ({Plus}
-             ({Star} {Nat(1)} {Nat(2)})
+             ({Times} {Nat(1)} {Nat(2)})
              {Nat(3)})
         }
     }
@@ -945,7 +942,7 @@ mod tests {
         test_parser! {
             [Nat(1), Plus, Nat(2), Star, Nat(3)],
             ({Plus} {Nat(1)}
-             ({Star} {Nat(2)} {Nat(3)}))
+             ({Times} {Nat(2)} {Nat(3)}))
         }
     }
 
@@ -954,7 +951,7 @@ mod tests {
     fn mixed_plus_equalequal() {
         test_parser! {
             [Nat(2), Plus, Nat(2), EqualEqual, Nat(3), Plus, Nat(1)],
-            ({EqualEqual}
+            ({Equal}
              ({Plus} {Nat(2)} {Nat(2)})
              ({Plus} {Nat(3)} {Nat(1)})
             )
@@ -975,7 +972,7 @@ mod tests {
     fn bang_plus() {
         test_parser! {
             [Bang, Nat(1), Plus, Nat(2)],
-            ({Plus} ({Bang} {Nat(1)}) {Nat(2)})
+            ({Plus} ({Delin} {Nat(1)}) {Nat(2)})
         }
     }
 
@@ -983,7 +980,7 @@ mod tests {
     fn plus_bang() {
         test_parser! {
             [Nat(1), Plus, Bang, Nat(2)],
-            ({Plus} {Nat(1)} ({Bang} {Nat(2)}))
+            ({Plus} {Nat(1)} ({Delin} {Nat(2)}))
         }
     }
 
@@ -992,7 +989,7 @@ mod tests {
         test_parser! {
             [Nat(1), Plus, Bang, Nat(2), Plus, Nat(3)],
             ({Plus}
-             ({Plus} {Nat(1)} ({Bang} {Nat(2)}))
+             ({Plus} {Nat(1)} ({Delin} {Nat(2)}))
              {Nat(3)})
         }
     }

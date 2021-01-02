@@ -36,6 +36,97 @@ impl TryFrom<Token> for Ident {
     }
 }
 
+/// Binary operator node
+#[derive(Debug, Clone)]
+pub struct BinOp {
+    pub kind: BinOpKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinOpKind {
+    Equal,
+    Nequal,
+    DotDot,
+    Plus,
+    Minus,
+    Times,
+    Mod,
+    Less,
+    Greater,
+}
+
+/// We will sometimes want to convert a token whose lexeme is definitely a
+/// binary operator into this standalone `BinOp` node. This implementation will
+/// make that easier to do.
+impl TryFrom<Token> for BinOp {
+    /// This is "really" an internal implementation whose use will be pretty
+    /// limited; it is supposed to be immediately unwrapped wherever it is used.
+    type Error = ();
+
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        use crate::token::Lexeme::*;
+        let kind = match token.lexeme {
+            EqualEqual => BinOpKind::Equal,
+            TildeEqual => BinOpKind::Nequal,
+            DotDot => BinOpKind::DotDot,
+            Plus => BinOpKind::Plus,
+            Minus => BinOpKind::Minus,
+            Star => BinOpKind::Times,
+            Percent => BinOpKind::Mod,
+            LAngle => BinOpKind::Less,
+            RAngle => BinOpKind::Greater,
+            _ => {
+                return Err(());
+            }
+        };
+        Ok(BinOp {
+            kind,
+            span: token.span,
+        })
+    }
+}
+
+/// Unary operator node
+#[derive(Debug, Clone)]
+pub struct UnOp {
+    pub kind: UnOpKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnOpKind {
+    Minus,
+    Not,
+    Linear,
+    Delin,
+}
+
+/// We will sometimes want to convert a token whose lexeme is definitely a
+/// unary operator into this standalone `UnOp` node. This implementation will
+/// make that easier to do.
+impl TryFrom<Token> for UnOp {
+    /// This is "really" an internal implementation whose use will be pretty
+    /// limited; it is supposed to be immediately unwrapped wherever it is used.
+    type Error = ();
+
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        use crate::token::Lexeme::*;
+        let kind = match token.lexeme {
+            Minus => UnOpKind::Minus,
+            Tilde => UnOpKind::Not,
+            Question => UnOpKind::Linear,
+            Bang => UnOpKind::Delin,
+            _ => {
+                return Err(());
+            }
+        };
+        Ok(UnOp {
+            kind,
+            span: token.span,
+        })
+    }
+}
 /// Expression node.
 #[derive(Debug, Clone)]
 pub struct Expr {
@@ -63,11 +154,11 @@ pub struct ExprTags {}
 pub enum ExprKind {
     BinOp {
         left: Box<Expr>,
-        op: Token,
+        op: BinOp,
         right: Box<Expr>,
     },
     UnOp {
-        op: Token,
+        op: UnOp,
         right: Box<Expr>,
     },
     Literal(Token),

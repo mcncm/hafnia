@@ -1,8 +1,6 @@
 use crate::alloc::QubitAllocator;
 use crate::arch::Arch;
-use crate::ast::{
-    Annot, Block, Expr, ExprKind, Ident, Item, ItemKind, LValue, LValueKind, Stmt, StmtKind,
-};
+use crate::ast::*;
 use crate::cavy_errors::ErrorBuf;
 use crate::environment::{Environment, Key, Moveable, Nameable};
 use crate::qram::Qram;
@@ -419,26 +417,26 @@ impl Interpreter {
         Ok(Value::Array(data))
     }
 
-    fn eval_unop(&mut self, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {
+    fn eval_unop(&mut self, op: &UnOp, right: &Expr) -> Result<Value, ErrorBuf> {
+        use crate::ast::UnOpKind::*;
         use crate::circuit::Gate;
-        use crate::token::Lexeme::*;
         let right_val = self.evaluate(right)?;
-        let val = match (&op.lexeme, right_val) {
-            (Tilde, Value::Bool(x)) => Value::Bool(!x),
+        let val = match (&op.kind, right_val) {
+            (Not, Value::Bool(x)) => Value::Bool(!x),
 
             // NOTE: or-patterns syntax is experimental, so we must use this
             // more verbose syntax until it is stabilized.
-            (Tilde, val @ Value::Q_Bool(_))
-            | (Tilde, val @ Value::Q_U8(_))
-            | (Tilde, val @ Value::Q_U16(_))
-            | (Tilde, val @ Value::Q_U32(_)) => crate::functions::builtins::not(self, &[val])?,
+            (Not, val @ Value::Q_Bool(_))
+            | (Not, val @ Value::Q_U8(_))
+            | (Not, val @ Value::Q_U16(_))
+            | (Not, val @ Value::Q_U32(_)) => crate::functions::builtins::not(self, &[val])?,
 
-            (Bang, val @ Value::Q_Bool(_))
-            | (Bang, val @ Value::Q_U8(_))
-            | (Bang, val @ Value::Q_U16(_))
-            | (Bang, val @ Value::Q_U32(_)) => crate::functions::builtins::measure(self, &[val])?,
+            (Delin, val @ Value::Q_Bool(_))
+            | (Delin, val @ Value::Q_U8(_))
+            | (Delin, val @ Value::Q_U16(_))
+            | (Delin, val @ Value::Q_U32(_)) => crate::functions::builtins::measure(self, &[val])?,
 
-            (Question, Value::Bool(x)) => {
+            (Linear, Value::Bool(x)) => {
                 let val = self.qubit_allocator.alloc_q_bool()?;
                 if x {
                     if let Value::Q_Bool(u) = val {
@@ -450,7 +448,7 @@ impl Interpreter {
                 val
             }
 
-            (Question, Value::U8(x)) => {
+            (Linear, Value::U8(x)) => {
                 let val = self.qubit_allocator.alloc_q_u8()?;
                 if let Value::Q_U8(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
@@ -464,7 +462,7 @@ impl Interpreter {
                 val
             }
 
-            (Question, Value::U16(x)) => {
+            (Linear, Value::U16(x)) => {
                 let val = self.qubit_allocator.alloc_q_u16()?;
                 if let Value::Q_U16(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
@@ -478,7 +476,7 @@ impl Interpreter {
                 val
             }
 
-            (Question, Value::U32(x)) => {
+            (Linear, Value::U32(x)) => {
                 let val = self.qubit_allocator.alloc_q_u32()?;
                 if let Value::Q_U32(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
@@ -497,72 +495,69 @@ impl Interpreter {
         Ok(val)
     }
 
-    fn eval_binop(&mut self, left: &Expr, op: &Token, right: &Expr) -> Result<Value, ErrorBuf> {
-        use crate::token::Lexeme;
+    fn eval_binop(&mut self, left: &Expr, op: &BinOp, right: &Expr) -> Result<Value, ErrorBuf> {
         use crate::values::Value::*;
+        use BinOpKind::*;
         let left = self.evaluate(left)?;
         let right = self.evaluate(right)?;
-        let val = match op.lexeme {
-            Lexeme::Plus => match (left, right) {
+        let val = match op.kind {
+            Plus => match (left, right) {
                 (U8(x), U8(y)) => U8(x + y),
                 (U16(x), U16(y)) => U16(x + y),
                 (U32(x), U32(y)) => U32(x + y),
                 (Array(ldata), Array(rdata)) => self.finish_array_sum(ldata, rdata)?,
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::Minus => match (left, right) {
+            Minus => match (left, right) {
                 (U8(x), U8(y)) => U8(x.wrapping_sub(y)),
                 (U16(x), U16(y)) => U16(x.wrapping_sub(y)),
                 (U32(x), U32(y)) => U32(x.wrapping_sub(y)),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::Star => match (left, right) {
+            Times => match (left, right) {
                 (U8(x), U8(y)) => U8(x * y),
                 (U16(x), U16(y)) => U16(x * y),
                 (U32(x), U32(y)) => U32(x * y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::Percent => match (left, right) {
+            Mod => match (left, right) {
                 (U8(x), U8(y)) => U8(x % y),
                 (U16(x), U16(y)) => U16(x % y),
                 (U32(x), U32(y)) => U32(x % y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::LAngle => match (left, right) {
+            Less => match (left, right) {
                 (U8(x), U8(y)) => Bool(x < y),
                 (U16(x), U16(y)) => Bool(x < y),
                 (U32(x), U32(y)) => Bool(x < y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::RAngle => match (left, right) {
+            Greater => match (left, right) {
                 (U8(x), U8(y)) => Bool(x > y),
                 (U16(x), U16(y)) => Bool(x > y),
                 (U32(x), U32(y)) => Bool(x > y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::EqualEqual => match (left, right) {
+            Equal => match (left, right) {
                 (Bool(x), Bool(y)) => Bool(x == y),
                 (U8(x), U8(y)) => Bool(x == y),
                 (U16(x), U16(y)) => Bool(x == y),
                 (U32(x), U32(y)) => Bool(x == y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::TildeEqual => match (left, right) {
+            Nequal => match (left, right) {
                 (Bool(x), Bool(y)) => Bool(x != y),
                 (U8(x), U8(y)) => Bool(x != y),
                 (U16(x), U16(y)) => Bool(x != y),
                 (U32(x), U32(y)) => Bool(x != y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            Lexeme::DotDot => match (left, right) {
+            DotDot => match (left, right) {
                 (U8(x), U8(y)) => Value::make_range(x, y),
                 (U16(x), U16(y)) => Value::make_range(x, y),
                 (U32(x), U32(y)) => Value::make_range(x, y),
                 (_, _) => panic!("Violated a typing invariant"),
             },
-            _ => {
-                panic!("illegal expression.");
-            }
         };
         Ok(val)
     }
