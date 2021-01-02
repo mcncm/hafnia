@@ -575,7 +575,8 @@ impl Parser {
         let token = self.next().unwrap();
         match token.lexeme {
             Nat(_) | True | False => {
-                let kind = ExprKind::Literal(token);
+                let lit = ast::Literal::try_from(token).unwrap();
+                let kind = ExprKind::Literal(lit);
                 Ok(kind.into())
             }
             Ident(_) => {
@@ -756,15 +757,23 @@ mod tests {
             }
         };
         // Literals and variables
-        ($ast:expr, {$literal:expr}) => {
+        ($ast:expr, {$($lit:tt)*}) => {
             match &$ast.kind {
-                Literal(token) => {
-                    assert_eq!(token.lexeme, $literal);
+                ExprKind::Literal(lit) => {
+                    // For backwards compatibility: convert the Literal back
+                    // into a Lexeme.
+                    let lexeme = match lit.kind {
+                        LiteralKind::True => Lexeme::True,
+                        LiteralKind::False => Lexeme::False,
+                        LiteralKind::Nat(n) => Lexeme::Nat(n),
+                    };
+                    assert_eq!(lexeme, $($lit)*);
                 }
                 ExprKind::Ident(ident) => {
-                    // For backwards compatibility of this test: convert the Ident back into a Lexeme::Ident.
+                    // For backwards compatibility of this test: convert the
+                    // Ident back into a Lexeme::Ident.
                     let lexeme = Lexeme::Ident(ident.name.clone());
-                    assert_eq!(lexeme, $literal);
+                    assert_eq!(lexeme, $($lit)*);
                 }
                 _ => panic!("unexpected AST node")
             }

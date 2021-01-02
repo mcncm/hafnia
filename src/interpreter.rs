@@ -341,14 +341,12 @@ impl Interpreter {
         }
     }
 
-    fn eval_literal(&self, literal: &Token) -> Result<Value, ErrorBuf> {
-        use crate::token::Lexeme;
-        // TODO
-        match literal.lexeme {
-            Lexeme::Nat(nat) => Ok(Value::U32(nat)),
-            Lexeme::True => Ok(Value::Bool(true)),
-            Lexeme::False => Ok(Value::Bool(false)),
-            _ => todo!(),
+    fn eval_literal(&self, literal: &Literal) -> Result<Value, ErrorBuf> {
+        use crate::ast::LiteralKind::*;
+        match literal.kind {
+            Nat(nat) => Ok(Value::U32(nat)),
+            True => Ok(Value::Bool(true)),
+            False => Ok(Value::Bool(false)),
         }
     }
 

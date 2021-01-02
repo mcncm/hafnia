@@ -1,5 +1,5 @@
 use crate::source::Span;
-use crate::token::Token;
+use crate::token::{Token, Unsigned};
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -43,7 +43,7 @@ pub struct BinOp {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOpKind {
     Equal,
     Nequal,
@@ -87,6 +87,27 @@ impl TryFrom<Token> for BinOp {
     }
 }
 
+/// This is a little bit redunant, because we're going *back* (hopefully
+/// losslessly) to the lexeme that we came from. Such is the cost of moving the
+/// checks earlier
+impl fmt::Display for BinOpKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::token::Lexeme::*;
+        let repr = match self {
+            Self::Equal => EqualEqual,
+            Self::Nequal => TildeEqual,
+            Self::DotDot => DotDot,
+            Self::Plus => Plus,
+            Self::Minus => Minus,
+            Self::Times => Star,
+            Self::Mod => Percent,
+            Self::Less => LAngle,
+            Self::Greater => RAngle,
+        };
+        write!(f, "{}", repr)
+    }
+}
+
 /// Unary operator node
 #[derive(Debug, Clone)]
 pub struct UnOp {
@@ -94,7 +115,7 @@ pub struct UnOp {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOpKind {
     Minus,
     Not,
@@ -127,6 +148,59 @@ impl TryFrom<Token> for UnOp {
         })
     }
 }
+
+/// This is a little bit redunant, because we're going *back* (hopefully
+/// losslessly) to the lexeme that we came from. Such is the cost of moving the
+/// checks earlier
+impl fmt::Display for UnOpKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::token::Lexeme::*;
+        let repr = match self {
+            Self::Minus => Minus,
+            Self::Not => Tilde,
+            Self::Linear => Question,
+            Self::Delin => Bang,
+        };
+        write!(f, "{}", repr)
+    }
+}
+
+/// A literal AST node
+#[derive(Debug, Clone)]
+pub struct Literal {
+    pub span: Span,
+    pub kind: LiteralKind,
+}
+
+impl TryFrom<Token> for Literal {
+    /// This is "really" an internal implementation whose use will be pretty
+    /// limited; it is supposed to be immediately unwrapped wherever it is used.
+    type Error = ();
+
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        use crate::token::Lexeme::*;
+        let kind = match token.lexeme {
+            Nat(n) => LiteralKind::Nat(n),
+            True => LiteralKind::True,
+            False => LiteralKind::False,
+            _ => {
+                return Err(());
+            }
+        };
+        Ok(Literal {
+            kind,
+            span: token.span,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiteralKind {
+    True,
+    False,
+    Nat(Unsigned),
+}
+
 /// Expression node.
 #[derive(Debug, Clone)]
 pub struct Expr {
@@ -161,7 +235,7 @@ pub enum ExprKind {
         op: UnOp,
         right: Box<Expr>,
     },
-    Literal(Token),
+    Literal(Literal),
     /// Identifiers
     Ident(Ident),
     /// Sequences of the form (1, 2, 3)
