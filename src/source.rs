@@ -143,7 +143,7 @@ impl SrcStore {
         })
     }
 
-    pub fn format_err(&self, err: &dyn Diagnostic) -> String {
+    pub fn format_err(&self, err: Box<dyn Diagnostic>) -> String {
         format!(
             "{}: {}\n{}",
             err.code(),

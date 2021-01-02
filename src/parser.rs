@@ -26,7 +26,7 @@ pub fn parse(tokens: Vec<Token>, sess: &Session) -> Vec<Stmt> {
     match Parser::new(tokens).parse() {
         Ok(stmts) => stmts,
         Err(errs) => {
-            sess.emit_errors(errs);
+            sess.emit_diagnostics(errs);
             crate::sys::exit(1);
         }
     }
@@ -60,6 +60,8 @@ lazy_static! {
 /// error.
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
+    /// Location of current token
+    loc: Span,
     errors: ErrorBuf,
 }
 
@@ -67,6 +69,7 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
+            loc: Span::default(),
             errors: ErrorBuf::new(),
         }
     }
@@ -80,7 +83,7 @@ impl Parser {
     fn match_lexeme(&mut self, lexeme: Lexeme) -> bool {
         if let Some(actual) = self.tokens.peek() {
             if actual.lexeme == lexeme {
-                self.forward();
+                self.next();
                 true
             } else {
                 false
@@ -90,8 +93,21 @@ impl Parser {
         }
     }
 
-    fn forward(&mut self) {
-        self.tokens.next();
+    fn next(&mut self) -> Option<Token> {
+        let token = self.tokens.next();
+        if let Some(token) = &token {
+            self.loc = token.span;
+        }
+        token
+    }
+
+    /// Take a token if there is one; push an error otherwise
+    fn consume_token(&mut self) -> Result<Token> {
+        // Note that this cannot be `ok_or`, which is eagerly evaluated.
+        let token = self
+            .next()
+            .ok_or_else(|| self.errors.push(errors::UnexpectedEof { span: self.loc }))?;
+        Ok(token)
     }
 
     /// Consumes the parser, generating a list of statements
@@ -130,18 +146,6 @@ impl Parser {
             expected: lexeme,
             actual: token.lexeme,
         }))?
-    }
-
-    /// Takes a token if there is one; pushes an error otherwise
-    fn consume_token(&mut self) -> Result<Token> {
-        // Note that this cannot be `ok_or`, which is eagerly evaluated.
-        let token = self.tokens.next().ok_or_else(|| {
-            self.errors.push(errors::UnexpectedEof {
-                // FIXME this default is flagrantly incorrect
-                span: Span::default(),
-            })
-        })?;
-        Ok(token)
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
@@ -253,7 +257,7 @@ impl Parser {
     /// }
     /// ```
     fn local(&mut self) -> Result<Stmt> {
-        self.forward();
+        self.next();
         let lhs = Box::new(self.lvalue()?);
         let ty = if self.match_lexeme(Colon) {
             Some(self.type_annotation()?)
@@ -277,17 +281,16 @@ impl Parser {
 
     /// Recursively build an LValue
     fn lvalue(&mut self) -> Result<LValue> {
+        // We' anticipate being able to find an lvalue here, so produce an error
+        // if a token isn't found.
+        let token = self.consume_token()?;
         // TODO should check that all names are unique
-        match self.peek_lexeme() {
-            Some(Lexeme::Ident(_)) => {
-                let token = self.tokens.next().unwrap();
+        match token.lexeme {
+            Lexeme::Ident(_) => {
                 let ident = ast::Ident::try_from(token).unwrap();
                 Ok(LValueKind::Ident(ident).into())
             }
-            Some(LParen) => {
-                self.forward();
-                self.finish_lvalue_tuple()
-            }
+            LParen => self.finish_lvalue_tuple(),
             _ => todo!(),
         }
     }
@@ -328,14 +331,14 @@ impl Parser {
     }
 
     fn print_stmt(&mut self) -> Result<Stmt> {
-        self.forward();
+        self.next();
         let expr = self.expression()?;
         self.consume(Lexeme::Semicolon)?;
         Ok(StmtKind::Print(Box::new(expr)).into())
     }
 
     fn if_expr(&mut self) -> Result<Expr> {
-        self.forward();
+        self.next();
         // Here we assume that
         let cond = Box::new(self.expression()?);
         self.consume(Lexeme::LBrace)?;
@@ -355,7 +358,7 @@ impl Parser {
     }
 
     fn for_expr(&mut self) -> Result<Expr> {
-        self.forward();
+        self.next();
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
         let iter = Box::new(self.expression()?);
@@ -396,13 +399,13 @@ impl Parser {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)
             }
-            _ => unreachable!(),
+            None => Err(self.errors.push(UnexpectedEof { span: self.loc }))?,
         }
     }
 
     fn unary(&mut self) -> Result<Expr> {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
-            let op = self.tokens.next().unwrap();
+            let op = self.next().unwrap();
             let right = self.unary()?;
             let kind = ExprKind::UnOp {
                 op,
@@ -568,7 +571,7 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Result<Expr> {
-        let token = self.tokens.next().unwrap();
+        let token = self.next().unwrap();
         match token.lexeme {
             Nat(_) | True | False => {
                 let kind = ExprKind::Literal(token);
@@ -628,7 +631,7 @@ impl Parser {
                 if op_prec < min_precedence {
                     break;
                 }
-                let outer = self.tokens.next().unwrap();
+                let outer = self.next().unwrap();
                 let mut rhs = self.unary()?;
                 while let Some(inner) = self.peek_lexeme() {
                     // Check the inner operator's precedence

@@ -24,7 +24,7 @@ pub fn tokenize(mut src: SrcObject, sess: &Session) -> Vec<Token> {
     match Scanner::new(&mut src).tokenize() {
         Ok(tokens) => tokens,
         Err(errs) => {
-            sess.emit_errors(errs);
+            sess.emit_diagnostics(errs);
             crate::sys::exit(1);
         }
     }

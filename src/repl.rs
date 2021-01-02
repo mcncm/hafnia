@@ -98,6 +98,8 @@ impl<'a> Repl<'a> {
                 func(self, args[1..].iter().map(|s| s.to_string()).collect());
                 continue;
             }
+
+            self.exec_input(input.as_str());
         }
     }
 
@@ -111,7 +113,7 @@ impl<'a> Repl<'a> {
         let tokens = match Scanner::new(&mut source).tokenize() {
             Ok(tokens) => tokens,
             Err(errs) => {
-                self.sess.emit_errors(errs);
+                self.sess.emit_diagnostics(errs);
                 return;
             }
         };
@@ -126,7 +128,7 @@ impl<'a> Repl<'a> {
         let mut stmts = match Parser::new(tokens).parse() {
             Ok(stmts) => stmts,
             Err(errs) => {
-                self.sess.emit_errors(errs);
+                self.sess.emit_diagnostics(errs);
                 return;
             }
         };
@@ -140,7 +142,7 @@ impl<'a> Repl<'a> {
             match typecheck::typecheck(&mut stmts, &self.sess) {
                 Ok(_) => {}
                 Err(errs) => {
-                    self.sess.emit_errors(errs);
+                    self.sess.emit_diagnostics(errs);
                     return;
                 }
             }
