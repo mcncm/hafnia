@@ -15,7 +15,7 @@ use std::convert::From;
 /// assert!(c1 < c2);
 /// assert!(c2 < c3);
 /// ```
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum QbCount {
     Finite(usize),
     Infinite,
@@ -37,7 +37,7 @@ impl Default for QbCount {
 /// layout, native gates, and related constraints.
 ///
 /// TODO Enforce that qram_size <= qb_count
-#[derive(Default)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Arch {
     pub qb_count: QbCount,
     pub qram_size: usize,

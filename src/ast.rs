@@ -246,8 +246,6 @@ pub struct Annot {
 
 #[derive(Debug, Clone)]
 pub enum AnnotKind {
-    Unit,
-
     Bool,
     U8,
     U16,

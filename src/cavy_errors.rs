@@ -36,19 +36,28 @@ pub enum DiagnosticLevel {
     Warn,
 }
 
+/// It's sometimes convenient to have a placeholder Error type to propagate
+/// errors upward. In fact, we'll use this to approximate exceptions in several
+/// compiler passes. I'm not sure if that's "good Rust," but it seems to make
+/// for a nice design in which I only need to check *once* whether there have
+/// been any errors in a compiler pass.
+#[derive(Debug)]
+pub struct CavyError;
+
+impl std::fmt::Display for CavyError {
+    /// Should never actually be called
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        panic!()
+    }
+}
+
+impl Error for CavyError {}
+
 /// Let’s simplify error propagation with with a typedef. This should be an
 /// acceptable thing to do; it mimics `io::Result`, and it's seen in plenty of
 /// projects.
-pub type Result<T> = std::result::Result<T, Box<dyn Diagnostic>>;
+pub type Result<T> = std::result::Result<T, CavyError>;
 
-/// It is common to want to report multiple errors from a single compiler pass;
-/// therefore it will be helpful to have such a buffer to push errors into as
-/// they’re encountered, and report them all together.
-///
-/// The one thing that could be a little awkward about this definition is that
-/// it’s actually recursive, and an `ErrorBuf` of `ErrorBuf`s might be
-/// nonsensical. I could break the recursion by implementing my own Error type
-/// for `ErrorBuf` instead of the standard library one.
 #[derive(Debug)]
 pub struct ErrorBuf(pub Vec<Box<dyn Diagnostic>>);
 
@@ -57,8 +66,11 @@ impl ErrorBuf {
         Self(vec![])
     }
 
-    pub fn push(&mut self, err: Box<dyn Diagnostic>) {
-        self.0.push(err)
+    /// It's useful for this to return something implementing Error; we'll use
+    /// this placeholder type to achieve this.
+    pub fn push<T: 'static + Diagnostic>(&mut self, err: T) -> CavyError {
+        self.0.push(Box::new(err));
+        CavyError
     }
 
     pub fn is_empty(&self) -> bool {

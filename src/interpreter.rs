@@ -22,12 +22,12 @@ use std::{
     rc::Rc,
 };
 
-pub struct Interpreter<'a> {
+pub struct Interpreter {
     pub env: Environment,
     pub circuit: Circuit,
     pub qram: Option<Qram>,
-    qubit_allocator: QubitAllocator<'a>,
-    arch: &'a Arch,
+    qubit_allocator: QubitAllocator,
+    arch: Arch,
     // This flag indicates whether code generation is currently covariant or
     // contravariant. It’s an implementation detail, and I’m not sure I like the
     // design of branching on a flag. I’m sure to think about this more, and
@@ -39,9 +39,9 @@ pub struct Interpreter<'a> {
     contra_stack: Vec<Gate>,
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(arch: &'a Arch) -> Self {
-        let mut qubit_allocator = QubitAllocator::new(&arch);
+impl Interpreter {
+    pub fn new(arch: Arch) -> Self {
+        let mut qubit_allocator = QubitAllocator::new(arch);
         let mut qram = None;
         if arch.qram_size > 0 {
             qram = Some(Qram::new(&mut qubit_allocator, arch.qram_size));
@@ -51,7 +51,7 @@ impl<'a> Interpreter<'a> {
             circuit: Circuit::new(),
             qubit_allocator,
             qram,
-            arch: &arch,
+            arch,
             contra: false,
             contra_stack: vec![],
         }
@@ -743,7 +743,7 @@ mod tests {
             let tokens = Scanner::new(&mut src).tokenize().unwrap();
             let ast = Parser::new(tokens).expression().unwrap();
             let arch = Arch::default();
-            let actual_value = Interpreter::new(&arch).evaluate(&ast);
+            let actual_value = Interpreter::new(arch).evaluate(&ast);
 
             assert_eq!(expected_value, actual_value.unwrap());
         };
@@ -751,11 +751,20 @@ mod tests {
 
     fn test_program(prog: &'static str, expected_gates: Vec<Gate>) {
         let mut src = SrcObject::from(prog);
-
         let tokens = Scanner::new(&mut src).tokenize().unwrap();
-        let stmts = Parser::new(tokens).parse().unwrap();
+
+        let stmts = match Parser::new(tokens).parse() {
+            Ok(stmts) => stmts,
+            Err(errs) => {
+                for err in errs.0.iter() {
+                    println!("{:?}", err.message());
+                }
+                panic!();
+            }
+        };
+
         let arch = Arch::default();
-        let mut interp = Interpreter::new(&arch);
+        let mut interp = Interpreter::new(arch);
         for stmt in stmts.into_iter() {
             interp.execute(&stmt).unwrap();
         }

@@ -1,42 +1,20 @@
 use std::fs;
 use std::io::prelude::*;
 use std::panic;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
-use cavy::cavy_errors::ErrorBuf;
 use cavy::repl::Repl;
-use cavy::source::{SrcObject, SrcStore};
+use cavy::session::{Config, Phase, PhaseConfig, Session};
 use cavy::target;
 use cavy::{compile, sys};
 
 use clap::{load_yaml, App, ArgMatches};
 use fs::File;
 
-fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
-    // Should we provide debug information?
-    let debug = argmatches.is_present("debug");
-
-    // Where should we cut the pipeline short?
-    let last_phase = match argmatches.value_of("phase") {
-        Some("tokenize") => sys::CompilerPhase::Tokenize,
-        Some("parse") => sys::CompilerPhase::Parse,
-        Some("typecheck") => sys::CompilerPhase::Typecheck,
-        Some("evaluate") => sys::CompilerPhase::Evaluate,
-        Some(_) => unreachable!(),
-        None => sys::CompilerPhase::Evaluate,
-    };
-
-    // If we've gone on to a late-enough pass, should we do the typechecking
-    // phase or skip it?
-    let typecheck = argmatches.is_present("typecheck");
-
-    let phase_config = sys::CompilerPhaseConfig {
-        last_phase,
-        typecheck,
-    };
-
+/// Get the optimization level
+fn get_opt(argmatches: &ArgMatches) -> u8 {
     let opt = match argmatches.value_of("opt") {
         Some("0") => 0,
         Some("1") => 1,
@@ -51,24 +29,28 @@ fn get_flags(argmatches: &ArgMatches) -> sys::Flags {
             opt
         );
     }
-
-    sys::Flags {
-        debug,
-        opt,
-        phase_config,
-    }
+    opt
 }
 
-fn get_code<'s>(
-    argmatches: &ArgMatches,
-    src_store: &'s mut SrcStore,
-) -> Result<Option<SrcObject<'s>>, ErrorBuf> {
-    match argmatches.value_of("input") {
-        Some(path) => {
-            let path = PathBuf::from(&path);
-            Ok(src_store.insert_path(path)?)
-        }
-        None => Ok(None),
+/// Collect information about which compiler phases to execute
+fn get_phase(argmatches: &ArgMatches) -> PhaseConfig {
+    // Where should we cut the pipeline short?
+    let last_phase = match argmatches.value_of("phase") {
+        Some("tokenize") => Phase::Tokenize,
+        Some("parse") => Phase::Parse,
+        Some("typecheck") => Phase::Typecheck,
+        Some("evaluate") => Phase::Evaluate,
+        Some(_) => unreachable!(),
+        None => Phase::Evaluate,
+    };
+
+    // If we've gone on to a late-enough pass, should we do the typechecking
+    // phase or skip it?
+    let typecheck = argmatches.is_present("typecheck");
+
+    PhaseConfig {
+        last_phase,
+        typecheck,
     }
 }
 
@@ -101,26 +83,67 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
     Ok(arch)
 }
 
-fn get_target(argmatches: &ArgMatches) -> &dyn target::Target<ObjectCode = String> {
+fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
     match argmatches.value_of("target") {
-        Some("qasm") => &target::qasm::Qasm {},
-        Some("latex") => &target::latex::Latex { standalone: false },
-        Some("latex_standalone") => &target::latex::Latex { standalone: true },
+        Some("qasm") => Box::new(target::qasm::Qasm {}),
+        Some("latex") => Box::new(target::latex::Latex { standalone: false }),
+        Some("latex_standalone") => Box::new(target::latex::Latex { standalone: true }),
         Some(_) => unreachable!(),
-        None => &target::qasm::Qasm {},
+        None => Box::new(target::qasm::Qasm {}),
     }
+}
+
+fn get_config(argmatches: &ArgMatches) -> Config {
+    // Should we provide debug information?
+    let debug = argmatches.is_present("debug");
+    let opt = get_opt(argmatches);
+    let phase_config = get_phase(argmatches);
+    let arch = match get_arch(argmatches) {
+        Ok(arch) => arch,
+        Err(_) => {
+            eprintln!("Failed to identify target architecture.");
+            process::exit(1);
+        }
+    };
+    let target = get_target(argmatches);
+
+    Config {
+        debug,
+        arch,
+        target,
+        opt,
+        phase_config,
+    }
+}
+
+fn get_entry_point(argmatches: &ArgMatches) -> Option<PathBuf> {
+    argmatches
+        .value_of("input")
+        .map(|path| PathBuf::from(&path))
+}
+
+fn get_object_path(argmatches: &ArgMatches) -> PathBuf {
+    let path = argmatches.value_of("output").unwrap_or("a.out");
+    PathBuf::from(path)
+}
+
+fn emit_object_code(object_code: target::ObjectCode, object_path: PathBuf) {
+    let mut file = File::create(&object_path).unwrap();
+    file.write_all(object_code.as_bytes()).unwrap();
 }
 
 fn main() {
     let yaml = load_yaml!("cli.yml");
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
-    let flags = get_flags(&argmatches);
-    let target = get_target(&argmatches);
-    let mut src_store = SrcStore::default();
+    let config = get_config(&argmatches);
+    let sess = Session::new(config);
 
     // Only emit debug messages if the program has *not* been built for the
-    // `release` profile, *and* the --debug flag has been passed.
+    // `release` profile, *and* the --debug flag has been passed. The reason for
+    // this is that I expect a large fraction of users to do a debug build
+    // rather than a release build to test the software, and I'd like it to look
+    // polished even to them.
     #[cfg(not(debug_assertions))]
     {
         panic::set_hook(Box::new(sys::panic_hook));
@@ -128,47 +151,20 @@ fn main() {
 
     #[cfg(debug_assertions)]
     {
-        if !flags.debug {
+        if !sess.config.debug {
             panic::set_hook(Box::new(sys::panic_hook));
         }
     }
 
-    let arch = match get_arch(&argmatches) {
-        Ok(arch) => arch,
-        Err(_) => {
-            eprintln!("Failed to identify target architecture.");
-            process::exit(1);
+    match get_entry_point(&argmatches) {
+        Some(path) => {
+            let object_path = get_object_path(&argmatches);
+            let object_code = compile::compile(path, sess);
+            emit_object_code(object_code, object_path);
         }
-    };
-
-    match get_code(&argmatches, &mut src_store) {
-        // A source file was given and read without error
-        Ok(Some(src)) => {
-            let object_path = Path::new(argmatches.value_of("object").unwrap_or("a.out"));
-            let object_code = compile::compile(src, flags, &arch, target)
-                .unwrap_or_else(|errs| {
-                    for err in errs.0.iter() {
-                        src_store.format_err(err.as_ref());
-                    }
-                    process::exit(1);
-                })
-                .unwrap_or_else(|| {
-                    println!("Compiler produced no object code!");
-                    process::exit(0);
-                });
-            let mut file = File::create(&object_path).unwrap();
-            file.write_all(object_code.as_bytes()).unwrap();
-            process::exit(0);
-        }
-        // A source file was not given; run a repl
-        Ok(None) => {
-            let mut repl = Repl::new(&flags, &arch);
+        None => {
+            let mut repl = Repl::new(sess);
             repl.run();
-        }
-        // An error was encountered in reading a source file
-        Err(_) => {
-            eprintln!("Failed to read source file.");
-            process::exit(1);
         }
     }
 }

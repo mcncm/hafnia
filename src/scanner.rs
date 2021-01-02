@@ -1,3 +1,4 @@
+use crate::session::Session;
 use crate::source::{Span, SrcId, SrcObject, SrcPoint};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
@@ -12,6 +13,22 @@ use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::str::Chars;
 use std::vec::Vec;
+
+/// Main entry point for scanning
+pub fn tokenize(mut src: SrcObject, sess: &Session) -> Vec<Token> {
+    use crate::session::Phase;
+    let last_phase = sess.config.phase_config.last_phase;
+    if last_phase < Phase::Tokenize {
+        crate::sys::exit(0);
+    }
+    match Scanner::new(&mut src).tokenize() {
+        Ok(tokens) => tokens,
+        Err(errs) => {
+            sess.emit_errors(errs);
+            crate::sys::exit(1);
+        }
+    }
+}
 
 lazy_static! {
     #[rustfmt::skip]
@@ -203,9 +220,9 @@ impl TokenBuf {
     }
 }
 
-pub struct Scanner<'src> {
+pub struct Scanner<'s> {
     // Scanner data
-    scan_head: ScanHead<'src>,
+    scan_head: ScanHead<'s>,
     src_id: SrcId,
     token_buf: TokenBuf,
     tokens: Vec<Token>,
@@ -294,7 +311,7 @@ impl<'s> Scanner<'s> {
     /// This method, which consumes the `Scanner`, produces either a vector of
     /// tokens or of representable errors that the caller is expected, in one
     /// way or another, to display to the user.
-    pub fn tokenize(mut self) -> Result<Vec<Token>, ErrorBuf> {
+    pub fn tokenize(mut self) -> std::result::Result<Vec<Token>, ErrorBuf> {
         let mut ch;
         loop {
             // The invariant for this loop is that we're beginning a new token
@@ -354,9 +371,9 @@ impl<'s> Scanner<'s> {
             if ch.is_ascii_digit() {
                 self.next_char();
             } else if is_ident_char(*ch) {
-                self.errors.push(Box::new(errors::NonDigitInNumber {
+                self.errors.push(errors::NonDigitInNumber {
                     span: self.loc_span(),
-                }));
+                });
                 self.synchronize_to_non_alphanum();
                 self.token_buf.clear();
                 return;
@@ -370,9 +387,9 @@ impl<'s> Scanner<'s> {
         if let Ok(value) = value {
             push_token!(self, Nat(value));
         } else {
-            self.errors.push(Box::new(errors::UnparsableNumber {
+            self.errors.push(errors::UnparsableNumber {
                 span: self.token_span(),
-            }));
+            });
             self.token_buf.clear();
         }
     }
@@ -403,8 +420,6 @@ mod errors {
     use crate::cavy_errors::Diagnostic;
     use crate::source::Span;
     use cavy_macros::Diagnostic;
-    // This will become redundant when diagnostics only implement `Diagnostic`
-    use std::error::Error;
 
     #[derive(Diagnostic)]
     pub struct NonDigitInNumber {

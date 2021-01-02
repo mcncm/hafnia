@@ -148,7 +148,7 @@ impl Serialize for EnvNode {
 }
 
 /// This implementation has to be here because `EnvNode` is not `pub`.
-impl IntoTarget<'_, Qasm> for EnvNode {
+impl IntoTarget<Qasm> for EnvNode {
     fn into_target(&self, _target: &Qasm) -> String {
         let json = serde_json::to_value(self).unwrap();
         json.to_string()
@@ -254,7 +254,7 @@ impl Environment {
 }
 
 /// This implementation has to be here becuase `store` is not a `pub` field.
-impl IntoTarget<'_, Qasm> for Environment {
+impl IntoTarget<Qasm> for Environment {
     fn into_target(&self, target: &Qasm) -> String {
         self.store.as_ref().unwrap().into_target(target)
     }

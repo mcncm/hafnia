@@ -1,11 +1,13 @@
 use crate::arch::Arch;
+use crate::ast::StmtKind;
 use crate::cavy_errors::{self, ErrorBuf};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::Scanner;
+use crate::session::{Phase, Session};
 use crate::source::{SrcObject, SrcStore};
+use crate::sys;
 use crate::typecheck;
-use crate::{ast::StmtKind, sys};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -51,14 +53,13 @@ macro_rules! command_table {
 }
 
 pub struct Repl<'a> {
-    src_store: SrcStore,
-    interpreter: Interpreter<'a>,
-    flags: &'a sys::Flags,
+    interpreter: Interpreter,
+    sess: Session,
     commands: HashMap<&'a str, CmdSpec<'a>>,
 }
 
 impl<'a> Repl<'a> {
-    pub fn new(flags: &'a sys::Flags, arch: &'a Arch) -> Self {
+    pub fn new(sess: Session) -> Self {
         // Set up commands. We can’t do this in a lazy_static because some
         // impossible trait bounds would be required, but that’s ok--we’re
         // setting up this table exactly once on startup, anyway!
@@ -70,9 +71,8 @@ impl<'a> Repl<'a> {
         ];
 
         Repl {
-            src_store: SrcStore::default(),
-            interpreter: Interpreter::new(&arch),
-            flags,
+            interpreter: Interpreter::new(sess.config.arch),
+            sess,
             commands,
         }
     }
@@ -98,67 +98,74 @@ impl<'a> Repl<'a> {
                 func(self, args[1..].iter().map(|s| s.to_string()).collect());
                 continue;
             }
-
-            // Otherwise, execute code.
-            if let Err(errors) = self.exec_input(input.as_str()) {
-                self.handle_errors(errors);
-            }
         }
     }
 
-    fn exec_input(&mut self, input: &str) -> Result<(), ErrorBuf> {
-        let phase = &self.flags.phase_config.last_phase;
+    fn exec_input(&mut self, input: &str) {
+        let phase = self.sess.config.phase_config.last_phase;
 
-        if phase < &sys::CompilerPhase::Tokenize {
-            return Ok(());
+        if phase < Phase::Tokenize {
+            return;
         }
-        let mut source = self.src_store.insert_input(input);
-        let tokens = Scanner::new(&mut source).tokenize()?;
+        let mut source = self.sess.sources.insert_input(input);
+        let tokens = match Scanner::new(&mut source).tokenize() {
+            Ok(tokens) => tokens,
+            Err(errs) => {
+                self.sess.emit_errors(errs);
+                return;
+            }
+        };
 
-        if phase < &sys::CompilerPhase::Parse {
+        if phase < Phase::Parse {
             // I wonder if there’s another way to factor this code so that I
             // don’t have to make these tests every time I handle input... Not
             // that it’s actually a performance bottleneck.
             println!("{:?}", tokens);
-            return Ok(());
+            return;
         }
-        let mut stmts = Parser::new(tokens).parse()?;
+        let mut stmts = match Parser::new(tokens).parse() {
+            Ok(stmts) => stmts,
+            Err(errs) => {
+                self.sess.emit_errors(errs);
+                return;
+            }
+        };
 
-        if phase < &sys::CompilerPhase::Typecheck {
+        if phase < Phase::Typecheck {
             println!("{:#?}", stmts);
-            return Ok(());
-        }
-        if self.flags.phase_config.typecheck {
-            typecheck::typecheck(&mut stmts)?;
+            return;
         }
 
-        if phase < &sys::CompilerPhase::Evaluate {
-            return Ok(());
+        if self.sess.config.phase_config.typecheck {
+            match typecheck::typecheck(&mut stmts, &self.sess) {
+                Ok(_) => {}
+                Err(errs) => {
+                    self.sess.emit_errors(errs);
+                    return;
+                }
+            }
+        }
+
+        if phase < Phase::Evaluate {
+            return;
         }
         let len = stmts.len();
         for (n, stmt) in stmts.iter().enumerate() {
             if let StmtKind::Expr(expr) = &stmt.kind {
-                let value = self.interpreter.evaluate(&expr)?;
+                let value = self.interpreter.evaluate(&expr).unwrap();
                 // Print the value of the final *expression* only
                 if n == len - 1 {
                     println!("{}", value);
                 };
             } else {
-                self.interpreter.execute(&stmt)?;
+                self.interpreter.execute(&stmt).unwrap();
             }
-        }
-        Ok(())
-    }
-
-    fn handle_errors(&self, errors: ErrorBuf) {
-        for err in errors.0.iter() {
-            println!("{}", self.src_store.format_err(err.as_ref()));
         }
     }
 
     fn greet(&self) {
         println!("{}", WELCOME);
-        if self.flags.debug {
+        if self.sess.config.debug {
             println!("This interpreter is running in DEBUG mode.");
         }
         println!("{}", HELP);

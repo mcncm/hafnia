@@ -1,5 +1,6 @@
-use crate::target::Target;
-use std::cmp::{Ord, PartialOrd};
+//! Utilities for setting up the compiler process, finding files, and
+//! information about the Cavy system.
+
 use std::panic::PanicInfo;
 use std::path::{Path, PathBuf};
 
@@ -18,30 +19,13 @@ pub fn history_path() -> Option<PathBuf> {
     cavy_dir().map(|dir| dir.join(Path::new(".history")))
 }
 
-/// Encodes which passes to do, including when to stop and which passes to skip.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CompilerPhaseConfig {
-    /// Included because we might want to go on to evaluate, but skip
-    /// typechecking
-    pub typecheck: bool,
-    /// Specifies what phase of the pipeline to stop at
-    pub last_phase: CompilerPhase,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CompilerPhase {
-    Tokenize,
-    Parse,
-    Typecheck,
-    Evaluate,
-}
-
-/// Configuration data for the operation of the compiler
-#[derive(Debug)]
-pub struct Flags {
-    pub debug: bool,
-    pub opt: u8,
-    pub phase_config: CompilerPhaseConfig,
+/// Exit (relatively) gracefully, informing the user if there has been an error,
+/// although they'll likely know this anyway from diagnostic messages.
+pub fn exit(code: i32) -> ! {
+    if code != 0 {
+        eprintln!("Cavy exited with errors.")
+    }
+    std::process::exit(code);
 }
 
 /// This is custom panic handler that logs system state on an unexpected crash.

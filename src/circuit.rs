@@ -85,7 +85,7 @@ impl Gate {
     }
 }
 
-impl IntoTarget<'_, Qasm> for Gate {
+impl IntoTarget<Qasm> for Gate {
     #[rustfmt::skip]
     fn into_target(&self, _target: &Qasm) -> String {
         match self {

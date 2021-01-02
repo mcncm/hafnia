@@ -89,7 +89,7 @@ impl From<&'static str> for SrcObject<'_> {
 /// Store of all the source objects loaded by the compiler. We're using a
 /// HashMap with a SrcId key, rather than a Vec, to save space. Every node in
 /// the AST will contain a SrcId, so they better be economical.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SrcStore {
     next_id: SrcId,
     table: HashMap<SrcId, SrcKind>,
@@ -114,13 +114,13 @@ impl SrcStore {
     }
 
     /// Try to insert a path to a source file and retrieve a source object
-    pub fn insert_path(&mut self, path: PathBuf) -> Result<Option<SrcObject>, ErrorBuf> {
+    pub fn insert_path(&mut self, path: PathBuf) -> Result<SrcId, std::io::Error> {
         // FIXME handle this error a bit better.
-        let src_file = SrcKind::try_from(path).unwrap();
+        let src_file = SrcKind::try_from(path)?;
         let id = self.new_id();
         self.table.insert(id, src_file);
         // FIXME defeating the borrow checker...
-        Ok(self.get(&id))
+        Ok(id)
     }
 
     pub fn insert_input(&mut self, input: &str) -> SrcObject {
@@ -183,6 +183,7 @@ impl SrcStore {
     }
 }
 
+#[derive(Debug)]
 enum SrcKind {
     /// A source file
     File { code: String, file: PathBuf },

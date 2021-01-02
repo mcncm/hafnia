@@ -3,45 +3,36 @@ use crate::{
     cavy_errors::ErrorBuf,
     circuit::Circuit,
     interpreter::Interpreter,
-    parser::Parser,
-    scanner::Scanner,
+    parser, scanner,
+    session::{Phase, Session},
     source::SrcObject,
-    sys::{CompilerPhase, Flags},
-    target::Target,
+    target::{ObjectCode, Target},
     typecheck::typecheck,
 };
-use std::{error::Error, path::PathBuf};
+use std::path::PathBuf;
 
-pub fn compile<'a, 's, C>(
-    mut src: SrcObject<'s>,
-    flags: Flags,
-    arch: &'a Arch,
-    target: &dyn Target<'a, ObjectCode = C>,
-) -> Result<Option<C>, ErrorBuf> {
-    let last_phase = flags.phase_config.last_phase;
-
-    if last_phase < CompilerPhase::Tokenize {
-        return Ok(None);
-    }
-    let tokens = Scanner::new(&mut src).tokenize()?;
-
-    if last_phase < CompilerPhase::Parse {
-        return Ok(None);
-    }
-    let mut stmts = Parser::new(tokens).parse()?;
-
-    if last_phase < CompilerPhase::Typecheck {
-        return Ok(None);
+pub fn compile(entry_point: PathBuf, mut sess: Session) -> ObjectCode {
+    // There shouldn't be any validation happening here... Should be back up in
+    // main(). Or maybe not--this might be the one kind of input validation that
+    // can wait. After all, we won't know every file we need to read until we've
+    // started reading *some* file.
+    //
+    // TODO Replace these unwraps.
+    let id = sess.sources.insert_path(entry_point).unwrap();
+    let src = sess.sources.get(&id).unwrap();
+    let tokens = scanner::tokenize(src, &sess);
+    let mut stmts = parser::parse(tokens, &sess);
+    if sess.config.phase_config.typecheck {
+        let _ = typecheck(&mut stmts, &sess);
     }
 
-    if flags.phase_config.typecheck {
-        typecheck(&mut stmts)?;
+    // I'll leave this phase undisturbed, since it is going to change
+    // dramatically, anyway.
+    let last_phase = sess.config.phase_config.last_phase;
+    if last_phase < Phase::Evaluate {
+        crate::sys::exit(0);
     }
-
-    if last_phase < CompilerPhase::Evaluate {
-        return Ok(None);
-    }
-    let mut interpreter = Interpreter::new(&arch);
-    interpreter.interpret(stmts)?;
-    Ok(Some(target.from(&interpreter)))
+    let mut interpreter = Interpreter::new(sess.config.arch);
+    interpreter.interpret(stmts).unwrap();
+    sess.config.target.from(&interpreter)
 }

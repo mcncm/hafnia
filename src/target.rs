@@ -3,22 +3,29 @@
 /// externally.
 use crate::interpreter::Interpreter;
 
-/// This is a marker trait for compile targets
-pub trait Target<'a>: std::fmt::Debug {
-    type ObjectCode;
+/// This type alias replaces the associated type previously attached to `Target`
+pub type ObjectCode = String;
 
-    fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode;
+/// This is a marker trait for compile targets
+pub trait Target: std::fmt::Debug {
+    fn from<'a>(&self, interp: &Interpreter) -> ObjectCode;
+}
+
+impl Default for Box<dyn Target> {
+    fn default() -> Self {
+        Box::new(null::NullTarget())
+    }
 }
 
 /// This trait is implemented by internal structs which, during code
 /// generation, need inform the target safely about their private fields.
-pub trait IntoTarget<'a, T>
+pub trait IntoTarget<T>
 where
-    T: Target<'a>,
+    T: Target,
 {
     // FIXME Consider changing the name: in Rust, it is conventional for
     // methods called `into` to call by move.
-    fn into_target(&self, target: &T) -> T::ObjectCode;
+    fn into_target(&self, target: &T) -> ObjectCode;
 }
 
 /// A null target for testing and running partial compiler pipelines.
@@ -27,10 +34,10 @@ pub mod null {
 
     #[derive(Debug)]
     pub struct NullTarget();
-    impl<'a> Target<'a> for NullTarget {
-        type ObjectCode = ();
-
-        fn from(&self, _interp: &Interpreter<'a>) {}
+    impl Target for NullTarget {
+        fn from(&self, _interp: &Interpreter) -> ObjectCode {
+            String::new()
+        }
     }
 }
 
@@ -61,10 +68,8 @@ pub mod qasm {
         }
     }
 
-    impl<'a> Target<'a> for Qasm {
-        type ObjectCode = String;
-
-        fn from(&self, interp: &Interpreter<'a>) -> String {
+    impl Target for Qasm {
+        fn from(&self, interp: &Interpreter) -> String {
             format!(
                 "{}\n{}\n{}",
                 self.bindings(&interp.env),
@@ -74,7 +79,7 @@ pub mod qasm {
         }
     }
 
-    impl IntoTarget<'_, Qasm> for crate::circuit::Circuit {
+    impl IntoTarget<Qasm> for crate::circuit::Circuit {
         fn into_target(&self, target: &Qasm) -> String {
             let declaration = {
                 if let Some(max_qubit) = self.max_qubit {
@@ -94,7 +99,7 @@ pub mod qasm {
         }
     }
 
-    impl<'a> IntoTarget<'a, Qasm> for crate::interpreter::Interpreter<'a> {
+    impl IntoTarget<Qasm> for crate::interpreter::Interpreter {
         fn into_target(&self, target: &Qasm) -> String {
             let bindings_asm = self.env.into_target(target);
             let circuit_asm = self.circuit.into_target(target);
@@ -286,7 +291,7 @@ pub mod latex {
         }
     }
 
-    impl IntoTarget<'_, Latex> for LayoutArray {
+    impl IntoTarget<Latex> for LayoutArray {
         fn into_target(&self, _target: &Latex) -> String {
             self.arr
                 .iter()
@@ -336,11 +341,9 @@ pub mod latex {
         }
     }
 
-    impl<'a> Target<'a> for Latex {
-        type ObjectCode = String;
-
+    impl Target for Latex {
         #[rustfmt::skip]
-        fn from(&self, interp: &Interpreter<'a>) -> Self::ObjectCode {
+        fn from(&self, interp: &Interpreter) -> ObjectCode {
             let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
             let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
             format!(

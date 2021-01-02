@@ -1,17 +1,36 @@
 use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Result};
+use crate::session::Session;
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
     Token,
 };
 use crate::types::Type;
+use errors::*;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
+
+/// Main entry point for parsing
+pub fn parse(tokens: Vec<Token>, sess: &Session) -> Vec<Stmt> {
+    use crate::session::Phase;
+    let last_phase = sess.config.phase_config.last_phase;
+    if last_phase < Phase::Parse {
+        crate::sys::exit(0);
+    }
+
+    match Parser::new(tokens).parse() {
+        Ok(stmts) => stmts,
+        Err(errs) => {
+            sess.emit_errors(errs);
+            crate::sys::exit(1);
+        }
+    }
+}
 
 /// The maximum allowed number of arguments to a function
 const MAX_ARGS: usize = 64;
@@ -37,6 +56,8 @@ lazy_static! {
     };
 }
 
+/// Internally, we'll just want to propagate upwards whether or not there was an
+/// error.
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
     errors: ErrorBuf,
@@ -79,7 +100,12 @@ impl Parser {
         loop {
             match self.declaration() {
                 Ok(Some(stmt)) => stmts.push(stmt),
-                Err(err) => self.errors.push(err),
+                // An error has been found, but we should try to parse the next
+                // declaration in order to gather more errors.
+                Err(_) => {
+                    continue;
+                }
+                // All done; exit the loop
                 Ok(None) => {
                     break;
                 }
@@ -94,34 +120,40 @@ impl Parser {
     }
 
     fn consume(&mut self, lexeme: Lexeme) -> Result<Token> {
-        let token = self.tokens.next().ok_or(errors::UnexpectedEof {
-            // FIXME this default is flagrantly incorrect
-            span: Span::default(),
-        })?;
+        let token = self.consume_token()?;
+
         if token.lexeme == lexeme {
             return Ok(token);
         }
-        Err(Box::new(errors::ExpectedToken {
+        Err(self.errors.push(ExpectedToken {
             span: token.span,
             expected: lexeme,
             actual: token.lexeme,
-        }))
+        }))?
+    }
+
+    /// Takes a token if there is one; pushes an error otherwise
+    fn consume_token(&mut self) -> Result<Token> {
+        // Note that this cannot be `ok_or`, which is eagerly evaluated.
+        let token = self.tokens.next().ok_or_else(|| {
+            self.errors.push(errors::UnexpectedEof {
+                // FIXME this default is flagrantly incorrect
+                span: Span::default(),
+            })
+        })?;
+        Ok(token)
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
     fn consume_ident(&mut self) -> Result<String> {
-        // TODO This unwrap isn’t safe; you could be at EOF
-        let token = self.tokens.next().ok_or(errors::UnexpectedEof {
-            // FIXME This span is blatantly wrong
-            span: Span::default(),
-        })?;
+        let token = self.consume_token()?;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(name),
-            lexeme => Err(Box::new(errors::ExpectedIdentifier {
+            lexeme => Err(self.errors.push(ExpectedIdentifier {
                 span: token.span,
                 actual: lexeme,
-            })),
+            }))?,
         }
     }
 
@@ -412,11 +444,7 @@ impl Parser {
     fn type_annotation(&mut self) -> Result<Annot> {
         // Get another token. We're anticipating being able to form a type
         // annotation here, so it's an error if none is available.
-        let Token { lexeme, span } = self.tokens.next().ok_or(errors::UnexpectedEof {
-            // FIXME this default is flagrantly incorrect
-            span: Span::default(),
-        })?;
-
+        let Token { lexeme, span } = self.consume_token()?;
         // TODO How to make this more succinct: a macro? It doesn't seem
         // possible for macros to expand to match arms. An or-pattern? Not
         // stable yet.
@@ -446,7 +474,12 @@ impl Parser {
                     kind: AnnotKind::Question(Box::new(ty_inner)),
                 }
             }
-            _ => todo!(),
+            Ident(name) => Annot {
+                span,
+                kind: AnnotKind::Ident(ast::Ident { span, name }),
+            },
+            // A non-annotation lexeme
+            x => Err(self.errors.push(ExpectedTypeAnnot { span, actual: x }))?,
         };
 
         Ok(ty)
@@ -472,11 +505,7 @@ impl Parser {
         }
         let closing = self.consume(RParen)?;
         let span = opening.join(&closing.span).unwrap();
-        let kind = if types.is_empty() {
-            AnnotKind::Unit
-        } else {
-            AnnotKind::Tuple(types)
-        };
+        let kind = AnnotKind::Tuple(types);
         Ok(Annot { span, kind })
     }
 
@@ -552,7 +581,7 @@ impl Parser {
             }
             LParen => self.finish_group(),
 
-            lexeme => Err(Box::new(errors::ExpectedPrimaryToken {
+            lexeme => Err(self.errors.push(ExpectedPrimaryToken {
                 // Guaranteed not to be EOF!
                 span: token.span,
                 actual: lexeme,
@@ -630,12 +659,10 @@ impl Parser {
 }
 
 mod errors {
+    use super::Lexeme;
     use crate::cavy_errors::Diagnostic;
     use crate::source::Span;
     use cavy_macros::Diagnostic;
-    // This will become redundant when diagnostics only implement `Diagnostic`
-    use super::Lexeme;
-    use std::error::Error;
 
     #[derive(Diagnostic)]
     pub struct ExpectedToken {
@@ -664,6 +691,14 @@ mod errors {
     #[derive(Diagnostic)]
     pub struct ExpectedPrimaryToken {
         #[msg = "expected primary token, found `{actual}`"]
+        pub span: Span,
+        /// The lexeme actually found
+        pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedTypeAnnot {
+        #[msg = "expected type annotation, found `{actual}`"]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,

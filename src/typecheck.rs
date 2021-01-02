@@ -1,15 +1,21 @@
 use crate::ast::*;
-use crate::cavy_errors::ErrorBuf;
+use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use crate::functions::{Func, UserFunc};
+use crate::session::Session;
 use crate::types::Type;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
+/// Main entry point for the semantic analysis phase.
+///
 /// Run a type-checking pass, annotating the AST as you go, and return a valid
 /// symbol table. For now, this is the single entry point for all semantic
 /// analysis passes, not just type-checking proper. It will also mutate the AST,
 /// adding type annotations where necessary (or possible).
-pub fn typecheck(stmts: &mut Vec<Stmt>) -> Result<SymbolTable, ErrorBuf> {
+pub fn typecheck<'s>(
+    stmts: &'s mut Vec<Stmt>,
+    _: &'s Session,
+) -> Result<SymbolTable<'s>, ErrorBuf> {
     let mut root = SymbolTable::default();
     hoist_items(stmts);
     for stmt in stmts.iter_mut() {
@@ -102,4 +108,64 @@ impl<'ast> SymbolTable<'ast> {
     }
 
     fn insert_local(&mut self, _lhs: &LValue, _ty: &Option<Annot>, _rhs: &Expr) {}
+
+    fn resolve_annot(&self, annot: &Annot) -> Result<Type, ErrorBuf> {
+        let ty = match &annot.kind {
+            AnnotKind::Bool => Type::Bool,
+            AnnotKind::U8 => Type::U8,
+            AnnotKind::U16 => Type::U16,
+            AnnotKind::U32 => Type::U32,
+
+            AnnotKind::Tuple(_inners) => {
+                // let inner_types = inners
+                //     .iter()
+                //     .map(|ann| self.resolve_annot(ann))
+                //     .collect::<Vec<Type>>()?;
+                // Type::Tuple(inner_types)
+                todo!()
+            }
+            AnnotKind::Array(inner) => {
+                let ty = Box::new(self.resolve_annot(inner)?);
+                Type::Array(ty)
+            }
+
+            AnnotKind::Question(inner) => {
+                let ty = self.resolve_annot(inner)?;
+                self.resolve_annot_question(ty)?
+            }
+
+            AnnotKind::Bang(inner) => {
+                let ty = self.resolve_annot(inner)?;
+                self.resolve_annot_bang(ty)?
+            }
+
+            AnnotKind::Ident(_ident) => {
+                todo!()
+            }
+        };
+
+        Ok(ty)
+    }
+
+    fn resolve_annot_question(&self, inner: Type) -> Result<Type, ErrorBuf> {
+        let ty = match inner {
+            Type::Bool => Type::Q_Bool,
+            Type::U8 => Type::Q_U8,
+            Type::U16 => Type::Q_U16,
+            Type::U32 => Type::Q_U32,
+
+            _ => unimplemented!(),
+        };
+        Ok(ty)
+    }
+
+    fn resolve_annot_bang(&self, _inner: Type) -> Result<Type, ErrorBuf> {
+        todo!()
+    }
+}
+
+mod errors {
+    use crate::cavy_errors::Diagnostic;
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
 }

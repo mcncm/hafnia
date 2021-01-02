@@ -148,7 +148,7 @@ pub mod test {
     fn paths_work() {
         // #![allow(unused_mut)]
         let arch = Arch::default();
-        let mut alloc = QubitAllocator::new(&arch);
+        let mut alloc = QubitAllocator::new(arch);
         let qram = Qram::new(&mut alloc, 8);
         path![ qram => child_l, child_l, child_l ];
         path![ qram => child_l, child_l, child_r ];
@@ -165,7 +165,7 @@ pub mod test {
     fn path_too_long() {
         // #![allow(unused_mut)]
         let arch = Arch::default();
-        let mut alloc = QubitAllocator::new(&arch);
+        let mut alloc = QubitAllocator::new(arch);
         let qram = Qram::new(&mut alloc, 8);
         path![ qram => child_l, child_l, child_l, child_l ];
     }

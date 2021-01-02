@@ -24,18 +24,18 @@ pub trait Allocator<T> {
 /// # use cavy::alloc::QubitAllocator;
 /// # use cavy::arch;
 /// let arch = arch::Arch::default();
-/// let mut allocator = QubitAllocator::new(&arch);
+/// let mut allocator = QubitAllocator::new(arch);
 /// let qb0 = allocator.alloc_q_bool().unwrap();
 /// let qb1 = allocator.alloc_q_bool().unwrap();
 /// assert_eq!(qb0, Value::Q_Bool(0));
 /// assert_eq!(qb1, Value::Q_Bool(1));
 /// ```
-pub struct QubitAllocator<'a> {
+pub struct QubitAllocator {
     least_free: usize,
-    arch: &'a Arch,
+    arch: Arch,
 }
 
-impl<'a> Allocator<Qubit> for QubitAllocator<'a> {
+impl Allocator<Qubit> for QubitAllocator {
     fn alloc(&mut self, n: usize) -> Result<Vec<Qubit>, ErrorBuf> {
         let end = self.least_free + n;
         if self.arch.qb_count < end.into() {
@@ -51,8 +51,8 @@ impl<'a> Allocator<Qubit> for QubitAllocator<'a> {
     fn free(&mut self, _addr: usize) {}
 }
 
-impl<'a> QubitAllocator<'a> {
-    pub fn new(arch: &'a Arch) -> Self {
+impl QubitAllocator {
+    pub fn new(arch: Arch) -> Self {
         Self {
             least_free: 0,
             arch,

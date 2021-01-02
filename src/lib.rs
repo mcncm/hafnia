@@ -15,6 +15,7 @@ pub mod parser;
 pub mod qram;
 pub mod repl;
 pub mod scanner;
+pub mod session;
 pub mod source;
 pub mod sys;
 pub mod target;
