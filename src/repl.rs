@@ -139,7 +139,8 @@ impl<'a> Repl<'a> {
         }
 
         if self.sess.config.phase_config.typecheck {
-            match typecheck::typecheck(&mut stmts, &self.sess) {
+            let checker = typecheck::Typechecker::new(&self.sess);
+            match checker.typecheck(&mut stmts) {
                 Ok(_) => {}
                 Err(errs) => {
                     self.sess.emit_diagnostics(errs);
