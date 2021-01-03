@@ -19,8 +19,7 @@ pub fn compile(entry_point: PathBuf, mut sess: Session) -> ObjectCode {
     //
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
-    let src = sess.sources.get(&id).unwrap();
-    let tokens = scanner::tokenize(src, &sess);
+    let tokens = scanner::tokenize(id, &mut sess);
     let mut stmts = parser::parse(tokens, &sess);
     if sess.config.phase_config.typecheck {
         let _ = typecheck(&mut stmts, &sess);

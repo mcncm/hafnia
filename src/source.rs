@@ -27,17 +27,18 @@ pub type SrcId = u16;
 
 /// Type returned by the public SrcStore interface. This is expected to be
 /// passed to a Scanner.
-pub struct SrcObject<'src> {
+#[derive(Debug)]
+pub struct SrcObject {
     /// ID of the source object, used for reporting errors
     pub id: SrcId,
     /// The locations of newline characters within the source object: filled in
     /// by the scanner
     pub newlines: Vec<usize>,
-    pub code: &'src str,
-    pub origin: &'src str,
+    pub code: String,
+    pub origin: String,
 }
 
-impl<'s> SrcObject<'s> {
+impl SrcObject {
     /// Returns a slice to the line in the source containing a point. This is
     /// expected to be called only after a scanning phase has filled in the
     /// newlines, but that isn't invariant enforced (yet) by the type system.
@@ -50,7 +51,7 @@ impl<'s> SrcObject<'s> {
     ///     0     1     2      found position
     ///
     ///  ```
-    fn get_line(&self, pos: SrcPoint) -> &'s str {
+    fn get_line(&self, pos: SrcPoint) -> &str {
         // Pointing to a newline character shouldn't happen; actual spans
         // shouldn't point *at* newlines, but they might cross them.
         let n = self
@@ -61,28 +62,18 @@ impl<'s> SrcObject<'s> {
         // otherwise (to exclude newline character)
         let ln_start = match n {
             0 => 0,
-            n => self.newlines[n - 1] + 1,
+            n => self.newlines[n - 1],
         };
 
         // line end
         let ln_end = if n == self.newlines.len() {
             self.code.len()
         } else {
-            self.newlines[n]
+            // don’t include the newline itself
+            self.newlines[n] - 1
         };
 
         &self.code[ln_start..ln_end]
-    }
-}
-
-impl From<&'static str> for SrcObject<'_> {
-    fn from(code: &'static str) -> Self {
-        Self {
-            id: 0,
-            code,
-            origin: "<static>",
-            newlines: vec![],
-        }
     }
 }
 
@@ -92,7 +83,7 @@ impl From<&'static str> for SrcObject<'_> {
 #[derive(Default, Debug)]
 pub struct SrcStore {
     next_id: SrcId,
-    table: HashMap<SrcId, SrcKind>,
+    table: HashMap<SrcId, SrcObject>,
 }
 
 impl SrcStore {
@@ -115,32 +106,38 @@ impl SrcStore {
 
     /// Try to insert a path to a source file and retrieve a source object
     pub fn insert_path(&mut self, path: PathBuf) -> Result<SrcId, std::io::Error> {
-        // FIXME handle this error a bit better.
-        let src_file = SrcKind::try_from(path)?;
+        let code = std::fs::read_to_string(&path)?;
         let id = self.new_id();
-        self.table.insert(id, src_file);
-        // FIXME defeating the borrow checker...
+        let src = SrcObject {
+            id,
+            newlines: vec![],
+            code,
+            origin: path.to_string_lossy().to_string(),
+        };
+        self.table.insert(id, src);
         Ok(id)
     }
 
-    pub fn insert_input(&mut self, input: &str) -> SrcObject {
+    pub fn insert_input(&mut self, input: &str) -> SrcId {
         let id = self.new_id();
-        let input = SrcKind::Input {
+        let src = SrcObject {
+            id,
+            newlines: vec![],
             code: input.to_owned(),
+            origin: "<input>".to_owned(),
         };
-        self.table.insert(id, input);
-        // FIXME defeating the borrow checker...
-        self.get(&id).unwrap()
+        self.table.insert(id, src);
+        id
     }
 
     /// Retrieve source code from the store of source objects
-    pub fn get(&self, id: &SrcId) -> Option<SrcObject> {
-        self.table.get(id).map(|src| SrcObject {
-            id: *id,
-            code: src.code(),
-            origin: src.origin(),
-            newlines: vec![],
-        })
+    pub fn get(&self, id: &SrcId) -> Option<&SrcObject> {
+        self.table.get(id)
+    }
+
+    /// Retrieve source code, mutably, from the store of source objects
+    pub fn get_mut(&mut self, id: &SrcId) -> Option<&mut SrcObject> {
+        self.table.get_mut(id)
     }
 
     pub fn format_err(&self, err: Box<dyn Diagnostic>) -> String {
@@ -168,8 +165,8 @@ impl SrcStore {
         // How long should line numbers be?
         let digits = count_digits(span.start.line);
         // Reported code with annotations. This is a little ad-hoc, and should
-        // really be some kind of "join".
-        let origin = format!("{}:{}:{}-{}", src.origin, span.start.line, start, end);
+        // really be some kind of "join" over reported lines.
+        let origin = format!("{} {}", src.origin, span);
         let report = format!(
             "{s:digits$} |\n{s:digits$} | {}\n{s:digits$} | {s:start$}{}",
             line,
@@ -210,23 +207,6 @@ impl SrcKind {
             SrcKind::File { file, .. } => file.as_path().to_str().unwrap(),
             SrcKind::Input { .. } => "<input>",
         }
-    }
-}
-
-impl TryFrom<PathBuf> for SrcKind {
-    type Error = std::io::Error;
-
-    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let code = std::fs::read_to_string(&path)?;
-
-        let src = Self::File {
-            code,
-            // FIXME This should be a PathBuf, but there were some difficulties
-            // with lifetimes last time I tried to do that.
-            file: path,
-        };
-
-        Ok(src)
     }
 }
 

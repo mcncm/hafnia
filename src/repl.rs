@@ -109,8 +109,9 @@ impl<'a> Repl<'a> {
         if phase < Phase::Tokenize {
             return;
         }
-        let mut source = self.sess.sources.insert_input(input);
-        let tokens = match Scanner::new(&mut source).tokenize() {
+        let src_id = self.sess.sources.insert_input(input);
+        let src = self.sess.sources.get_mut(&src_id).unwrap();
+        let tokens = match Scanner::new(src).tokenize() {
             Ok(tokens) => tokens,
             Err(errs) => {
                 self.sess.emit_diagnostics(errs);
