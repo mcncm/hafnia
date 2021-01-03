@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::cavy_errors::{Diagnostic, ErrorBuf};
+use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 use crate::functions::{Func, UserFunc};
 use crate::session::Session;
 use crate::types::Type;
@@ -52,7 +52,7 @@ impl<'s> Typechecker<'s> {
         let mut root = SymbolTable::new();
         hoist_items(stmts);
         for stmt in stmts.iter_mut() {
-            self.type_stmt(stmt, &mut root);
+            let _ = self.type_stmt(stmt, &mut root);
         }
 
         if self.errors.is_empty() {
@@ -64,24 +64,20 @@ impl<'s> Typechecker<'s> {
 
     /// Typecheck a statement. This will be executed after hoisting, so all items
     /// will have been hoisted to the top.
-    fn type_stmt<'ast>(
-        &mut self,
-        stmt: &'ast Stmt,
-        table: &mut SymbolTable<'ast>,
-    ) -> Result<(), ()> {
+    fn type_stmt<'ast>(&mut self, stmt: &'ast Stmt, table: &mut SymbolTable<'ast>) -> Result<()> {
         use StmtKind::*;
         match &stmt.kind {
             // No-op
             Print(_expr) => Ok(()),
             // An expression statement not decorated with a semicolon: could be a
             // return value from a block.
-            Expr(expr) => self.type_expr(expr, table),
+            Expr(expr) => self.type_expr(expr, table).map(|_| ()),
             // An expression statement decorated with a semicolon
-            ExprSemi(expr) => self.type_expr(expr, table),
+            ExprSemi(expr) => self.type_expr(expr, table).map(|_| ()),
             // A new local binding: insert the name into the symbol table
             Local { lhs, ty, rhs } => {
-                let ty = self.type_local(lhs, ty, rhs)?;
-                table.insert_local(lhs, ty);
+                let ty = self.type_local(ty, rhs, table)?;
+                self.insert_local(lhs, ty, table);
                 Ok(())
             }
             // All these are expected to be at the top of the AST, as they’ve
@@ -94,28 +90,84 @@ impl<'s> Typechecker<'s> {
     }
 
     /// Typecheck a single expression
-    fn type_expr(&self, _expr: &Expr, _table: &mut SymbolTable) -> Result<(), ()> {
-        Ok(())
+    fn type_expr(&mut self, expr: &Expr, table: &SymbolTable) -> Result<Type> {
+        match &expr.kind {
+            ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right, table),
+            ExprKind::UnOp { op, right } => self.type_unop(op, right, table),
+            ExprKind::Literal(lit) => self.type_literal(lit, table),
+            ExprKind::Tuple(vals) => self.type_tuple(vals, table),
+            _ => unimplemented!(),
+        }
     }
 
-    fn type_local(&self, lhs: &LValue, ty: &Option<Annot>, rhs: &Expr) -> Result<Type, ()> {
+    fn type_binop(
+        &mut self,
+        left: &Box<Expr>,
+        op: &BinOp,
+        right: &Box<Expr>,
+        table: &SymbolTable,
+    ) -> Result<Type> {
+        use BinOpKind::*;
+        use Type::*;
+        let ty_l = self.type_expr(left, table)?;
+        let ty_r = self.type_expr(right, table)?;
+        let ty = match (op.kind, ty_l, ty_r) {
+            // These are not quite right!
+            (Equal, l, r) if l == r => l,
+            (Nequal, l, r) if l == r => l,
+
+            (Plus, U8, U8) => U8,
+            (Plus, U16, U16) => U16,
+            (Plus, U32, U32) => U32,
+
+            (Plus, Q_U8, Q_U8) => U8,
+            (Plus, Q_U16, Q_U16) => U16,
+            (Plus, Q_U32, Q_U32) => U32,
+
+            (kind, left, right) => {
+                return Err(self.errors.push(errors::BinOpTypeError {
+                    span: op.span,
+                    kind,
+                    left,
+                    right,
+                }));
+            }
+        };
+        Ok(ty)
+    }
+
+    fn type_unop(&mut self, _op: &UnOp, _right: &Box<Expr>, _table: &SymbolTable) -> Result<Type> {
         todo!();
     }
 
-    fn resolve_annot(&self, annot: &Annot, table: &SymbolTable) -> Result<Type, ()> {
+    fn type_tuple(&mut self, vals: &Vec<Expr>, table: &SymbolTable) -> Result<Type> {
+        let tys = vals
+            .iter()
+            .map(|v| self.type_expr(v, table))
+            // NOTE: this short-circuits at the first error, which is really not
+            // quite the behavior I want.
+            .collect::<Result<Vec<Type>>>()?;
+        Ok(Type::Tuple(tys))
+    }
+
+    fn type_local(&mut self, _ty: &Option<Annot>, rhs: &Expr, table: &SymbolTable) -> Result<Type> {
+        let ty_r = self.type_expr(rhs, table)?;
+        Ok(ty_r)
+    }
+
+    fn resolve_annot(&self, annot: &Annot, table: &SymbolTable) -> Result<Type> {
         let ty = match &annot.kind {
             AnnotKind::Bool => Type::Bool,
             AnnotKind::U8 => Type::U8,
             AnnotKind::U16 => Type::U16,
             AnnotKind::U32 => Type::U32,
 
-            AnnotKind::Tuple(_inners) => {
-                // let inner_types = inners
-                //     .iter()
-                //     .map(|ann| self.resolve_annot(ann))
-                //     .collect::<Vec<Type>>()?;
-                // Type::Tuple(inner_types)
-                todo!()
+            AnnotKind::Tuple(inners) => {
+                let inner_types = inners
+                    .iter()
+                    .map(|ann| self.resolve_annot(ann, table))
+                    .collect::<Result<Vec<Type>>>()?;
+                Type::Tuple(inner_types)
             }
             AnnotKind::Array(inner) => {
                 let ty = Box::new(self.resolve_annot(inner, table)?);
@@ -140,7 +192,17 @@ impl<'s> Typechecker<'s> {
         Ok(ty)
     }
 
-    fn resolve_annot_question(&self, inner: Type, table: &SymbolTable) -> Result<Type, ()> {
+    fn type_literal(&mut self, lit: &Literal, _table: &SymbolTable) -> Result<Type> {
+        use LiteralKind::*;
+        use Type::*;
+        match lit.kind {
+            True => Ok(Bool),
+            False => Ok(Bool),
+            Nat(_) => Ok(U32),
+        }
+    }
+
+    fn resolve_annot_question(&self, inner: Type, _table: &SymbolTable) -> Result<Type> {
         let ty = match inner {
             Type::Bool => Type::Q_Bool,
             Type::U8 => Type::Q_U8,
@@ -152,8 +214,33 @@ impl<'s> Typechecker<'s> {
         Ok(ty)
     }
 
-    fn resolve_annot_bang(&self, inner: Type) -> Result<Type, ()> {
+    fn resolve_annot_bang(&self, _inner: Type) -> Result<Type> {
         todo!()
+    }
+
+    /// Insert local bindings, recursively destructuring the LValue and type
+    fn insert_local(&mut self, lhs: &LValue, ty: Type, table: &mut SymbolTable) -> Result<()> {
+        match (&lhs.kind, &ty) {
+            (LValueKind::Tuple(lvalues), Type::Tuple(tys)) => {
+                if lvalues.len() != tys.len() {
+                    return Err(self.errors.push(errors::DestructuringError {
+                        span: lhs.span,
+                        actual: ty,
+                    }))?;
+                }
+
+                for (lvalue, ty) in lvalues.iter().zip(tys.into_iter()) {
+                    // FIXME: this clone shouldn't be necessary, right? Why is
+                    // `into_iter` not yielding owned `Type`s here?
+                    self.insert_local(lvalue, ty.clone(), table)?;
+                }
+            }
+            (LValueKind::Ident(ident), _) => {
+                todo!();
+            }
+            _ => todo!(),
+        };
+        Ok(())
     }
 }
 
@@ -219,14 +306,42 @@ impl<'ast> SymbolTable<'ast> {
             }
         }
     }
-
-    fn insert_local(&mut self, lhs: &LValue, ty: Type) {
-        todo!();
-    }
 }
 
 mod errors {
+    use crate::ast::*;
     use crate::cavy_errors::Diagnostic;
     use crate::source::Span;
+    use crate::types::Type;
     use cavy_macros::Diagnostic;
+
+    #[derive(Diagnostic)]
+    pub struct BinOpTypeError {
+        #[msg = "operator `{kind}` doesn't support argument types `{left}` and `{right}`"]
+        pub span: Span,
+        /// The operator
+        pub kind: BinOpKind,
+        /// The actual left operand type
+        pub left: Type,
+        /// The actual right operand type
+        pub right: Type,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct UnOpTypeError {
+        #[msg = "operator `{kind}` doesn't support argument type `{actual}`"]
+        pub span: Span,
+        /// The operator
+        pub kind: UnOpKind,
+        /// The actual left operand type
+        pub actual: Type,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct DestructuringError {
+        #[msg = "pattern fails to match type `{actual}`"]
+        pub span: Span,
+        /// The type
+        pub actual: Type,
+    }
 }

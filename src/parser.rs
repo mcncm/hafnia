@@ -288,9 +288,13 @@ impl Parser {
         match token.lexeme {
             Lexeme::Ident(_) => {
                 let ident = ast::Ident::try_from(token).unwrap();
-                Ok(LValueKind::Ident(ident).into())
+                let lvalue = LValue {
+                    span: ident.span,
+                    kind: LValueKind::Ident(ident),
+                };
+                Ok(lvalue)
             }
-            LParen => self.finish_lvalue_tuple(),
+            LParen => self.finish_lvalue_tuple(token.span),
             _ => todo!(),
         }
     }
@@ -304,29 +308,40 @@ impl Parser {
     /// NOTE We should inline this because it’s only called from `lvalue`, with which
     /// it is mutually recursive.
     #[inline(always)]
-    fn finish_lvalue_tuple(&mut self) -> Result<LValue> {
-        if self.match_lexeme(Lexeme::RParen) {
-            return Ok(LValueKind::Tuple(vec![]).into());
+    fn finish_lvalue_tuple(&mut self, opening: Span) -> Result<LValue> {
+        // Finish right away if the next token is a close-paren
+        if let Some(&Lexeme::RParen) = self.peek_lexeme() {
+            let closing = self.next().unwrap().span;
+            let span = opening.join(&closing).unwrap();
+            let lvalue = LValue {
+                span,
+                kind: LValueKind::Tuple(vec![]),
+            };
+            return Ok(lvalue);
         }
 
         let head = self.lvalue()?;
-        let lvalue = if let Some(&Comma) = self.peek_lexeme() {
+        let mut lvalue = if let Some(&Comma) = self.peek_lexeme() {
             // Tuples with one element should have a single trailing comma to
             // disambiguate from groups.
             let mut items = vec![head];
             while self.match_lexeme(Comma) {
+                items.push(self.lvalue()?);
                 if let Some(&RParen) = &self.peek_lexeme() {
                     break;
                 }
-                items.push(self.lvalue()?);
             }
+            // Give a default span for now
             LValueKind::Tuple(items).into()
         } else {
             // If there were no commas, we should just regard this as a pair of
             // grouping parentheses.
             head
         };
-        self.consume(RParen)?;
+        // Now fix up the span
+        let closing = self.consume(RParen)?;
+        let span = opening.join(&closing.span).unwrap();
+        lvalue.span = span;
         Ok(lvalue)
     }
 
