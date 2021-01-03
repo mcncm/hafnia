@@ -60,8 +60,13 @@ pub enum Type {
 
 impl Type {
     /// Create an instance of the unit type
-    pub fn unit() -> Self {
-        Type::Tuple(vec![])
+    pub const fn unit() -> Self {
+        Self::Tuple(vec![])
+    }
+
+    /// Create an instance of the size/index type
+    pub const fn size_type() -> Self {
+        Self::U32
     }
 
     /// Check the structural properties of each type

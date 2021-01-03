@@ -34,7 +34,7 @@ pub fn typecheck<'s>(stmts: &'s mut Vec<Stmt>, sess: &'s Session) -> SymbolTable
 /// well-typed symbol table.
 pub struct Typechecker<'s> {
     sess: &'s Session,
-    errors: ErrorBuf,
+    pub errors: ErrorBuf,
 }
 
 impl<'s> Typechecker<'s> {
@@ -45,10 +45,10 @@ impl<'s> Typechecker<'s> {
         }
     }
 
-    pub fn typecheck(
+    pub fn typecheck<'ast>(
         mut self,
-        stmts: &mut Vec<Stmt>,
-    ) -> std::result::Result<SymbolTable, ErrorBuf> {
+        stmts: &'ast mut Vec<Stmt>,
+    ) -> std::result::Result<SymbolTable<'ast>, ErrorBuf> {
         let mut root = SymbolTable::new();
         hoist_items(stmts);
         for stmt in stmts.iter_mut() {
@@ -64,7 +64,11 @@ impl<'s> Typechecker<'s> {
 
     /// Typecheck a statement. This will be executed after hoisting, so all items
     /// will have been hoisted to the top.
-    fn type_stmt<'ast>(&mut self, stmt: &'ast Stmt, table: &mut SymbolTable<'ast>) -> Result<()> {
+    pub fn type_stmt<'ast>(
+        &mut self,
+        stmt: &'ast Stmt,
+        table: &mut SymbolTable<'ast>,
+    ) -> Result<()> {
         use StmtKind::*;
         match &stmt.kind {
             // No-op
@@ -77,7 +81,7 @@ impl<'s> Typechecker<'s> {
             // A new local binding: insert the name into the symbol table
             Local { lhs, ty, rhs } => {
                 let ty = self.type_local(ty, rhs, table)?;
-                self.insert_local(lhs, ty, table);
+                self.insert_local(lhs, ty, table)?;
                 Ok(())
             }
             // All these are expected to be at the top of the AST, as they’ve
@@ -96,7 +100,12 @@ impl<'s> Typechecker<'s> {
             ExprKind::UnOp { op, right } => self.type_unop(op, right, table),
             ExprKind::Literal(lit) => self.type_literal(lit, table),
             ExprKind::Tuple(vals) => self.type_tuple(vals, table),
-            _ => unimplemented!(),
+            // There is some duplication following us around here--perhaps we
+            // ought to lower the representation somewhat.
+            ExprKind::ExtArr(vals) => self.type_ext_arr(vals, table),
+            ExprKind::IntArr { item, reps } => self.type_int_arr(item, reps, table),
+            ExprKind::Ident(ident) => self.type_ident(ident, table),
+            _ => todo!(),
         }
     }
 
@@ -136,8 +145,35 @@ impl<'s> Typechecker<'s> {
         Ok(ty)
     }
 
-    fn type_unop(&mut self, _op: &UnOp, _right: &Box<Expr>, _table: &SymbolTable) -> Result<Type> {
-        todo!();
+    fn type_unop(&mut self, op: &UnOp, right: &Box<Expr>, table: &SymbolTable) -> Result<Type> {
+        use Type::*;
+        use UnOpKind::*;
+        let ty_r = self.type_expr(right, table)?;
+        let ty = match (op.kind, ty_r) {
+            (Minus, _) => unimplemented!(),
+
+            (Not, Bool) => Bool,
+            (Not, Q_Bool) => Bool,
+
+            (Linear, Bool) => Q_Bool,
+            (Linear, U8) => Q_U8,
+            (Linear, U16) => Q_U16,
+            (Linear, U32) => Q_U32,
+
+            (Delin, Q_Bool) => Bool,
+            (Delin, Q_U8) => U8,
+            (Delin, Q_U16) => U16,
+            (Delin, Q_U32) => U32,
+
+            (kind, right) => {
+                return Err(self.errors.push(errors::UnOpTypeError {
+                    span: op.span,
+                    kind,
+                    right,
+                }));
+            }
+        };
+        Ok(ty)
     }
 
     fn type_tuple(&mut self, vals: &Vec<Expr>, table: &SymbolTable) -> Result<Type> {
@@ -148,6 +184,40 @@ impl<'s> Typechecker<'s> {
             // quite the behavior I want.
             .collect::<Result<Vec<Type>>>()?;
         Ok(Type::Tuple(tys))
+    }
+
+    fn type_ext_arr(&mut self, vals: &Vec<Expr>, table: &SymbolTable) -> Result<Type> {
+        if vals.is_empty() {
+            // This might have to wait for type inference to make sense.
+            todo!();
+        }
+
+        let mut vals = vals.iter();
+        // Unwrap safe because `vals` is known not to be empty.
+        let ty = self.type_expr(vals.next().unwrap(), table)?;
+        for v in vals {
+            if self.type_expr(v, table)? != ty {
+                return Err(self
+                    .errors
+                    .push(errors::HeterogeneousArray { span: v.span, ty }))?;
+            }
+        }
+
+        Ok(Type::Array(Box::new(ty)))
+    }
+
+    fn type_int_arr(&mut self, item: &Expr, reps: &Expr, table: &SymbolTable) -> Result<Type> {
+        let ty_item = self.type_expr(item, table)?;
+        let ty_reps = self.type_expr(item, table)?;
+
+        if ty_reps != Type::size_type() {
+            return Err(self.errors.push(errors::ExpectedSizeType {
+                span: reps.span,
+                ty: ty_reps,
+            }))?;
+        }
+
+        Ok(Type::Array(Box::new(ty_item)))
     }
 
     fn type_local(&mut self, _ty: &Option<Annot>, rhs: &Expr, table: &SymbolTable) -> Result<Type> {
@@ -202,6 +272,24 @@ impl<'s> Typechecker<'s> {
         }
     }
 
+    fn type_ident(&mut self, ident: &Ident, table: &SymbolTable) -> Result<Type> {
+        // NOTE: cann’t use `ok_or` here because it evaluates its arguments
+        // eagerly.
+        let symb = table.get(&ident).ok_or_else(|| {
+            self.errors.push(errors::UnboundName {
+                span: ident.span,
+                name: ident.name.clone(),
+            })
+        });
+
+        match symb {
+            // This clone is not wasted--we might well need to make a new symbol
+            // that has the same type!
+            Ok(symb) => Ok(symb.ty.clone()),
+            Err(err) => Err(err),
+        }
+    }
+
     fn resolve_annot_question(&self, inner: Type, _table: &SymbolTable) -> Result<Type> {
         let ty = match inner {
             Type::Bool => Type::Q_Bool,
@@ -214,31 +302,59 @@ impl<'s> Typechecker<'s> {
         Ok(ty)
     }
 
-    fn resolve_annot_bang(&self, _inner: Type) -> Result<Type> {
-        todo!()
+    fn resolve_annot_bang(&self, inner: Type) -> Result<Type> {
+        let ty = match inner {
+            Type::Q_Bool => Type::Bool,
+            Type::Q_U8 => Type::U8,
+            Type::Q_U16 => Type::U16,
+            Type::Q_U32 => Type::U32,
+
+            _ => unimplemented!(),
+        };
+        Ok(ty)
     }
 
     /// Insert local bindings, recursively destructuring the LValue and type
-    fn insert_local(&mut self, lhs: &LValue, ty: Type, table: &mut SymbolTable) -> Result<()> {
-        match (&lhs.kind, &ty) {
+    fn insert_local<'ast>(
+        &mut self,
+        lhs: &'ast LValue,
+        ty: Type,
+        table: &mut SymbolTable<'ast>,
+    ) -> Result<()> {
+        match (&lhs.kind, ty) {
             (LValueKind::Tuple(lvalues), Type::Tuple(tys)) => {
                 if lvalues.len() != tys.len() {
                     return Err(self.errors.push(errors::DestructuringError {
                         span: lhs.span,
-                        actual: ty,
+                        // Have to rebuild the type because it was moved in here
+                        actual: Type::Tuple(tys),
                     }))?;
                 }
 
                 for (lvalue, ty) in lvalues.iter().zip(tys.into_iter()) {
-                    // FIXME: this clone shouldn't be necessary, right? Why is
-                    // `into_iter` not yielding owned `Type`s here?
-                    self.insert_local(lvalue, ty.clone(), table)?;
+                    self.insert_local(lvalue, ty, table)?;
                 }
             }
-            (LValueKind::Ident(ident), _) => {
-                todo!();
+
+            (LValueKind::Ident(ident), ty) => match table.insert_var(ident, ty) {
+                None => {}
+                // TODO report some information about the contained symbol
+                Some(_) => {
+                    return Err(self.errors.push(errors::NameCollision {
+                        span: lhs.span,
+                        name: ident.name.clone(),
+                    }))?;
+                }
+            },
+
+            // In all other cases, we've failed to destructure
+            (_, ty) => {
+                return Err(self.errors.push(errors::DestructuringError {
+                    span: lhs.span,
+                    // Have to rebuild the type because it was moved in here
+                    actual: ty,
+                }))?;
             }
-            _ => todo!(),
         };
         Ok(())
     }
@@ -246,7 +362,7 @@ impl<'s> Typechecker<'s> {
 
 /// Hoists `fn`, `struct`, `enum` declarations to the top of a list of
 /// statements, but does not insert them in a symbol table.
-fn hoist_items(stmts: &mut Vec<Stmt>) {
+pub fn hoist_items(stmts: &mut Vec<Stmt>) {
     // `Vec::sort_by` is a stable sort, so all this will do is carry items to
     // the top, without reordering anything else. This significantly simplifies
     // the implementation, at least as long as `drain_filter` is unstable.
@@ -257,17 +373,20 @@ fn hoist_items(stmts: &mut Vec<Stmt>) {
     });
 }
 
-/// Lives in symbol table, carries type, lifetime information and so on.
+/// Lives in symbol table; carries type, lifetime information and so on.
+#[derive(Debug)]
 pub struct Symbol {
     kind: SymbolKind,
     ty: Type,
 }
 
+#[derive(Debug)]
 pub enum SymbolKind {
     Fn(Box<dyn Func>),
     Var,
 }
 
+#[derive(Debug)]
 pub struct SymbolTable<'ast> {
     /// For now, there is a single namespace for all symbols. It might be better
     /// to have separate namespaces for functions, variables, types, and so on.
@@ -276,7 +395,7 @@ pub struct SymbolTable<'ast> {
 }
 
 impl<'ast> SymbolTable<'ast> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
             parent: None,
@@ -306,6 +425,19 @@ impl<'ast> SymbolTable<'ast> {
             }
         }
     }
+
+    fn insert_var(&mut self, ident: &'ast Ident, ty: Type) -> Option<Symbol> {
+        let symb = Symbol {
+            kind: SymbolKind::Var,
+            ty,
+        };
+        let symb = self.symbols.insert(&ident.name, symb);
+        symb
+    }
+
+    fn get(&self, ident: &'ast Ident) -> Option<&Symbol> {
+        self.symbols.get(ident.name.as_str())
+    }
 }
 
 mod errors {
@@ -329,12 +461,12 @@ mod errors {
 
     #[derive(Diagnostic)]
     pub struct UnOpTypeError {
-        #[msg = "operator `{kind}` doesn't support argument type `{actual}`"]
+        #[msg = "operator `{kind}` doesn't support argument type `{right}`"]
         pub span: Span,
         /// The operator
         pub kind: UnOpKind,
-        /// The actual left operand type
-        pub actual: Type,
+        /// The actual right operand type
+        pub right: Type,
     }
 
     #[derive(Diagnostic)]
@@ -343,5 +475,33 @@ mod errors {
         pub span: Span,
         /// The type
         pub actual: Type,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct NameCollision {
+        #[msg = "name `{name}` was previously bound"]
+        pub span: Span,
+        pub name: String,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct HeterogeneousArray {
+        #[msg = "element's type differs from `{ty}`"]
+        pub span: Span,
+        pub ty: Type,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedSizeType {
+        #[msg = "expected size type, found `{ty}`"]
+        pub span: Span,
+        pub ty: Type,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct UnboundName {
+        #[msg = "name `{name}` is not bound"]
+        pub span: Span,
+        pub name: String,
     }
 }
