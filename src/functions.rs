@@ -67,64 +67,6 @@ pub mod builtins {
     use lazy_static::lazy_static;
     use std::collections::HashMap;
 
-    /// This macro is helpful for synchronizing the names of builtin functions
-    /// and the native functions they refer to.
-    macro_rules! builtins_table {
-        ($($doc:literal | $func:ident : $arity:expr),*) => {
-            {
-                let mut table = HashMap::new();
-                $(
-                    table.insert(
-                        stringify!($func),
-                        Builtin {
-                            arity: $arity,
-                            func: &$func,
-                            doc: Some($doc.to_string()),
-                        },
-                    );
-                )*
-                table
-            }
-        };
-    }
-
-    lazy_static! {
-        /// The table of builtin functions, the implementations of which are
-        /// given below. Note that although `not` and `measure` are defined as builtin
-        /// functions, they aren't bound to names here, since they are honored with the
-        /// special `~` and `!` operators.
-        #[rustfmt::skip]
-        pub static ref BUILTINS: HashMap<&'static str, Builtin> = {
-            builtins_table! [
-                r"Return the argument, shifted by a phase of π."
-                    | flip      : 1,
-
-                r"Return the argument, after a bitwise Hadamard operation."
-                    | split     : 1,
-
-                r"Return the length of the argument."
-                    | len       : 1,
-
-                r"Return an array consisting of pairs of indices and elements \
-                of the argument."
-                    | enumerate : 1,
-
-                r"Zip together two arrays, returning an array of pairs of \
-                elements."
-                    | zip       : 2,
-
-                r"Reverse an array or tuple."
-                    | reversed  : 1,
-
-                r"Allocate memory from the QRAM."
-                    | qalloc    : 2,
-
-                r"Free memory to the QRAM."
-                    | free      : 1
-            ]
-        };
-    }
-
     /// Type representing a builtin function. These are best implemented with a
     /// separate data structure from user-defined functions because the `func`
     /// field is here a native function, rather than a `Block` expression.

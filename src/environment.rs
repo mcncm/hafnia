@@ -1,4 +1,3 @@
-use crate::functions::builtins::BUILTINS;
 use crate::target::{qasm::Qasm, IntoTarget, Target};
 use crate::{circuit::Qubit, functions::Func, values::Value};
 use serde::{self, Deserialize, Serialize};
@@ -179,11 +178,7 @@ impl Environment {
     /// be called once, so I’m not very worried about the cost of cloning.
     /// Nevertheless, You might want to think about cleaner ways of doing this.
     pub fn base() -> Self {
-        let mut env = Self::new();
-        for (name, func) in BUILTINS.iter() {
-            env.insert(name.to_string(), Nameable::Func(Rc::new(func.clone())));
-        }
-        env
+        Self::new()
     }
 
     //////////////////
