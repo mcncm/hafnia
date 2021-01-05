@@ -123,7 +123,7 @@ fn get_entry_point(argmatches: &ArgMatches) -> Option<PathBuf> {
 }
 
 fn get_object_path(argmatches: &ArgMatches) -> PathBuf {
-    let path = argmatches.value_of("output").unwrap_or("a.out");
+    let path = argmatches.value_of("object").unwrap_or("a.out");
     PathBuf::from(path)
 }
 
