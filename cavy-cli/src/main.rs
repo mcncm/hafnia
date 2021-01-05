@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
-use cavy::repl::Repl;
 use cavy::session::{Config, Phase, PhaseConfig, Session};
 use cavy::target;
 use cavy::{compile, sys};
+
+use cavy_cli::repl::Repl;
 
 use clap::{load_yaml, App, ArgMatches};
 use fs::File;

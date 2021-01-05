@@ -1,16 +1,14 @@
-use crate::arch::Arch;
-use crate::ast::StmtKind;
-use crate::cavy_errors::{self, ErrorBuf};
-use crate::interpreter::Interpreter;
-use crate::parser::Parser;
-use crate::scanner::Scanner;
-use crate::session::{Phase, Session};
-use crate::source::{SrcObject, SrcStore};
-use crate::sys;
-use crate::typecheck;
-use lazy_static::lazy_static;
+#![allow(dead_code)]
+
+use cavy::ast::StmtKind;
+use cavy::interpreter::Interpreter;
+use cavy::parser::Parser;
+use cavy::scanner::Scanner;
+use cavy::session::{Phase, Session};
+use cavy::sys;
+use cavy::typecheck;
+
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::io::{self, Write};
 use std::process;
 

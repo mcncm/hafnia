@@ -13,7 +13,6 @@ pub mod functions;
 pub mod interpreter;
 pub mod parser;
 pub mod qram;
-pub mod repl;
 pub mod scanner;
 pub mod session;
 pub mod source;
