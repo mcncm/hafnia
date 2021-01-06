@@ -1,5 +1,5 @@
 use crate::session::Session;
-use crate::source::{Span, SrcId, SrcObject, SrcPoint};
+use crate::source::{Span, SrcId, SrcObject, SrcPoint, SrcStore};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
     cavy_errors::ErrorBuf,
@@ -21,8 +21,7 @@ pub fn tokenize(src_id: SrcId, sess: &mut Session) -> Vec<Token> {
     if last_phase < Phase::Tokenize {
         crate::sys::exit(0);
     }
-    let src = sess.sources.get_mut(&src_id).unwrap();
-    match Scanner::new(src).tokenize() {
+    match Scanner::new(src_id, &mut sess.sources).tokenize() {
         Ok(tokens) => tokens,
         Err(errs) => {
             sess.emit_diagnostics(errs);
@@ -244,10 +243,13 @@ macro_rules! push_token {
 }
 
 impl<'s> Scanner<'s> {
-    pub fn new(src: &'s mut SrcObject) -> Self {
+    pub fn new(src_id: SrcId, store: &'s mut SrcStore) -> Self {
+        // NOTE: This unwrap probably isn't safe, unless we're careful only to
+        // pass in a SrcId that hasn't been invalidated.
+        let src = store.get_mut(&src_id).unwrap();
         Scanner {
             scan_head: ScanHead::new(src.code.chars().peekable(), &mut src.newlines),
-            src_id: src.id,
+            src_id,
             token_buf: TokenBuf::new(),
             tokens: vec![],
             errors: ErrorBuf::new(),
@@ -453,9 +455,9 @@ mod tests {
                 )*
             )?
 
-            let mut src = SrcObject::from($code);
-            let scanner = Scanner::new(&mut src);
-            let tokens = scanner.tokenize().unwrap();
+            let mut store = SrcStore::new();
+            let id = store.insert(SrcObject::from($code));
+            let tokens = Scanner::new(id, &mut store).tokenize().unwrap();
 
             assert_eq!(tokens.len(), expected_tokens.len(), "expected same number of tokens.");
 
@@ -601,8 +603,9 @@ mod tests {
 
     #[test]
     fn spans_correct() {
-        let mut src = SrcObject::from("fn hello()");
-        let scanner = Scanner::new(&mut src);
+        let mut store = SrcStore::new();
+        let id = store.insert(SrcObject::from("fn hello()"));
+        let scanner = Scanner::new(id, &mut store);
         let tokens = scanner.tokenize().unwrap();
         assert_eq!(tokens.len(), 4);
         check_span(&tokens[0], 0, 1);

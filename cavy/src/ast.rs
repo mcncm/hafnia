@@ -322,7 +322,7 @@ impl From<StmtKind> for Stmt {
     }
 }
 
-/// A kind of statement
+/// A kind of statement: this division of kinds is basically taken from `rustc_ast`.
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     Print(Box<Expr>),

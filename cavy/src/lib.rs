@@ -16,6 +16,7 @@ pub mod qram;
 pub mod scanner;
 pub mod session;
 pub mod source;
+pub mod store;
 pub mod sys;
 pub mod target;
 pub mod token;

@@ -1,6 +1,8 @@
 //! Data strucures for holding and manipulating source code
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
+use crate::store::Index;
+use crate::store_triple;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -21,16 +23,14 @@ fn count_digits(n: usize) -> usize {
     }
 }
 
-/// Unique identifier of a source object. I'll be surprised if anyone ever needs more
-/// than two bytes to identify all of their source objects.
-pub type SrcId = u16;
+// /// Unique identifier of a source object. I'll be surprised if anyone ever needs more
+// /// than two bytes to identify all of their source objects.
+store_triple! { SrcStore : SrcId => SrcObject }
 
 /// Type returned by the public SrcStore interface. This is expected to be
 /// passed to a Scanner.
 #[derive(Debug)]
 pub struct SrcObject {
-    /// ID of the source object, used for reporting errors
-    pub id: SrcId,
     /// The locations of newline characters within the source object: filled in
     /// by the scanner
     pub newlines: Vec<usize>,
@@ -77,67 +77,35 @@ impl SrcObject {
     }
 }
 
-/// Store of all the source objects loaded by the compiler. We're using a
-/// HashMap with a SrcId key, rather than a Vec, to save space. Every node in
-/// the AST will contain a SrcId, so they better be economical.
-#[derive(Default, Debug)]
-pub struct SrcStore {
-    next_id: SrcId,
-    table: HashMap<SrcId, SrcObject>,
-}
-
-impl SrcStore {
-    pub fn new() -> Self {
+impl From<&'static str> for SrcObject {
+    fn from(code: &'static str) -> Self {
         Self {
-            // Start at 1 so 0 can be used as a special value for SourceObjects
-            // not derived from a store
-            next_id: 1,
-            table: HashMap::new(),
+            code: code.to_owned(),
+            newlines: vec![],
+            origin: String::from("<static>"),
         }
     }
 }
 
 impl SrcStore {
-    fn new_id(&mut self) -> SrcId {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
     /// Try to insert a path to a source file and retrieve a source object
     pub fn insert_path(&mut self, path: PathBuf) -> Result<SrcId, std::io::Error> {
         let code = std::fs::read_to_string(&path)?;
-        let id = self.new_id();
         let src = SrcObject {
-            id,
             newlines: vec![],
             code,
             origin: path.to_string_lossy().to_string(),
         };
-        self.table.insert(id, src);
-        Ok(id)
+        Ok(self.insert(src))
     }
 
     pub fn insert_input(&mut self, input: &str) -> SrcId {
-        let id = self.new_id();
         let src = SrcObject {
-            id,
             newlines: vec![],
             code: input.to_owned(),
             origin: "<input>".to_owned(),
         };
-        self.table.insert(id, src);
-        id
-    }
-
-    /// Retrieve source code from the store of source objects
-    pub fn get(&self, id: &SrcId) -> Option<&SrcObject> {
-        self.table.get(id)
-    }
-
-    /// Retrieve source code, mutably, from the store of source objects
-    pub fn get_mut(&mut self, id: &SrcId) -> Option<&mut SrcObject> {
-        self.table.get_mut(id)
+        self.insert(src)
     }
 
     pub fn format_err(&self, err: Box<dyn Diagnostic>) -> String {
