@@ -9,6 +9,13 @@ use std::fmt;
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
 
+// A module. For now there's only one module per program.
+#[derive(Debug)]
+pub struct Mod {
+    pub span: Span,
+    pub items: Vec<Item>,
+}
+
 /// Identifier node
 #[derive(Debug, Clone)]
 pub struct Ident {
@@ -247,7 +254,7 @@ pub enum ExprKind {
     },
     /// Extensional arrays of the form [1, 2, 3]
     ExtArr(Vec<Expr>),
-    Block(Block),
+    Block(Box<Block>),
     If {
         cond: Box<Expr>,
         then_branch: Box<Block>,
@@ -256,11 +263,6 @@ pub enum ExprKind {
     For {
         bind: Box<LValue>,
         iter: Box<Expr>,
-        body: Box<Block>,
-    },
-    Let {
-        lhs: Box<LValue>,
-        rhs: Box<Expr>,
         body: Box<Block>,
     },
     Call {
@@ -293,7 +295,6 @@ impl ExprKind {
             Block(_) => false,
             If { .. } => false,
             For { .. } => false,
-            Let { .. } => false,
             Call { .. } => true,
             Index { .. } => true,
         }
@@ -365,9 +366,9 @@ pub struct Item {
 pub enum ItemKind {
     Fn {
         /// Function identifier
-        name: String,
+        name: Ident,
         /// Function parameters consisting of name-type pairs
-        params: Vec<(String, Annot)>,
+        params: Vec<(Ident, Annot)>,
         /// Return type of the function
         typ: Option<Annot>,
         /// Body of the function; guaranteed to be a block.

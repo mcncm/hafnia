@@ -12,6 +12,7 @@ pub mod environment;
 pub mod functions;
 pub mod interpreter;
 pub mod parser;
+pub mod hir;
 pub mod qram;
 pub mod scanner;
 pub mod session;

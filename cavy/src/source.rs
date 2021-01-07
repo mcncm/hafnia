@@ -1,7 +1,6 @@
 //! Data strucures for holding and manipulating source code
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
-use crate::store::Index;
 use crate::store_triple;
 use std::collections::HashMap;
 use std::convert::TryFrom;

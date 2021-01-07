@@ -143,13 +143,13 @@ impl Interpreter {
     /// time, before evaluation.
     fn exec_fn(
         &mut self,
-        name: &str,
-        params: &[(String, Annot)],
+        name: &Ident,
+        params: &[(Ident, Annot)],
         body: &Block,
     ) -> Result<(), ErrorBuf> {
         let params = params
             .iter()
-            .map(|(param, _)| param.clone())
+            .map(|(param, _)| param.name.clone())
             .collect::<Vec<String>>();
         let body = Box::new(body.clone());
 
@@ -160,7 +160,7 @@ impl Interpreter {
         };
 
         self.env
-            .insert(name.to_string(), Nameable::Func(Rc::new(func)));
+            .insert(name.name.clone(), Nameable::Func(Rc::new(func)));
 
         Ok(())
     }
@@ -295,7 +295,6 @@ impl Interpreter {
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
             For { bind, iter, body } => self.eval_for(bind, iter, body),
-            Let { lhs, rhs, body } => self.eval_let(lhs, rhs, body),
             Block(block) => self.eval_block(block, None, vec![]),
             Call { callee, args, .. } => self.eval_call(callee, args),
             Index { head, index, .. } => self.eval_index(head, index),
@@ -706,7 +705,7 @@ mod errors {
     }
 }
 
-#[cfg(test)]
+#[cfg(foo)]
 mod tests {
     use super::*;
     use crate::circuit::Gate::*;
@@ -748,8 +747,8 @@ mod tests {
         let id = store.insert(SrcObject::from(prog));
         let tokens = Scanner::new(id, &mut store).tokenize().unwrap();
 
-        let stmts = match Parser::new(tokens).parse() {
-            Ok(stmts) => stmts,
+        let module = match Parser::new(tokens).parse() {
+            Ok(module) => module,
             Err(errs) => {
                 for err in errs.0.iter() {
                     println!("{:?}", err.message());
@@ -760,7 +759,7 @@ mod tests {
 
         let arch = Arch::default();
         let mut interp = Interpreter::new(arch);
-        for stmt in stmts.into_iter() {
+        for stmt in module.stmts.into_iter() {
             interp.execute(&stmt).unwrap();
         }
 

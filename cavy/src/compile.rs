@@ -20,18 +20,21 @@ pub fn compile(entry_point: PathBuf, mut sess: Session) -> ObjectCode {
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
     let tokens = scanner::tokenize(id, &mut sess);
-    let mut stmts = parser::parse(tokens, &sess);
-    if sess.config.phase_config.typecheck {
-        let _ = typecheck(&mut stmts, &sess);
-    }
+    let mut _module = parser::parse(tokens, &sess);
 
-    // I'll leave this phase undisturbed, since it is going to change
-    // dramatically, anyway.
-    let last_phase = sess.config.phase_config.last_phase;
-    if last_phase < Phase::Evaluate {
-        crate::sys::exit(0);
-    }
-    let mut interpreter = Interpreter::new(sess.config.arch);
-    interpreter.interpret(stmts).unwrap();
-    sess.config.target.from(&interpreter)
+    todo!();
+
+    // if sess.config.phase_config.typecheck {
+    //     let _ = typecheck(&mut stmts, &sess);
+    // }
+
+    // // I'll leave this phase undisturbed, since it is going to change
+    // // dramatically, anyway.
+    // let last_phase = sess.config.phase_config.last_phase;
+    // if last_phase < Phase::Evaluate {
+    //     crate::sys::exit(0);
+    // }
+    // let mut interpreter = Interpreter::new(sess.config.arch);
+    // interpreter.interpret(stmts).unwrap();
+    // sess.config.target.from(&interpreter)
 }

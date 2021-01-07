@@ -421,7 +421,7 @@ impl<'ast> SymbolTable<'ast> {
                     ty: Type::unit(),
                     kind: SymbolKind::Fn(func),
                 };
-                self.symbols.insert(&name, symb);
+                self.symbols.insert(&name.name, symb);
             }
         }
     }

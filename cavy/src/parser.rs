@@ -15,8 +15,10 @@ use std::fmt;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
-/// Main entry point for parsing
-pub fn parse(tokens: Vec<Token>, sess: &Session) -> Vec<Stmt> {
+/// Main entry point for parsing: consumes a token stream and produces a module.
+/// This api will almost certainly change when, some fine day, a program can
+/// have more than one module in it.
+pub fn parse(tokens: Vec<Token>, sess: &Session) -> Mod {
     use crate::session::Phase;
     let last_phase = sess.config.phase_config.last_phase;
     if last_phase < Phase::Parse {
@@ -102,7 +104,7 @@ impl Parser {
     }
 
     /// Take a token if there is one; push an error otherwise
-    fn consume_token(&mut self) -> Result<Token> {
+    fn token(&mut self) -> Result<Token> {
         // Note that this cannot be `ok_or`, which is eagerly evaluated.
         let token = self
             .next()
@@ -110,33 +112,44 @@ impl Parser {
         Ok(token)
     }
 
-    /// Consumes the parser, generating a list of statements
-    pub fn parse(mut self) -> std::result::Result<Vec<Stmt>, ErrorBuf> {
-        let mut stmts = vec![];
-        loop {
-            match self.declaration() {
-                Ok(Some(stmt)) => stmts.push(stmt),
-                // An error has been found, but we should try to parse the next
-                // declaration in order to gather more errors.
-                Err(_) => {
-                    continue;
-                }
-                // All done; exit the loop
-                Ok(None) => {
-                    break;
-                }
+    /// Consumes the parser, generating a module
+    pub fn parse(mut self) -> std::result::Result<Mod, ErrorBuf> {
+        let mut items = vec![];
+        while let Some(_) = self.tokens.peek() {
+            match self.item() {
+                Ok(item) => items.push(item),
+                Err(_) => {}
             }
         }
 
         if self.errors.is_empty() {
-            Ok(stmts)
+            let span = if items.len() == 0 {
+                // Figure out what to do in this case. Regardless, the span of
+                // the module should not be the join of the spans of its items;
+                // it is actually a little subtler than that.
+                Span::default()
+            } else {
+                items[0].span.join(&items.last().unwrap().span).unwrap()
+            };
+            Ok(Mod { span, items })
         } else {
             Err(self.errors)
         }
     }
 
+    fn item(&mut self) -> Result<Item> {
+        let Token { lexeme, span } = self.token()?;
+        match lexeme {
+            Lexeme::Fn => self.fn_item(),
+            lexeme => Err(self.errors.push(ExpectedItem {
+                span,
+                actual: lexeme,
+            }))?,
+        }
+    }
+
     fn consume(&mut self, lexeme: Lexeme) -> Result<Token> {
-        let token = self.consume_token()?;
+        let token = self.token()?;
 
         if token.lexeme == lexeme {
             return Ok(token);
@@ -150,10 +163,10 @@ impl Parser {
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
-    fn consume_ident(&mut self) -> Result<String> {
-        let token = self.consume_token()?;
+    fn consume_ident(&mut self) -> Result<ast::Ident> {
+        let token = self.token()?;
         match token.lexeme {
-            Lexeme::Ident(name) => Ok(name),
+            Lexeme::Ident(_) => Ok(ast::Ident::try_from(token).unwrap()),
             lexeme => Err(self.errors.push(ExpectedIdentifier {
                 span: token.span,
                 actual: lexeme,
@@ -161,27 +174,14 @@ impl Parser {
         }
     }
 
-    /// A declaration, which is either a definition or a statement
-    pub fn declaration(&mut self) -> Result<Option<Stmt>> {
-        if self.peek_lexeme() == None {
-            return Ok(None);
-        }
-
-        // TODO Check for assignment (currently in `self.statement`)
-        if self.match_lexeme(Lexeme::Fn) {
-            let def = self.function_definition()?;
-            let stmt = StmtKind::Item(def).into();
-            Ok(Some(stmt))
-        } else {
-            Ok(Some(self.statement()?))
-        }
-    }
-
     /// Produces a statement
     pub fn statement(&mut self) -> Result<Stmt> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
-            Some(Let) => Ok(self.local()?),
+            Some(Fn) => {
+                let item = self.item()?;
+                Ok(StmtKind::Item(item).into())
+            }
             // Must be an expression next!
             Some(_) => {
                 let expr = Box::new(self.expression()?);
@@ -197,7 +197,7 @@ impl Parser {
         }
     }
 
-    fn function_definition(&mut self) -> Result<Item> {
+    fn fn_item(&mut self) -> Result<Item> {
         let name = self.consume_ident()?;
         self.consume(Lexeme::LParen)?;
         let params = self.finish_function_params()?;
@@ -217,7 +217,7 @@ impl Parser {
         })
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(String, Annot)>> {
+    fn finish_function_params(&mut self) -> Result<Vec<(ast::Ident, Annot)>> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -231,7 +231,7 @@ impl Parser {
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(String, Annot)> {
+    fn function_param(&mut self) -> Result<(ast::Ident, Annot)> {
         let name = self.consume_ident()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
@@ -266,24 +266,15 @@ impl Parser {
         };
         self.consume(Lexeme::Equal)?;
         let rhs = Box::new(self.expression()?);
-        // But this could still be a *let expression statement*. We have to check
-        // for this case.
-        if self.match_lexeme(Lexeme::In) {
-            self.consume(Lexeme::LBrace)?;
-            let body = Box::new(self.block()?);
-            let expr_kind = ExprKind::Let { lhs, rhs, body };
-            Ok(StmtKind::Expr(Box::new(expr_kind.into())).into())
-        } else {
-            self.consume(Lexeme::Semicolon)?;
-            Ok(StmtKind::Local { lhs, rhs, ty }.into())
-        }
+        self.consume(Lexeme::Semicolon)?;
+        Ok(StmtKind::Local { lhs, rhs, ty }.into())
     }
 
     /// Recursively build an LValue
     fn lvalue(&mut self) -> Result<LValue> {
         // We' anticipate being able to find an lvalue here, so produce an error
         // if a token isn't found.
-        let token = self.consume_token()?;
+        let token = self.token()?;
         // TODO should check that all names are unique
         match token.lexeme {
             Lexeme::Ident(_) => {
@@ -384,7 +375,8 @@ impl Parser {
     }
 
     fn block_expr(&mut self) -> Result<Expr> {
-        Ok(ExprKind::Block(self.block()?).into())
+        let block = Box::new(self.block()?);
+        Ok(ExprKind::Block(block).into())
     }
 
     fn block(&mut self) -> Result<Block> {
@@ -463,7 +455,7 @@ impl Parser {
     fn type_annotation(&mut self) -> Result<Annot> {
         // Get another token. We're anticipating being able to form a type
         // annotation here, so it's an error if none is available.
-        let Token { lexeme, span } = self.consume_token()?;
+        let Token { lexeme, span } = self.token()?;
         // TODO How to make this more succinct: a macro? It doesn't seem
         // possible for macros to expand to match arms. An or-pattern? Not
         // stable yet.
@@ -699,6 +691,14 @@ mod errors {
     #[derive(Diagnostic)]
     pub struct ExpectedIdentifier {
         #[msg = "expected identifier, found `{actual}`"]
+        pub span: Span,
+        /// The lexeme actually found
+        pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ExpectedItem {
+        #[msg = "expected item, found token `{actual}`"]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
