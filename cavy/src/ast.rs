@@ -1,4 +1,5 @@
-use crate::source::Span;
+use crate::source::{Span, SrcStore};
+use crate::store_triple;
 use crate::token::{Token, Unsigned};
 use std::convert::TryFrom;
 use std::fmt;
@@ -8,34 +9,90 @@ use std::fmt;
 // that item. This pattern was borrowed from rustc itself, as I found that it
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
+store_triple! { FnStore : FnId => Func }
+store_triple! { BodyStore : BodyId => Expr }
+store_triple! { SymbolStore : SymbolId => String }
 
-// A module. For now there's only one module per program.
-#[derive(Debug)]
-pub struct Mod {
-    pub span: Span,
-    pub items: Vec<Item>,
+/// This data structure holds the AST-level symbol tables, arenas and interners,
+/// etc., associated with a single compilation unit. All the surrounding data
+/// structures used by parsers go here.
+#[derive(Debug, Default)]
+pub struct AstCtx {
+    /// Function items
+    funcs: FnStore,
+    /// Function bodies
+    bodies: BodyStore,
+    /// Interned strings: identifiers etc.
+    symbols: SymbolStore,
+    /// `main` function
+    entry_point: FnId,
 }
+
+impl AstCtx {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn intern_symbol(&mut self, s: String) -> SymbolId {
+        self.symbols.insert(s)
+    }
+}
+
+/// A generic type for some ast node that contains a single "thing.""
+#[derive(Debug)]
+pub struct Spanned<T> {
+    pub data: T,
+    pub span: Span,
+}
+
+impl<T> PartialEq for Spanned<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
+impl<T> Eq for Spanned<T>
+where
+    T: Eq,
+{
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl<T> Clone for Spanned<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            span: self.span.clone(),
+        }
+    }
+}
+
+/// Interface for ast nodes that can be made from a single token. Returns
+/// Err(()) when the received token can't be transformed as the requested node.
+pub trait FromToken {
+    fn from_token(token: Token, ctx: &mut AstCtx) -> Result<Self, ()>
+    where
+        Self: Sized;
+}
+
+/// A module. For now there's only one module per program.
+pub type Mod = Spanned<Vec<Item>>;
 
 /// Identifier node
-#[derive(Debug, Clone)]
-pub struct Ident {
-    pub name: String,
-    pub span: Span,
-}
+pub type Ident = Spanned<SymbolId>;
 
-/// We will sometimes want to convert a token whose lexeme is definitely a
-/// `Lexeme::Ident` into this standalone `Ident` node. This implementation will
-/// make that easier to do.
-impl TryFrom<Token> for Ident {
-    /// This is "really" an internal implementation whose use will be pretty
-    /// limited; it is supposed to be immediately unwrapped wherever it is used.
-    type Error = ();
-
-    fn try_from(token: Token) -> Result<Self, Self::Error> {
+impl FromToken for Ident {
+    fn from_token(token: Token, ctx: &mut AstCtx) -> Result<Self, ()> {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
-                name,
+                data: ctx.intern_symbol(name),
                 span: token.span,
             }),
             _ => Err(()),
@@ -44,11 +101,7 @@ impl TryFrom<Token> for Ident {
 }
 
 /// Binary operator node
-#[derive(Debug, Clone)]
-pub struct BinOp {
-    pub kind: BinOpKind,
-    pub span: Span,
-}
+pub type BinOp = Spanned<BinOpKind>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOpKind {
@@ -63,32 +116,26 @@ pub enum BinOpKind {
     Greater,
 }
 
-/// We will sometimes want to convert a token whose lexeme is definitely a
-/// binary operator into this standalone `BinOp` node. This implementation will
-/// make that easier to do.
-impl TryFrom<Token> for BinOp {
-    /// This is "really" an internal implementation whose use will be pretty
-    /// limited; it is supposed to be immediately unwrapped wherever it is used.
-    type Error = ();
-
-    fn try_from(token: Token) -> Result<Self, Self::Error> {
-        use crate::token::Lexeme::*;
+impl FromToken for BinOp {
+    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
+        use crate::token::Lexeme;
+        use BinOpKind::*;
         let kind = match token.lexeme {
-            EqualEqual => BinOpKind::Equal,
-            TildeEqual => BinOpKind::Nequal,
-            DotDot => BinOpKind::DotDot,
-            Plus => BinOpKind::Plus,
-            Minus => BinOpKind::Minus,
-            Star => BinOpKind::Times,
-            Percent => BinOpKind::Mod,
-            LAngle => BinOpKind::Less,
-            RAngle => BinOpKind::Greater,
+            Lexeme::EqualEqual => Equal,
+            Lexeme::TildeEqual => Nequal,
+            Lexeme::DotDot => DotDot,
+            Lexeme::Plus => Plus,
+            Lexeme::Minus => Minus,
+            Lexeme::Star => Times,
+            Lexeme::Percent => Mod,
+            Lexeme::LAngle => Less,
+            Lexeme::RAngle => Greater,
             _ => {
                 return Err(());
             }
         };
         Ok(BinOp {
-            kind,
+            data: kind,
             span: token.span,
         })
     }
@@ -116,11 +163,7 @@ impl fmt::Display for BinOpKind {
 }
 
 /// Unary operator node
-#[derive(Debug, Clone)]
-pub struct UnOp {
-    pub kind: UnOpKind,
-    pub span: Span,
-}
+pub type UnOp = Spanned<UnOpKind>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOpKind {
@@ -130,15 +173,8 @@ pub enum UnOpKind {
     Delin,
 }
 
-/// We will sometimes want to convert a token whose lexeme is definitely a
-/// unary operator into this standalone `UnOp` node. This implementation will
-/// make that easier to do.
-impl TryFrom<Token> for UnOp {
-    /// This is "really" an internal implementation whose use will be pretty
-    /// limited; it is supposed to be immediately unwrapped wherever it is used.
-    type Error = ();
-
-    fn try_from(token: Token) -> Result<Self, Self::Error> {
+impl FromToken for UnOp {
+    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Minus => UnOpKind::Minus,
@@ -150,7 +186,7 @@ impl TryFrom<Token> for UnOp {
             }
         };
         Ok(UnOp {
-            kind,
+            data: kind,
             span: token.span,
         })
     }
@@ -173,18 +209,17 @@ impl fmt::Display for UnOpKind {
 }
 
 /// A literal AST node
-#[derive(Debug, Clone)]
-pub struct Literal {
-    pub span: Span,
-    pub kind: LiteralKind,
+pub type Literal = Spanned<LiteralKind>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiteralKind {
+    True,
+    False,
+    Nat(Unsigned),
 }
 
-impl TryFrom<Token> for Literal {
-    /// This is "really" an internal implementation whose use will be pretty
-    /// limited; it is supposed to be immediately unwrapped wherever it is used.
-    type Error = ();
-
-    fn try_from(token: Token) -> Result<Self, Self::Error> {
+impl FromToken for Literal {
+    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Nat(n) => LiteralKind::Nat(n),
@@ -195,40 +230,23 @@ impl TryFrom<Token> for Literal {
             }
         };
         Ok(Literal {
-            kind,
+            data: kind,
             span: token.span,
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LiteralKind {
-    True,
-    False,
-    Nat(Unsigned),
-}
-
 /// Expression node.
-#[derive(Debug, Clone)]
-pub struct Expr {
-    pub kind: ExprKind,
-    pub tags: ExprTags,
-    pub span: Span,
-}
+pub type Expr = Spanned<ExprKind>;
 
 impl From<ExprKind> for Expr {
     fn from(kind: ExprKind) -> Self {
         Self {
-            kind,
-            tags: ExprTags::default(),
+            data: kind,
             span: Span::default(),
         }
     }
 }
-
-/// Decorations added to an expression node through successive compiler passes.
-#[derive(Default, Debug, Clone)]
-pub struct ExprTags {}
 
 /// A kind of expression node.
 #[derive(Debug, Clone)]
@@ -301,23 +319,21 @@ impl ExprKind {
     }
 }
 
-// A brace-delimited code block
+/// A brace-delimited code block
 #[derive(Debug, Clone)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
-}
-
-/// Statement node.
-#[derive(Debug, Clone)]
-pub struct Stmt {
-    pub kind: StmtKind,
     pub span: Span,
 }
 
+/// Statement node.
+pub type Stmt = Spanned<StmtKind>;
+
+// A highly dubious impl
 impl From<StmtKind> for Stmt {
     fn from(kind: StmtKind) -> Self {
         Self {
-            kind,
+            data: kind,
             span: Span::default(),
         }
     }
@@ -345,22 +361,10 @@ pub enum StmtKind {
     Item(Item),
 }
 
-impl StmtKind {
-    /// Checks whether the statement is an item. This is used for hoisting in
-    /// semantic analysis phases.
-    pub fn is_item(&self) -> bool {
-        matches!(self, StmtKind::Item(_))
-    }
-}
-
 /// An item. For now this wrapper doesn't do anything, but it does make this AST
 /// node more symmetric with respect to the others; future refactoring will also
 /// be easier, if more fields are added.
-#[derive(Debug, Clone)]
-pub struct Item {
-    pub kind: ItemKind,
-    pub span: Span,
-}
+pub type Item = Spanned<ItemKind>;
 
 #[derive(Debug, Clone)]
 pub enum ItemKind {
@@ -378,16 +382,13 @@ pub enum ItemKind {
 }
 
 /// Something that can be assigned to
-#[derive(Debug, Clone)]
-pub struct LValue {
-    pub kind: LValueKind,
-    pub span: Span,
-}
+pub type LValue = Spanned<LValueKind>;
 
+// Another dubious impl
 impl From<LValueKind> for LValue {
     fn from(kind: LValueKind) -> Self {
         Self {
-            kind,
+            data: kind,
             span: Span::default(),
         }
     }
@@ -404,11 +405,7 @@ pub enum LValueKind {
 /// Type annotations. These are distinct from, and not convertible to types. The
 /// reason is that there may be identical type annotations that resolve to
 /// different types within different scopes.
-#[derive(Debug, Clone)]
-pub struct Annot {
-    pub kind: AnnotKind,
-    pub span: Span,
-}
+pub type Annot = Spanned<AnnotKind>;
 
 #[derive(Debug, Clone)]
 pub enum AnnotKind {
@@ -427,4 +424,27 @@ pub enum AnnotKind {
 
     /// User-defined types
     Ident(Ident),
+}
+
+#[derive(Debug)]
+pub struct Func {
+    sig: Sig,
+    body: BodyId,
+    span: Span,
+}
+
+/// A function signature
+#[derive(Debug)]
+pub struct Sig {
+    /// Input parameters
+    params: Vec<Param>,
+    /// Return type
+    output: Annot,
+}
+
+#[derive(Debug)]
+pub struct Param {
+    name: Ident,
+    ty: Annot,
+    span: Span,
 }

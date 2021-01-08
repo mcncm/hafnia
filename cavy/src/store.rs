@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 ///
 /// As I somehow keep converging on the same design choices as rustc, it might
 /// be worth pointing out that this is exactly analogous to `rustc_index::Idx`.
-pub trait Index<V>: From<usize> + Eq + Hash + Copy {}
+pub trait Index<V>: From<u32> + Eq + Hash + Copy {}
 
 /// A macro for building implementers of Index. This is exactly analogous to
 /// rustc's `rustc_index::newtype_index`.
@@ -19,10 +19,10 @@ pub trait Index<V>: From<usize> + Eq + Hash + Copy {}
 macro_rules! store_triple {
     ($store:ident : $index:ident => $V:ty) => {
         #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
-        pub struct $index(usize);
+        pub struct $index(u32);
 
-        impl From<usize> for $index {
-            fn from(val: usize) -> Self {
+        impl From<u32> for $index {
+            fn from(val: u32) -> Self {
                 Self(val)
             }
         }
@@ -43,7 +43,7 @@ pub struct Store<Idx, V>
 where
     Idx: Index<V>,
 {
-    next_internal: usize,
+    next_internal: u32,
     backing_store: HashMap<Idx, V>,
     phantom: PhantomData<Idx>,
 }

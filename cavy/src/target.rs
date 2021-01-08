@@ -1,6 +1,7 @@
-/// In this module we outline the backend APIs for various target languages.
-/// This is all pretty unstable for the time being, so don’t rely on it too much
-/// externally.
+//! In this module we outline the backend APIs for various target languages.
+//! This is all pretty unstable for the time being, so don’t rely on it too much
+//! externally.
+
 use crate::interpreter::Interpreter;
 
 /// This type alias replaces the associated type previously attached to `Target`

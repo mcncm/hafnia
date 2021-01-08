@@ -120,7 +120,7 @@ impl Interpreter {
 
         match (&lhs.kind, &rhs) {
             (LValueKind::Ident(ident), _) => {
-                bindings.push((ident.name.clone(), Nameable::Value(rhs.clone())));
+                bindings.push((ident.clone(), Nameable::Value(rhs.clone())));
             }
             (LValueKind::Tuple(binders), Value::Array(values))
             | (LValueKind::Tuple(binders), Value::Tuple(values)) => {

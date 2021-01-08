@@ -1,17 +1,18 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    circuit::Circuit,
-    interpreter::Interpreter,
-    parser, scanner,
+    // circuit::Circuit,
+    // interpreter::Interpreter,
+    parser,
+    scanner,
     session::{Phase, Session},
     source::SrcObject,
-    target::{ObjectCode, Target},
-    typecheck::typecheck,
+    // target::{ObjectCode, Target},
+    // typecheck::typecheck,
 };
 use std::path::PathBuf;
 
-pub fn compile(entry_point: PathBuf, mut sess: Session) -> ObjectCode {
+pub fn compile(entry_point: PathBuf, mut sess: Session) -> () {
     // There shouldn't be any validation happening here... Should be back up in
     // main(). Or maybe not--this might be the one kind of input validation that
     // can wait. After all, we won't know every file we need to read until we've
@@ -20,7 +21,7 @@ pub fn compile(entry_point: PathBuf, mut sess: Session) -> ObjectCode {
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
     let tokens = scanner::tokenize(id, &mut sess);
-    let mut _module = parser::parse(tokens, &sess);
+    let _mod = parser::parse(tokens, &mut sess);
 
     todo!();
 
