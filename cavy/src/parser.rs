@@ -18,7 +18,7 @@ use std::vec::IntoIter;
 /// Main entry point for parsing: consumes a token stream and produces a module.
 /// This api will almost certainly change when, some fine day, a program can
 /// have more than one module in it.
-pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> Mod {
+pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> AstCtx {
     use crate::session::Phase;
     let last_phase = sess.config.phase_config.last_phase;
     if last_phase < Phase::Parse {
@@ -27,7 +27,7 @@ pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> Mod {
 
     let mut ctx = AstCtx::new();
     match Parser::new(tokens, &mut ctx).parse() {
-        Ok(module) => module,
+        Ok(()) => ctx,
         Err(errs) => {
             sess.emit_diagnostics(errs);
             crate::sys::exit(1);
@@ -119,8 +119,8 @@ impl<'ctx> Parser<'ctx> {
         Ok(token)
     }
 
-    /// Consumes the parser, generating a module
-    pub fn parse(mut self) -> std::result::Result<Mod, ErrorBuf> {
+    /// Consumes the parser
+    pub fn parse(mut self) -> std::result::Result<(), ErrorBuf> {
         let mut items = vec![];
         while let Some(_) = self.tokens.peek() {
             match self.item() {
@@ -128,26 +128,16 @@ impl<'ctx> Parser<'ctx> {
                 Err(_) => {}
             }
         }
-
-        if self.errors.is_empty() {
-            let span = if items.len() == 0 {
-                // Figure out what to do in this case. Regardless, the span of
-                // the module should not be the join of the spans of its items;
-                // it is actually a little subtler than that.
-                Span::default()
-            } else {
-                items[0].span.join(&items.last().unwrap().span).unwrap()
-            };
-            Ok(Mod { span, data: items })
-        } else {
-            Err(self.errors)
-        }
+        Ok(())
     }
 
-    fn item(&mut self) -> Result<Item> {
+    fn item(&mut self) -> Result<()> {
         let Token { lexeme, span } = self.token()?;
         match lexeme {
             Lexeme::Fn => self.fn_item(),
+
+            // We anticipated an item, so if you haven't gotten one, there's
+            // been a problem.
             lexeme => Err(self.errors.push(ExpectedItem {
                 span,
                 actual: lexeme,
@@ -185,11 +175,9 @@ impl<'ctx> Parser<'ctx> {
     pub fn statement(&mut self) -> Result<Stmt> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
-            Some(Fn) => {
-                let item = self.item()?;
-                Ok(StmtKind::Item(item).into())
-            }
-            // Must be an expression next!
+            // Must be an expression next! Note that it's not possible to find
+            // an item in this position, since this method is *only* called
+            // under a match that catches the item keywords.
             Some(_) => {
                 let expr = Box::new(self.expression()?);
                 if expr.data.requires_semicolon() & self.match_lexeme(Semicolon) {
@@ -204,26 +192,33 @@ impl<'ctx> Parser<'ctx> {
         }
     }
 
-    fn fn_item(&mut self) -> Result<Item> {
+    /// Parse a function item and insert it in the functions table
+    fn fn_item(&mut self) -> Result<()> {
         let name = self.consume_ident()?;
         self.consume(Lexeme::LParen)?;
-        let params = self.finish_function_params()?;
-        let typ = self.function_return_type()?;
-        let body = Box::new(self.block()?);
-        let kind = ItemKind::Fn {
-            name,
-            params,
-            typ,
+        let sig = self.finish_function_params()?;
+        let output = self.function_return_type()?;
+        let (_params, annots): (Vec<_>, Vec<_>) = sig.into_iter().unzip();
+        let body: Expr = self.block()?.into();
+        let span = name.span.join(&body.span).unwrap();
+        let body: BodyId = self.ctx.bodies.insert(body);
+
+        // span should include the `fn` token...
+        let func = Func {
+            sig: Sig { annots, output },
             body,
-            docstring: None,
+            span,
         };
-        Ok(Item {
-            data: kind,
-            span: Span::default(),
-        })
+
+        // Insert the function into the function table
+        let _fn_id = self.ctx.funcs.insert(func);
+
+        // Finally, insert the function id into the local symbol table.
+        todo!();
     }
 
-    fn finish_function_params(&mut self) -> Result<Vec<(ast::Ident, Annot)>> {
+    /// Finish collecting a function signature
+    fn finish_function_params(&mut self) -> Result<Vec<(LValue, Annot)>> {
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -237,8 +232,10 @@ impl<'ctx> Parser<'ctx> {
         Ok(params)
     }
 
-    fn function_param(&mut self) -> Result<(ast::Ident, Annot)> {
-        let name = self.consume_ident()?;
+    /// Get a single function parameter comprising an LValue pattern and a type
+    /// annotation.
+    fn function_param(&mut self) -> Result<(LValue, Annot)> {
+        let name = self.lvalue()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
         Ok((name, ty))
@@ -377,19 +374,17 @@ impl<'ctx> Parser<'ctx> {
         Ok(kind.into())
     }
 
-    fn block_expr(&mut self) -> Result<Expr> {
-        let block = Box::new(self.block()?);
-        Ok(ExprKind::Block(block).into())
-    }
-
     fn block(&mut self) -> Result<Block> {
         let opening = self.consume(Lexeme::LBrace)?.span;
         let mut stmts: Vec<Stmt> = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
-            if lexeme == &Lexeme::RBrace {
-                break;
+            match lexeme {
+                Lexeme::RBrace => {
+                    break;
+                }
+                If => self.item()?,
+                _ => stmts.push(self.statement()?),
             }
-            stmts.push(self.statement()?);
         }
         let closing = self.consume(Lexeme::RBrace)?.span;
         let span = opening.join(&closing).unwrap();
@@ -406,7 +401,7 @@ impl<'ctx> Parser<'ctx> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
-            Some(Lexeme::LBrace) => self.block_expr(),
+            Some(Lexeme::LBrace) => Ok(self.block()?.into()),
             Some(_) => {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)

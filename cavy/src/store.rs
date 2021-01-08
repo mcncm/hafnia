@@ -5,29 +5,39 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 
-/// This trait is applied to types that can be used to index into a Store. It
-/// ultimately just wraps a usize, but should do so opaquely.
-///
-/// As I somehow keep converging on the same design choices as rustc, it might
-/// be worth pointing out that this is exactly analogous to `rustc_index::Idx`.
-pub trait Index<V>: From<u32> + Eq + Hash + Copy {}
+/// A trait automatically implemented by index types
+pub trait Index: From<NonZeroU32> + Default + Clone + Eq + Hash {}
 
 /// A macro for building implementers of Index. This is exactly analogous to
 /// rustc's `rustc_index::newtype_index`.
 #[macro_export]
 macro_rules! store_triple {
     ($store:ident : $index:ident => $V:ty) => {
-        #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
-        pub struct $index(u32);
+        #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+        pub struct $index(std::num::NonZeroU32);
 
-        impl From<u32> for $index {
-            fn from(val: u32) -> Self {
+        // Thm: this index has no memory overhead over a simple u32, even when
+        // wrapped in an Option.
+        const _: fn() = || {
+            let _ = core::mem::transmute::<Option<$index>, u32>;
+        };
+
+        /// Seems to be required by some other part of my code
+        impl Default for $index {
+            fn default() -> Self {
+                Self(std::num::NonZeroU32::new(1).unwrap())
+            }
+        }
+
+        impl From<std::num::NonZeroU32> for $index {
+            fn from(val: std::num::NonZeroU32) -> Self {
                 Self(val)
             }
         }
 
-        impl crate::store::Index<$V> for $index {}
+        impl crate::store::Index for $index {}
 
         pub type $store = crate::store::Store<$index, $V>;
     };
@@ -41,16 +51,16 @@ macro_rules! store_triple {
 #[derive(Debug)]
 pub struct Store<Idx, V>
 where
-    Idx: Index<V>,
+    Idx: Index,
 {
-    next_internal: u32,
+    next_internal: std::num::NonZeroU32,
     backing_store: HashMap<Idx, V>,
     phantom: PhantomData<Idx>,
 }
 
 impl<Idx, V> Store<Idx, V>
 where
-    Idx: Index<V>,
+    Idx: Index,
 {
     pub fn new() -> Self {
         Self::default()
@@ -64,7 +74,7 @@ where
 
     pub fn insert(&mut self, val: V) -> Idx {
         let idx = self.next_idx();
-        self.backing_store.insert(idx, val);
+        self.backing_store.insert(idx.clone(), val);
         idx
     }
 
@@ -79,13 +89,12 @@ where
 
 impl<Idx, V> Default for Store<Idx, V>
 where
-    Idx: Index<V>,
+    Idx: Index,
 {
     fn default() -> Self {
         Self {
-            // Start at 1 because you might later want to make this non-nullable
-            next_internal: 1,
-            backing_store: HashMap::new(),
+            next_internal: NonZeroU32::new(1).unwrap(),
+            backing_store: HashMap::default(),
             phantom: PhantomData,
         }
     }

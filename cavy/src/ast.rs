@@ -15,17 +15,18 @@ store_triple! { SymbolStore : SymbolId => String }
 
 /// This data structure holds the AST-level symbol tables, arenas and interners,
 /// etc., associated with a single compilation unit. All the surrounding data
-/// structures used by parsers go here.
+/// structures used by parsers go here. Note that this is conceptually similar
+/// to the `rustc_hir::hir::Crate` struct in rustc.
 #[derive(Debug, Default)]
 pub struct AstCtx {
     /// Function items
-    funcs: FnStore,
+    pub funcs: FnStore,
     /// Function bodies
-    bodies: BodyStore,
+    pub bodies: BodyStore,
     /// Interned strings: identifiers etc.
-    symbols: SymbolStore,
+    pub symbols: SymbolStore,
     /// `main` function
-    entry_point: FnId,
+    pub entry_point: Option<FnId>,
 }
 
 impl AstCtx {
@@ -326,6 +327,15 @@ pub struct Block {
     pub span: Span,
 }
 
+impl Into<Expr> for Block {
+    fn into(self: Self) -> Expr {
+        Expr {
+            span: self.span.clone(),
+            data: ExprKind::Block(Box::new(self)),
+        }
+    }
+}
+
 /// Statement node.
 pub type Stmt = Spanned<StmtKind>;
 
@@ -428,18 +438,18 @@ pub enum AnnotKind {
 
 #[derive(Debug)]
 pub struct Func {
-    sig: Sig,
-    body: BodyId,
-    span: Span,
+    pub sig: Sig,
+    pub body: BodyId,
+    pub span: Span,
 }
 
 /// A function signature
 #[derive(Debug)]
 pub struct Sig {
     /// Input parameters
-    params: Vec<Param>,
+    pub annots: Vec<Annot>,
     /// Return type
-    output: Annot,
+    pub output: Option<Annot>,
 }
 
 #[derive(Debug)]
