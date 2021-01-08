@@ -64,6 +64,8 @@ pub struct Parser<'ctx> {
     /// We may want to parse more than one token stream in the future, so we
     /// don't want exclusive ownership of this data.
     ctx: &'ctx mut AstCtx,
+    /// Currently active symbol table
+    table: TableId,
     /// The representation of the token stream is subject to change.
     tokens: Peekable<IntoIter<Token>>,
     /// Location of current token
@@ -75,8 +77,11 @@ pub struct Parser<'ctx> {
 
 impl<'ctx> Parser<'ctx> {
     pub fn new(tokens: Vec<Token>, ctx: &'ctx mut AstCtx) -> Self {
+        // For now, just allocate some new table, which will be the root.
+        let table = ctx.new_table();
         Self {
             ctx,
+            table,
             tokens: tokens.into_iter().peekable(),
             loc: Span::default(),
             errors: ErrorBuf::new(),
@@ -195,8 +200,7 @@ impl<'ctx> Parser<'ctx> {
     /// Parse a function item and insert it in the functions table
     fn fn_item(&mut self) -> Result<()> {
         let name = self.consume_ident()?;
-        self.consume(Lexeme::LParen)?;
-        let sig = self.finish_function_params()?;
+        let sig = self.function_params()?;
         let output = self.function_return_type()?;
         let (_params, annots): (Vec<_>, Vec<_>) = sig.into_iter().unzip();
         let body: Expr = self.block()?.into();
@@ -211,14 +215,28 @@ impl<'ctx> Parser<'ctx> {
         };
 
         // Insert the function into the function table
-        let _fn_id = self.ctx.funcs.insert(func);
+        let func_id = self.ctx.funcs.insert(func);
+
+        if self.ctx.symbol_eq(&name.data, "main") {
+            match self.ctx.entry_point {
+                None => self.ctx.entry_point = Some(func_id),
+                Some(_) => Err(self.errors.push(errors::MultipleEntryPoints { span }))?,
+            }
+        }
 
         // Finally, insert the function id into the local symbol table.
-        todo!();
+        match self.ctx.insert_fn(self.table, name.data, func_id) {
+            None => Ok(()),
+            Some(_) => Err(self.errors.push(errors::MultipleDefinitions {
+                span,
+                name: self.ctx.get_symbol(name.data).unwrap().clone(),
+            })),
+        }
     }
 
     /// Finish collecting a function signature
-    fn finish_function_params(&mut self) -> Result<Vec<(LValue, Annot)>> {
+    fn function_params(&mut self) -> Result<Vec<(LValue, Annot)>> {
+        self.consume(Lexeme::LParen)?;
         if self.match_lexeme(RParen) {
             return Ok(vec![]);
         }
@@ -728,6 +746,19 @@ mod errors {
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct MultipleEntryPoints {
+        #[msg = "multiple functions named `main`"]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct MultipleDefinitions {
+        #[msg = "multiple definitions of function `{name}` in this scope"]
+        pub span: Span,
+        pub name: String,
     }
 }
 

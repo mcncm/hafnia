@@ -99,3 +99,25 @@ where
         }
     }
 }
+
+impl<Idx, V> std::ops::Index<Idx> for Store<Idx, V>
+where
+    Idx: Index,
+{
+    type Output = V;
+
+    /// This can easily panic if you're not really careful about not making Inx
+    /// types manually.
+    fn index(&self, index: Idx) -> &Self::Output {
+        self.backing_store.get(&index).unwrap()
+    }
+}
+
+impl<Idx, V> std::ops::IndexMut<Idx> for Store<Idx, V>
+where
+    Idx: Index,
+{
+    fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
+        self.backing_store.get_mut(&index).unwrap()
+    }
+}

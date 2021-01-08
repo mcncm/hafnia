@@ -1,6 +1,7 @@
 use crate::source::{Span, SrcStore};
 use crate::store_triple;
 use crate::token::{Token, Unsigned};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -12,6 +13,7 @@ use std::fmt;
 store_triple! { FnStore : FnId => Func }
 store_triple! { BodyStore : BodyId => Expr }
 store_triple! { SymbolStore : SymbolId => String }
+store_triple! { TableStore : TableId => Table }
 
 /// This data structure holds the AST-level symbol tables, arenas and interners,
 /// etc., associated with a single compilation unit. All the surrounding data
@@ -25,6 +27,8 @@ pub struct AstCtx {
     pub bodies: BodyStore,
     /// Interned strings: identifiers etc.
     pub symbols: SymbolStore,
+    /// Symbol tables associated with scoped environments
+    pub tables: TableStore,
     /// `main` function
     pub entry_point: Option<FnId>,
 }
@@ -37,6 +41,88 @@ impl AstCtx {
     pub fn intern_symbol(&mut self, s: String) -> SymbolId {
         self.symbols.insert(s)
     }
+
+    pub fn get_symbol(&self, symb: SymbolId) -> Option<&String> {
+        self.symbols.get(&symb)
+    }
+
+    pub fn symbol_eq(&self, symb: &SymbolId, other: &str) -> bool {
+        if let Some(symb) = self.symbols.get(symb) {
+            symb == other
+        } else {
+            false
+        }
+    }
+
+    pub fn insert_fn(&mut self, tab: TableId, symb: SymbolId, func: FnId) -> Option<FnId> {
+        self.tables[tab].funcs.insert(symb, func)
+    }
+
+    pub fn new_table(&mut self) -> TableId {
+        self.tables.insert(Table::new())
+    }
+}
+
+/// A scoped symbol table
+#[derive(Debug, Default)]
+pub struct Table {
+    /// The enclosing scope, if there is any
+    parent: Option<TableId>,
+    /// Locals (`let` bindings) in this scope. Note that these could possibly
+    /// point to functions, although there is a separate table of functions
+    /// defined in this scope.
+    locals: HashMap<SymbolId, TableEntry>,
+    /// Functions in this scope. While locals should also be able to "shadow"
+    /// functions, and it will one day be possible to define lambda expressions,
+    /// this table contains those functions defined with the `fn` keyword. They
+    /// must be unique.
+    funcs: HashMap<SymbolId, FnId>,
+}
+
+impl Table {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn child(table: &TableId) -> Self {
+        Table {
+            parent: Some(*table),
+            locals: HashMap::new(),
+            funcs: HashMap::new(),
+        }
+    }
+
+    /// Look up the data associated with a symbol, recursively
+    fn get<'ctx>(&'ctx self, symb: &SymbolId, ctx: &'ctx AstCtx) -> Option<&'ctx TableEntry> {
+        match self.get_inner(symb) {
+            v @ Some(_) => v,
+            None => match self.parent {
+                Some(id) => {
+                    let parent = &ctx.tables[id];
+                    parent.get(symb, ctx)
+                }
+                None => None,
+            },
+        }
+    }
+
+    fn get_inner(&self, symb: &SymbolId) -> Option<&TableEntry> {
+        // We'll try this: retrieve a local, if one exists, with higher
+        // precedence; if there is none, check for a fn item.
+        if let Some(entry) = self.locals.get(symb) {
+            Some(entry)
+        // } else if let Some(fn_id) = self.funcs.get(symb) {
+        //     Some(TableEntry::Func(fn_id.clone()))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum TableEntry {
+    Var,
+    Func(FnId),
 }
 
 /// A generic type for some ast node that contains a single "thing.""
