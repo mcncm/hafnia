@@ -137,7 +137,7 @@ fn main() {
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
     let config = get_config(&argmatches);
-    let sess = Session::new(config);
+    let mut sess = Session::new(config);
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed. The reason for
@@ -159,8 +159,11 @@ fn main() {
     match get_entry_point(&argmatches) {
         Some(path) => {
             let _object_path = get_object_path(&argmatches);
-            let _object_code = compile::compile(path, sess);
-            // emit_object_code(object_code, object_path);
+            let _object_code = compile::compile(path, &mut sess).unwrap_or_else(|errs| {
+                sess.emit_diagnostics(errs);
+                sys::exit(1);
+            });
+            // emit_object_code(object_code, object_path)
         }
         None => {
             // let mut repl = Repl::new(sess);

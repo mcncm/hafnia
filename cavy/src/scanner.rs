@@ -15,19 +15,14 @@ use std::str::Chars;
 use std::vec::Vec;
 
 /// Main entry point for scanning
-pub fn tokenize(src_id: SrcId, sess: &mut Session) -> Vec<Token> {
+pub fn tokenize(src_id: SrcId, sess: &mut Session) -> Result<Vec<Token>, ErrorBuf> {
     use crate::session::Phase;
     let last_phase = sess.config.phase_config.last_phase;
     if last_phase < Phase::Tokenize {
         crate::sys::exit(0);
     }
-    match Scanner::new(src_id, &mut sess.sources).tokenize() {
-        Ok(tokens) => tokens,
-        Err(errs) => {
-            sess.emit_diagnostics(errs);
-            crate::sys::exit(1);
-        }
-    }
+
+    Scanner::new(src_id, &mut sess.sources).tokenize()
 }
 
 lazy_static! {

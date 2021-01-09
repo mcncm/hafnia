@@ -12,7 +12,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-pub fn compile(entry_point: PathBuf, mut sess: Session) -> () {
+pub fn compile(entry_point: PathBuf, sess: &mut Session) -> Result<(), ErrorBuf> {
     // There shouldn't be any validation happening here... Should be back up in
     // main(). Or maybe not--this might be the one kind of input validation that
     // can wait. After all, we won't know every file we need to read until we've
@@ -20,11 +20,14 @@ pub fn compile(entry_point: PathBuf, mut sess: Session) -> () {
     //
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
-    let tokens = scanner::tokenize(id, &mut sess);
-    let ctx = parser::parse(tokens, &mut sess);
+    let tokens = scanner::tokenize(id, sess)?;
+    let ctx = parser::parse(tokens, sess)?;
 
-    println!("{:#?}", ctx);
+    if sess.config.debug {
+        println!("{:#?}", ctx);
+    }
 
+    Ok(())
     // if sess.config.phase_config.typecheck {
     //     let _ = typecheck(&mut stmts, &sess);
     // }

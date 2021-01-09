@@ -554,14 +554,17 @@ pub struct Func {
 #[derive(Debug)]
 pub struct Sig {
     /// Input parameters
-    pub annots: Vec<Annot>,
+    pub params: Vec<Param>,
     /// Return type
     pub output: Option<Annot>,
+    pub span: Span,
 }
 
 #[derive(Debug)]
 pub struct Param {
-    name: Ident,
-    ty: Annot,
-    span: Span,
+    /// TODO: This field should really be an `LValue`; that is, a pattern. But for now
+    /// we'll accept only identifiers.
+    pub name: Ident,
+    pub ty: Annot,
+    pub span: Span,
 }

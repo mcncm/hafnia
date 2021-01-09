@@ -1,3 +1,8 @@
+//! Parsing, as well as a fair number of semantic rules, are handled by this
+//! module. We hope that it will improve performance--as well as reduce the
+//! amount of code that must be writen--to construct symbol tables and validate
+//! the syntax tree at parse time.
+
 use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Result};
 use crate::session::Session;
@@ -18,7 +23,7 @@ use std::{mem, vec::IntoIter};
 /// Main entry point for parsing: consumes a token stream and produces a module.
 /// This api will almost certainly change when, some fine day, a program can
 /// have more than one module in it.
-pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> AstCtx {
+pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> std::result::Result<AstCtx, ErrorBuf> {
     use crate::session::Phase;
     let last_phase = sess.config.phase_config.last_phase;
     if last_phase < Phase::Parse {
@@ -26,13 +31,7 @@ pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> AstCtx {
     }
 
     let mut ctx = AstCtx::new();
-    match Parser::new(tokens, &mut ctx).parse() {
-        Ok(()) => ctx,
-        Err(errs) => {
-            sess.emit_diagnostics(errs);
-            crate::sys::exit(1);
-        }
-    }
+    Parser::new(tokens, &mut ctx).parse().map(|_| ctx)
 }
 
 /// The maximum allowed number of arguments to a function
@@ -103,6 +102,21 @@ impl<'ctx> Parser<'ctx> {
         })
     }
 
+    /// Check if you're in a root table.
+    ///
+    /// NOTE: This check is currently being used to validate `main` by ensuring
+    /// that there is only one such function in the global scope. This might no
+    /// longer work if there are multiple root tables in multiple modules one
+    /// day.
+    fn root_table(&self) -> bool {
+        self.ctx
+            .tables
+            .get(&self.table_id)
+            .unwrap()
+            .parent
+            .is_none()
+    }
+
     /// Check the next lexeme
     fn peek_lexeme(&mut self) -> Option<&Lexeme> {
         self.tokens.peek().map(|token| &token.lexeme)
@@ -145,7 +159,9 @@ impl<'ctx> Parser<'ctx> {
         while let Some(_) = self.tokens.peek() {
             match self.item() {
                 Ok(item) => items.push(item),
-                Err(_) => {}
+                Err(_) => {
+                    return Err(self.errors);
+                }
             }
         }
         Ok(())
@@ -216,33 +232,28 @@ impl<'ctx> Parser<'ctx> {
     /// Parse a function item and insert it in the functions table
     fn fn_item(&mut self) -> Result<()> {
         let name = self.consume_ident()?;
-        let sig = self.function_params()?;
-        let output = self.function_return_type()?;
-        let (_params, annots): (Vec<_>, Vec<_>) = sig.into_iter().unzip();
+        let sig = self.function_sig()?;
         let body: Expr = self.block()?.into();
         let span = name.span.join(&body.span).unwrap();
         let body: BodyId = self.ctx.bodies.insert(body);
 
-        // span should include the `fn` token...
-        let func = Func {
-            sig: Sig { annots, output },
-            body,
-            span,
-        };
+        // Span should include the `fn` token...
+        let func = Func { sig, body, span };
 
         // Insert the function into the function table
         let func_id = self.ctx.funcs.insert(func);
 
-        if self.ctx.symbol_eq(&name.data, "main") {
-            match self.ctx.entry_point {
-                None => self.ctx.entry_point = Some(func_id),
-                Some(_) => Err(self.errors.push(errors::MultipleEntryPoints { span }))?,
-            }
+        // Validate the `main` function
+        if self.root_table() && self.ctx.symbol_eq(&name.data, "main") {
+            self.validate_main(func_id)?;
+            self.ctx.entry_point = Some(func_id);
         }
 
         // Finally, insert the function id into the local symbol table.
         match self.ctx.insert_fn(self.table_id, name.data, func_id) {
+            // No other function with this name
             None => Ok(()),
+            // A function with this name was already in the local symbol table
             Some(_) => Err(self.errors.push(errors::MultipleDefinitions {
                 span,
                 name: self.ctx.get_symbol(name.data).unwrap().clone(),
@@ -250,29 +261,68 @@ impl<'ctx> Parser<'ctx> {
         }
     }
 
-    /// Finish collecting a function signature
-    fn function_params(&mut self) -> Result<Vec<(LValue, Annot)>> {
-        self.consume(Lexeme::LParen)?;
-        if self.match_lexeme(RParen) {
-            return Ok(vec![]);
+    /// Once a `main` function has been found, ensure that it's the only one,
+    /// acceps no parameters, and returns no value. We'll just take an `FnId` as
+    /// we hope to only call this once, so the cost of lookup should not be too great.
+    fn validate_main(&mut self, func_id: FnId) -> Result<()> {
+        let func = &self.ctx.funcs[func_id];
+        // Make sure there are no other entry points
+        if self.ctx.entry_point.is_some() {
+            let span = func.span;
+            Err(self.errors.push(errors::MultipleEntryPoints { span }))?;
+        }
+        // Check the signature
+        if !func.sig.params.is_empty() || func.sig.output.is_some() {
+            let span = func.sig.span;
+            Err(self.errors.push(errors::InvalidMainSignature { span }))?;
+        }
+        Ok(())
+    }
+
+    /// Collect a function signature
+    fn function_sig(&mut self) -> Result<Sig> {
+        let opening = self.consume(Lexeme::LParen)?.span;
+
+        // Get the parameters
+        let mut params;
+        let mut closing;
+        if let Some(RParen) = self.peek_lexeme() {
+            params = vec![];
+            closing = self.next().unwrap().span;
+        } else {
+            // There's at least one parameter
+            params = vec![self.function_param()?];
+            while self.match_lexeme(Comma) {
+                params.push(self.function_param()?);
+            }
+            closing = self.consume(RParen)?.span;
         }
 
-        let mut params = vec![self.function_param()?];
-        while self.match_lexeme(Comma) {
-            params.push(self.function_param()?);
-        }
-        self.consume(RParen)?;
+        let output = self.function_return_type()?;
 
-        Ok(params)
+        if let Some(annot) = &output {
+            closing = annot.span;
+        }
+
+        let span = opening.join(&closing).unwrap();
+
+        let sig = Sig {
+            output,
+            params,
+            span,
+        };
+
+        Ok(sig)
     }
 
     /// Get a single function parameter comprising an LValue pattern and a type
     /// annotation.
-    fn function_param(&mut self) -> Result<(LValue, Annot)> {
-        let name = self.lvalue()?;
+    fn function_param(&mut self) -> Result<Param> {
+        let name = self.consume_ident()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
-        Ok((name, ty))
+        let span = name.span.join(&ty.span).unwrap();
+        Ok(Param { name, ty, span })
     }
 
     fn function_return_type(&mut self) -> Result<Option<Annot>> {
@@ -776,6 +826,12 @@ mod errors {
         #[msg = "multiple definitions of function `{name}` in this scope"]
         pub span: Span,
         pub name: String,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct InvalidMainSignature {
+        #[msg = "entry point `main` must not take parameters or return"]
+        pub span: Span,
     }
 }
 

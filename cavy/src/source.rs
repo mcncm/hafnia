@@ -116,14 +116,13 @@ impl SrcStore {
         )
     }
 
-    /// This implementation is entirely provisional! In particular, newlines
-    /// aren't tracked by the scanner. Instead finding line breaks in any
-    /// remotely intelligent way, we'll simply scan forward and backward until
-    /// hitting them.
     fn format_span(&self, span: &Span) -> String {
         let src = self.get(&span.src_id).unwrap();
-        // FIXME assume for now that spans don't cross lines
         let line = src.get_line(span.start);
+        // FIXME assume for now that spans don't cross lines
+        if src.get_line(span.end) != line {
+            panic!("Span crossed a line boundary");
+        }
         // Columns to annotate: remember that columns are 1-indexed.
         let start = span.start.col;
         let end = span.end.col;
