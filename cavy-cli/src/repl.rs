@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 
 use cavy::ast::StmtKind;
-use cavy::interpreter::Interpreter;
+// use cavy::interpreter::Interpreter;
 use cavy::parser::Parser;
 use cavy::scanner::Scanner;
 use cavy::session::{Phase, Session};
 use cavy::sys;
-use cavy::typecheck;
+// use cavy::typecheck;
 
 use std::collections::HashMap;
 use std::io::{self, Write};

@@ -54,20 +54,37 @@ impl AstCtx {
         }
     }
 
+    /// Try to insert a function into a table.
+    /// TODO make this a method of Table
     pub fn insert_fn(&mut self, tab: TableId, symb: SymbolId, func: FnId) -> Option<FnId> {
         self.tables[tab].funcs.insert(symb, func)
     }
 
+    pub fn insert_local(
+        &mut self,
+        tab: TableId,
+        symb: SymbolId,
+        ty: Option<Annot>,
+    ) -> Option<TableEntry> {
+        self.tables[tab].locals.insert(symb, TableEntry::Var(ty))
+    }
+
+    /// Create a new table without parent
     pub fn new_table(&mut self) -> TableId {
         self.tables.insert(Table::new())
     }
+
+    /// Spawn a child and return its id
+    pub fn child_table(&mut self, table: TableId) -> TableId {
+        self.tables.insert(Table::child(table))
+    }
 }
 
-/// A scoped symbol table
+/// A scoped symbol table. This may correspond to a textual block or a module.
 #[derive(Debug, Default)]
 pub struct Table {
     /// The enclosing scope, if there is any
-    parent: Option<TableId>,
+    pub parent: Option<TableId>,
     /// Locals (`let` bindings) in this scope. Note that these could possibly
     /// point to functions, although there is a separate table of functions
     /// defined in this scope.
@@ -84,9 +101,9 @@ impl Table {
         Self::default()
     }
 
-    fn child(table: &TableId) -> Self {
+    fn child(table: TableId) -> Self {
         Table {
-            parent: Some(*table),
+            parent: Some(table),
             locals: HashMap::new(),
             funcs: HashMap::new(),
         }
@@ -121,7 +138,7 @@ impl Table {
 
 #[derive(Debug)]
 pub enum TableEntry {
-    Var,
+    Var(Option<Annot>),
     Func(FnId),
 }
 
@@ -409,7 +426,10 @@ impl ExprKind {
 /// A brace-delimited code block
 #[derive(Debug, Clone)]
 pub struct Block {
+    /// The statements contained in the block
     pub stmts: Vec<Stmt>,
+    /// The id of the associated symbol table
+    pub table: TableId,
     pub span: Span,
 }
 
@@ -449,9 +469,10 @@ pub enum StmtKind {
         /// lvalues might not just be names! In particular, we would like to make
         /// destructuring possible. The same is true of other contexts in which
         /// lvalues appear, as in the bound expression in a for loop.
-        lhs: Box<LValue>,
-        /// A type annotation, as in `let x: u8 = 0;`
-        ty: Option<Annot>,
+        ///
+        /// For now, though, we're going to ignore that possibility, disable
+        /// destructuring, and allow only a symbol on the lhs.
+        lhs: Box<Ident>,
         rhs: Box<Expr>,
     },
     Item(Item),

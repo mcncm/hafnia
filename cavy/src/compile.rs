@@ -21,9 +21,9 @@ pub fn compile(entry_point: PathBuf, mut sess: Session) -> () {
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
     let tokens = scanner::tokenize(id, &mut sess);
-    let _mod = parser::parse(tokens, &mut sess);
+    let ctx = parser::parse(tokens, &mut sess);
 
-    todo!();
+    println!("{:#?}", ctx);
 
     // if sess.config.phase_config.typecheck {
     //     let _ = typecheck(&mut stmts, &sess);

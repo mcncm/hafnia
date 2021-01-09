@@ -53,7 +53,7 @@ pub struct Store<Idx, V>
 where
     Idx: Index,
 {
-    next_internal: std::num::NonZeroU32,
+    next_internal: u32,
     backing_store: HashMap<Idx, V>,
     phantom: PhantomData<Idx>,
 }
@@ -67,8 +67,11 @@ where
     }
 
     fn next_idx(&mut self) -> Idx {
-        let idx = self.next_internal;
-        self.next_internal;
+        // This will cause problems of anyone ever reaches 2 ^ 32 distinct
+        // indexed items in one program. This is a bug. If it's ever discovered,
+        // I have had massive success.
+        let idx = NonZeroU32::new(self.next_internal).unwrap();
+        self.next_internal += 1;
         idx.into()
     }
 
@@ -93,7 +96,7 @@ where
 {
     fn default() -> Self {
         Self {
-            next_internal: NonZeroU32::new(1).unwrap(),
+            next_internal: 1,
             backing_store: HashMap::default(),
             phantom: PhantomData,
         }

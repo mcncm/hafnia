@@ -1,18 +1,17 @@
-use std::fs;
-use std::io::prelude::*;
+// use std::fs;
 use std::panic;
 use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
 use cavy::session::{Config, Phase, PhaseConfig, Session};
-use cavy::target;
+// use cavy::target;
 use cavy::{compile, sys};
 
-use cavy_cli::repl::Repl;
+// use cavy_cli::repl::Repl;
 
 use clap::{load_yaml, App, ArgMatches};
-use fs::File;
+// use fs::File;
 
 /// Get the optimization level
 fn get_opt(argmatches: &ArgMatches) -> u8 {
@@ -84,15 +83,15 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
     Ok(arch)
 }
 
-fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
-    match argmatches.value_of("target") {
-        Some("qasm") => Box::new(target::qasm::Qasm {}),
-        Some("latex") => Box::new(target::latex::Latex { standalone: false }),
-        Some("latex_standalone") => Box::new(target::latex::Latex { standalone: true }),
-        Some(_) => unreachable!(),
-        None => Box::new(target::qasm::Qasm {}),
-    }
-}
+// fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
+//     match argmatches.value_of("target") {
+//         Some("qasm") => Box::new(target::qasm::Qasm {}),
+//         Some("latex") => Box::new(target::latex::Latex { standalone: false }),
+//         Some("latex_standalone") => Box::new(target::latex::Latex { standalone: true }),
+//         Some(_) => unreachable!(),
+//         None => Box::new(target::qasm::Qasm {}),
+//     }
+// }
 
 fn get_config(argmatches: &ArgMatches) -> Config {
     // Should we provide debug information?
@@ -106,12 +105,12 @@ fn get_config(argmatches: &ArgMatches) -> Config {
             process::exit(1);
         }
     };
-    let target = get_target(argmatches);
+    // let target = get_target(argmatches);
 
     Config {
         debug,
         arch,
-        target,
+        // target,
         opt,
         phase_config,
     }
@@ -128,10 +127,10 @@ fn get_object_path(argmatches: &ArgMatches) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn emit_object_code(object_code: target::ObjectCode, object_path: PathBuf) {
-    let mut file = File::create(&object_path).unwrap();
-    file.write_all(object_code.as_bytes()).unwrap();
-}
+// fn emit_object_code(object_code: target::ObjectCode, object_path: PathBuf) {
+//     let mut file = File::create(&object_path).unwrap();
+//     file.write_all(object_code.as_bytes()).unwrap();
+// }
 
 fn main() {
     let yaml = load_yaml!("cli.yml");
@@ -159,13 +158,13 @@ fn main() {
 
     match get_entry_point(&argmatches) {
         Some(path) => {
-            let object_path = get_object_path(&argmatches);
-            let object_code = compile::compile(path, sess);
-            emit_object_code(object_code, object_path);
+            let _object_path = get_object_path(&argmatches);
+            let _object_code = compile::compile(path, sess);
+            // emit_object_code(object_code, object_path);
         }
         None => {
-            let mut repl = Repl::new(sess);
-            repl.run();
+            // let mut repl = Repl::new(sess);
+            // repl.run();
         }
     }
 }

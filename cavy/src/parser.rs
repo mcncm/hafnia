@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
-use std::vec::IntoIter;
+use std::{mem, vec::IntoIter};
 
 /// Main entry point for parsing: consumes a token stream and produces a module.
 /// This api will almost certainly change when, some fine day, a program can
@@ -64,8 +64,8 @@ pub struct Parser<'ctx> {
     /// We may want to parse more than one token stream in the future, so we
     /// don't want exclusive ownership of this data.
     ctx: &'ctx mut AstCtx,
-    /// Currently active symbol table
-    table: TableId,
+    /// Currently active symbol table.
+    table_id: TableId,
     /// The representation of the token stream is subject to change.
     tokens: Peekable<IntoIter<Token>>,
     /// Location of current token
@@ -78,14 +78,29 @@ pub struct Parser<'ctx> {
 impl<'ctx> Parser<'ctx> {
     pub fn new(tokens: Vec<Token>, ctx: &'ctx mut AstCtx) -> Self {
         // For now, just allocate some new table, which will be the root.
-        let table = ctx.new_table();
+        let table_id = ctx.new_table();
         Self {
             ctx,
-            table,
+            table_id,
             tokens: tokens.into_iter().peekable(),
             loc: Span::default(),
             errors: ErrorBuf::new(),
         }
+    }
+
+    /// Push a new symbol table onto the stack
+    fn push_table(&mut self) {
+        self.table_id = self.ctx.child_table(self.table_id);
+    }
+
+    /// Pop a symbol table from the stack, unless you're at the root
+    fn pop_table(&mut self) -> Option<TableId> {
+        let table = self.ctx.tables.get(&self.table_id).unwrap();
+        table.parent.map(|parent_id| {
+            let tid = self.table_id;
+            self.table_id = parent_id;
+            tid
+        })
     }
 
     /// Check the next lexeme
@@ -180,6 +195,7 @@ impl<'ctx> Parser<'ctx> {
     pub fn statement(&mut self) -> Result<Stmt> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
+            Some(Let) => Ok(self.local()?),
             // Must be an expression next! Note that it's not possible to find
             // an item in this position, since this method is *only* called
             // under a match that catches the item keywords.
@@ -225,7 +241,7 @@ impl<'ctx> Parser<'ctx> {
         }
 
         // Finally, insert the function id into the local symbol table.
-        match self.ctx.insert_fn(self.table, name.data, func_id) {
+        match self.ctx.insert_fn(self.table_id, name.data, func_id) {
             None => Ok(()),
             Some(_) => Err(self.errors.push(errors::MultipleDefinitions {
                 span,
@@ -270,16 +286,10 @@ impl<'ctx> Parser<'ctx> {
     /// ```cavy
     /// let x = 3;
     /// ```
-    /// or a let-expression, as in:
-    /// ```cavy
-    /// let y = 3;
-    /// let x = y in {
-    ///     x + 1
-    /// }
-    /// ```
     fn local(&mut self) -> Result<Stmt> {
         self.next();
-        let lhs = Box::new(self.lvalue()?);
+        // For now, only admit symbols on the lhs.
+        let lhs = Box::new(self.consume_ident()?);
         let ty = if self.match_lexeme(Colon) {
             Some(self.type_annotation()?)
         } else {
@@ -288,7 +298,9 @@ impl<'ctx> Parser<'ctx> {
         self.consume(Lexeme::Equal)?;
         let rhs = Box::new(self.expression()?);
         self.consume(Lexeme::Semicolon)?;
-        Ok(StmtKind::Local { lhs, rhs, ty }.into())
+        // TODO figure out what to do about shadowing
+        self.ctx.insert_local(self.table_id, lhs.data, ty);
+        Ok(StmtKind::Local { lhs, rhs }.into())
     }
 
     /// Recursively build an LValue
@@ -394,19 +406,24 @@ impl<'ctx> Parser<'ctx> {
 
     fn block(&mut self) -> Result<Block> {
         let opening = self.consume(Lexeme::LBrace)?.span;
+        // Replace the active table with a child
+        self.push_table();
+        // Start collecting the contents of the block
         let mut stmts: Vec<Stmt> = vec![];
         while let Some(lexeme) = self.peek_lexeme() {
             match lexeme {
                 Lexeme::RBrace => {
                     break;
                 }
-                If => self.item()?,
+                Fn => self.item()?,
                 _ => stmts.push(self.statement()?),
             }
         }
         let closing = self.consume(Lexeme::RBrace)?.span;
+        // Pop the new table off the stack; retrieve its id
+        let table = self.pop_table().unwrap();
         let span = opening.join(&closing).unwrap();
-        Ok(Block { stmts, span })
+        Ok(Block { stmts, table, span })
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt> {
