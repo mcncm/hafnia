@@ -1,5 +1,5 @@
+use crate::index_triple;
 use crate::source::{Span, SrcStore};
-use crate::store_triple;
 use crate::token::{Token, Unsigned};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -10,10 +10,11 @@ use std::fmt;
 // that item. This pattern was borrowed from rustc itself, as I found that it
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
-store_triple! { FnStore : FnId => Func }
-store_triple! { BodyStore : BodyId => Expr }
-store_triple! { SymbolStore : SymbolId => String }
-store_triple! { TableStore : TableId => Table }
+index_triple! { FnStore : FnId -> Func }
+index_triple! { BodyStore : BodyId -> Expr }
+index_triple! { TableStore : TableId -> Table }
+// Note the opposite direction of the arrow: this one is an /interner/.
+index_triple! { SymbolStore : SymbolId <- String }
 
 /// This data structure holds the AST-level symbol tables, arenas and interners,
 /// etc., associated with a single compilation unit. All the surrounding data
@@ -36,22 +37,6 @@ pub struct AstCtx {
 impl AstCtx {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn intern_symbol(&mut self, s: String) -> SymbolId {
-        self.symbols.insert(s)
-    }
-
-    pub fn get_symbol(&self, symb: SymbolId) -> Option<&String> {
-        self.symbols.get(&symb)
-    }
-
-    pub fn symbol_eq(&self, symb: &SymbolId, other: &str) -> bool {
-        if let Some(symb) = self.symbols.get(symb) {
-            symb == other
-        } else {
-            false
-        }
     }
 
     /// Try to insert a function into a table.
@@ -196,7 +181,7 @@ impl FromToken for Ident {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
-                data: ctx.intern_symbol(name),
+                data: ctx.symbols.intern(name).unwrap(),
                 span: token.span,
             }),
             _ => Err(()),

@@ -2,6 +2,15 @@
 //! module. We hope that it will improve performance--as well as reduce the
 //! amount of code that must be writen--to construct symbol tables and validate
 //! the syntax tree at parse time.
+//!
+//! Some of the validations performed at this stage include:
+//! * The uniqueness of the `main` function, as well its type signature
+//! * No shadowing (this will presumably be relaxed in the future)
+//!
+//! Other checks cannot be performed at this time, because the data may not be
+//! available on this pass.
+//! * Most kinds of name resolution: we can't resolve types, so in particular we
+//!   can't check that type annotations refer to something in-scope.
 
 use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Result};
@@ -244,7 +253,7 @@ impl<'ctx> Parser<'ctx> {
         let func_id = self.ctx.funcs.insert(func);
 
         // Validate the `main` function
-        if self.root_table() && self.ctx.symbol_eq(&name.data, "main") {
+        if self.root_table() && self.ctx.symbols.get("main") == Some(&name.data) {
             self.validate_main(func_id)?;
             self.ctx.entry_point = Some(func_id);
         }
@@ -254,10 +263,7 @@ impl<'ctx> Parser<'ctx> {
             // No other function with this name
             None => Ok(()),
             // A function with this name was already in the local symbol table
-            Some(_) => Err(self.errors.push(errors::MultipleDefinitions {
-                span,
-                name: self.ctx.get_symbol(name.data).unwrap().clone(),
-            })),
+            Some(_) => Err(self.errors.push(errors::MultipleDefinitions { span })),
         }
     }
 
@@ -348,8 +354,11 @@ impl<'ctx> Parser<'ctx> {
         self.consume(Lexeme::Equal)?;
         let rhs = Box::new(self.expression()?);
         self.consume(Lexeme::Semicolon)?;
-        // TODO figure out what to do about shadowing
-        self.ctx.insert_local(self.table_id, lhs.data, ty);
+        // Note: disallow shadowing for now
+        if self.ctx.insert_local(self.table_id, lhs.data, ty).is_some() {
+            Err(self.errors.push(errors::ShadowedLocal { span: lhs.span }))?;
+        }
+
         Ok(StmtKind::Local { lhs, rhs }.into())
     }
 
@@ -572,7 +581,7 @@ impl<'ctx> Parser<'ctx> {
             }
             // overly verbose...
             Ident(symb) => {
-                let data = self.ctx.intern_symbol(symb);
+                let data = self.ctx.symbols.intern(symb).unwrap();
                 Annot {
                     span,
                     data: AnnotKind::Ident(ast::Ident { span, data }),
@@ -823,14 +832,19 @@ mod errors {
 
     #[derive(Diagnostic)]
     pub struct MultipleDefinitions {
-        #[msg = "multiple definitions of function `{name}` in this scope"]
+        #[msg = "multiple definitions of function in this scope"]
         pub span: Span,
-        pub name: String,
     }
 
     #[derive(Diagnostic)]
     pub struct InvalidMainSignature {
         #[msg = "entry point `main` must not take parameters or return"]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ShadowedLocal {
+        #[msg = "shadowed locals are currently not allowed"]
         pub span: Span,
     }
 }

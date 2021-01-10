@@ -1,7 +1,7 @@
 //! Data strucures for holding and manipulating source code
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
-use crate::store_triple;
+use crate::index_triple;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -24,7 +24,7 @@ fn count_digits(n: usize) -> usize {
 
 // /// Unique identifier of a source object. I'll be surprised if anyone ever needs more
 // /// than two bytes to identify all of their source objects.
-store_triple! { SrcStore : SrcId => SrcObject }
+index_triple! { SrcStore : SrcId -> SrcObject }
 
 /// Type returned by the public SrcStore interface. This is expected to be
 /// passed to a Scanner.
