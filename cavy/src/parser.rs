@@ -131,6 +131,16 @@ impl<'ctx> Parser<'ctx> {
         Ok((t, self.pop_table().unwrap()))
     }
 
+    /// A convenience method for creating new nodes. Right now, this doesn't
+    /// *really* do anything, but I might decide in the future that expression
+    /// nodes should have an associated `ExprId`. In that case, it will be nice to
+    /// only have to edit this one spot, rather than every point an `Expr` is
+    /// made in this file.
+    #[inline(always)]
+    fn node(&mut self, kind: ExprKind, span: Span) -> Expr {
+        Expr { data: kind, span }
+    }
+
     /// A convenience function for inserting locals, since the parser is
     /// tracking the symbol table stack.
     #[inline]
@@ -206,7 +216,7 @@ impl<'ctx> Parser<'ctx> {
     fn item(&mut self) -> Result<()> {
         let Token { lexeme, span } = self.token()?;
         match lexeme {
-            Lexeme::Fn => self.fn_item(),
+            Lexeme::Fn => self.fn_item(span),
 
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
@@ -266,21 +276,21 @@ impl<'ctx> Parser<'ctx> {
     }
 
     /// Parse a function item and insert it in the functions table
-    fn fn_item(&mut self) -> Result<()> {
+    fn fn_item(&mut self, opening: Span) -> Result<()> {
         let name = self.consume_ident()?;
 
         // Should we create a parameters table as the parent of the function
         // body? I'm not totally sure about this.
 
         let sig = self.function_sig()?;
-        let sig_span = sig.span;
-        let body: Expr = self.block()?.into();
-        let body_span = name.span.join(&body.span).unwrap();
-        let body: BodyId = self.ctx.bodies.insert(body);
+        let body = Box::new(self.block()?);
+        let body_span = body.span;
+        let body = self.node(ExprKind::Block(body), body_span);
+        let span = opening.join(&body.span).unwrap();
         let func = Func {
             sig,
-            body,
-            span: sig_span.join(&body_span).unwrap(),
+            body: self.ctx.bodies.insert(body),
+            span,
             table: self.table_id,
         };
 
@@ -473,31 +483,44 @@ impl<'ctx> Parser<'ctx> {
     }
 
     fn if_expr(&mut self) -> Result<Expr> {
-        self.next();
+        let opening = self.token()?.span;
         // Here we assume that
         let cond = Box::new(self.expression()?);
         let then_branch = Box::new(self.block()?);
 
         let mut else_branch = None;
+        let span;
         if self.match_lexeme(Lexeme::Else) {
+            let block = self.block()?;
+            span = opening.join(&block.span).unwrap();
             else_branch = Some(Box::new(self.block()?));
+        } else {
+            span = opening.join(&then_branch.span).unwrap();
         }
         let kind = ExprKind::If {
             cond,
             then_branch,
             else_branch,
         };
-        Ok(kind.into())
+
+        Ok(self.node(kind, span))
     }
 
     fn for_expr(&mut self) -> Result<Expr> {
-        self.next();
+        let opening = self.token()?.span;
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
         let iter = Box::new(self.expression()?);
         let body = Box::new(self.block()?);
+        let span = opening.join(&body.span).unwrap();
         let kind = ExprKind::For { bind, iter, body };
-        Ok(kind.into())
+        Ok(self.node(kind, span))
+    }
+
+    fn block_expr(&mut self) -> Result<Expr> {
+        let block = self.block()?;
+        let block_span = block.span;
+        Ok(self.node(ExprKind::Block(Box::new(block)), block_span))
     }
 
     fn block(&mut self) -> Result<Block> {
@@ -551,7 +574,7 @@ impl<'ctx> Parser<'ctx> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
-            Some(Lexeme::LBrace) => Ok(self.block()?.into()),
+            Some(Lexeme::LBrace) => self.block_expr(),
             Some(_) => {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)
@@ -565,21 +588,25 @@ impl<'ctx> Parser<'ctx> {
             let op = self.next().unwrap();
             let op = UnOp::from_token(op, self.ctx).unwrap();
             let right = self.unary()?;
+            let span = op.span.join(&right.span).unwrap();
             let kind = ExprKind::UnOp {
                 op,
                 right: Box::new(right),
             };
-            return Ok(kind.into());
-        } else if self.match_lexeme(LBracket) {
-            return self.finish_array();
+            return Ok(self.node(kind, span));
+        } else if let Some(LBracket) = self.peek_lexeme() {
+            let opening = self.token()?.span;
+            return self.finish_array(opening);
         }
         self.call()
     }
 
-    fn finish_array(&mut self) -> Result<Expr> {
+    fn finish_array(&mut self, opening: Span) -> Result<Expr> {
         // Empty array:
-        if self.match_lexeme(RBracket) {
-            return Ok(ExprKind::ExtArr(vec![]).into());
+        if let Some(RBracket) = self.peek_lexeme() {
+            let closing = self.token().unwrap().span;
+            let span = opening.join(&closing).unwrap();
+            return Ok(self.node(ExprKind::ExtArr(vec![]), span));
         }
 
         // Otherwise, there is at least one item:
@@ -598,8 +625,9 @@ impl<'ctx> Parser<'ctx> {
             }
             ExprKind::ExtArr(items)
         };
-        self.consume(RBracket)?;
-        Ok(arr.into())
+        let closing = self.consume(RBracket)?.span;
+        let span = opening.join(&closing).unwrap();
+        Ok(self.node(arr, span))
     }
 
     fn type_annotation(&mut self) -> Result<Annot> {
@@ -710,26 +738,20 @@ impl<'ctx> Parser<'ctx> {
                 }
             }
         }
-        let paren = self.consume(RParen)?;
-        let kind = ExprKind::Call {
-            callee,
-            args,
-            paren,
-        };
-        Ok(kind.into())
+        let closing = self.consume(RParen)?.span;
+        let span = callee.span.join(&closing).unwrap();
+        let kind = ExprKind::Call { callee, args };
+        Ok(self.node(kind, span))
     }
 
     #[inline(always)]
     fn finish_index(&mut self, head: Expr) -> Result<Expr> {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
-        let bracket = self.consume(RBracket)?;
-        let kind = ExprKind::Index {
-            head,
-            index,
-            bracket,
-        };
-        Ok(kind.into())
+        let bracket = self.consume(RBracket)?.span;
+        let span = head.span.join(&bracket).unwrap();
+        let kind = ExprKind::Index { head, index };
+        Ok(self.node(kind, span))
     }
 
     fn primary(&mut self) -> Result<Expr> {
@@ -737,15 +759,15 @@ impl<'ctx> Parser<'ctx> {
         match token.lexeme {
             Nat(_) | True | False => {
                 let lit = ast::Literal::from_token(token, self.ctx).unwrap();
-                let kind = ExprKind::Literal(lit);
-                Ok(kind.into())
+                let lit_span = lit.span;
+                Ok(self.node(ExprKind::Literal(lit), lit_span))
             }
             Ident(_) => {
                 let ident = ast::Ident::from_token(token, self.ctx).unwrap();
-                let kind = ExprKind::Ident(ident);
-                Ok(kind.into())
+                let ident_span = ident.span;
+                Ok(self.node(ExprKind::Ident(ident), ident_span))
             }
-            LParen => self.finish_group(),
+            LParen => self.finish_group(token.span),
 
             lexeme => Err(self.errors.push(ExpectedPrimaryToken {
                 // Guaranteed not to be EOF!
@@ -757,14 +779,15 @@ impl<'ctx> Parser<'ctx> {
 
     /// After reaching an `(` in the position of a primary token, we must have
     /// either a group or a sequence.
-    fn finish_group(&mut self) -> Result<Expr> {
+    fn finish_group(&mut self, opening: Span) -> Result<Expr> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
-        if self.match_lexeme(Lexeme::RParen) {
-            return Ok(ExprKind::Tuple(vec![]).into());
+        if let Some(RParen) = self.peek_lexeme() {
+            let span = opening.join(&self.token().unwrap().span).unwrap();
+            return Ok(self.node(ExprKind::Tuple(vec![]), span));
         }
 
         let head = self.expression()?;
-        let expr = if let Some(&Lexeme::Comma) = self.peek_lexeme() {
+        let kind = if let Some(&Lexeme::Comma) = self.peek_lexeme() {
             // Tuples with one element should have a single trailing comma to
             // disambiguate from groups.
             let mut items = vec![head];
@@ -774,18 +797,22 @@ impl<'ctx> Parser<'ctx> {
                 }
                 items.push(self.expression()?);
             }
-            ExprKind::Tuple(items).into()
+            ExprKind::Tuple(items)
         } else {
             // If there were no commas, we should have a single expression
-            // followed by a close-paren, and return a group.
-            head
+            // followed by a close-paren, and return a group. Take the head node
+            // and unwrap it, so we can give it the correct span.
+            head.data
         };
-        self.consume(RParen)?;
-        Ok(expr)
+        let span = opening.join(&self.consume(RParen)?.span).unwrap();
+        Ok(self.node(kind, span))
     }
 
     fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr> {
-        let mut lhs = lhs.data;
+        let Expr {
+            data: mut lhs,
+            mut span,
+        } = lhs;
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {
             // Check the outer operator's precedence
@@ -809,16 +836,18 @@ impl<'ctx> Parser<'ctx> {
                 }
 
                 let op = BinOp::from_token(outer, self.ctx).unwrap();
+                let rhs_span = rhs.span;
                 lhs = ExprKind::BinOp {
                     op,
-                    left: Box::new(lhs.into()),
+                    left: Box::new(self.node(lhs, span)),
                     right: Box::new(rhs),
                 };
+                span = span.join(&rhs_span).unwrap();
             } else {
                 break;
             }
         }
-        Ok(lhs.into())
+        Ok(self.node(lhs, span))
     }
 
     fn synchronize(&mut self, _err: &str) {

@@ -59,7 +59,7 @@ pub trait Index: From<InnerIndex> + Default + Clone + Eq + Hash {}
 macro_rules! index_triple {
     // This branch just makes the index type itself
     ($index:ident) => {
-        #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+        #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
         pub struct $index(crate::store::InnerIndex);
 
         // Thm: this index has no memory overhead over a simple u32, even when
@@ -94,15 +94,6 @@ macro_rules! index_triple {
     ($store:ident : $index:ident <- $V:ty) => {
         index_triple! { $index }
         pub type $store = crate::store::Interner<$V, $index>;
-    };
-}
-
-/// A macro for building index types together with an interner for them
-#[macro_export]
-macro_rules! interner_triple {
-    ($store:ident : $V:ty => $index:ident) => {
-        index_type! { $index }
-        pub type $store = crate::store::Store<$index, $V>;
     };
 }
 

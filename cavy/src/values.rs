@@ -40,47 +40,47 @@ impl Value {
         }
     }
 
-    /// Indicates whether a value can be used only once.
-    ///
-    /// NOTE This function is marked for removal when--and if--we move to static
-    /// type-checking.
-    #[rustfmt::skip]
-    pub fn is_linear(&self) -> bool {
-        self.type_of().is_linear()
-    }
+    // /// Indicates whether a value can be used only once.
+    // ///
+    // /// NOTE This function is marked for removal when--and if--we move to static
+    // /// type-checking.
+    // #[rustfmt::skip]
+    // pub fn is_linear(&self) -> bool {
+    //     self.type_of().is_linear()
+    // }
 
-    pub fn type_of(&self) -> crate::types::Type {
-        use crate::types::Type;
-        use Value::*;
-        match self {
-            Unit => Type::Tuple(vec![]),
+    // pub fn type_of(&self) -> crate::types::Type {
+    //     use crate::types::Type;
+    //     use Value::*;
+    //     match self {
+    //         Unit => Type::Tuple(vec![]),
 
-            Bool(_) => Type::Bool,
-            U8(_) => Type::U8,
-            U16(_) => Type::U16,
-            U32(_) => Type::U32,
+    //         Bool(_) => Type::Bool,
+    //         U8(_) => Type::U8,
+    //         U16(_) => Type::U16,
+    //         U32(_) => Type::U32,
 
-            Q_Bool(_) => Type::Q_Bool,
-            Q_U8(_) => Type::Q_U8,
-            Q_U16(_) => Type::Q_U16,
-            Q_U32(_) => Type::Q_U32,
+    //         Q_Bool(_) => Type::Q_Bool,
+    //         Q_U8(_) => Type::Q_U8,
+    //         Q_U16(_) => Type::Q_U16,
+    //         Q_U32(_) => Type::Q_U32,
 
-            Tuple(data) => Type::Tuple(data.iter().map(|elem| elem.type_of()).collect()),
+    //         Tuple(data) => Type::Tuple(data.iter().map(|elem| elem.type_of()).collect()),
 
-            // NOTE: This here reveals the inadequacy of values, rather than
-            // expressions, having types. We can’t know the type of an expression
-            // until we evaluate it, but the array might be empty, in which case we
-            // cannot evaluate the expression, because it might have side-effects
-            // like allocation. We must make some peculiar compromise like arrays
-            // being untyped, or empty arrays having their own type.
-            Array(data) => Type::Array(match data.len() {
-                0 => Box::new(Type::unit()),
-                _ => Box::new(data[0].type_of()),
-            }),
+    //         // NOTE: This here reveals the inadequacy of values, rather than
+    //         // expressions, having types. We can’t know the type of an expression
+    //         // until we evaluate it, but the array might be empty, in which case we
+    //         // cannot evaluate the expression, because it might have side-effects
+    //         // like allocation. We must make some peculiar compromise like arrays
+    //         // being untyped, or empty arrays having their own type.
+    //         Array(data) => Type::Array(match data.len() {
+    //             0 => Box::new(Type::unit()),
+    //             _ => Box::new(data[0].type_of()),
+    //         }),
 
-            Measured(val) => Type::Measured(Box::new(val.type_of())),
-        }
-    }
+    //         Measured(val) => Type::Measured(Box::new(val.type_of())),
+    //     }
+    // }
 
     pub fn make_range<T>(lower: T, upper: T) -> Self
     where
@@ -154,7 +154,7 @@ impl fmt::Display for Value {
                     .join(", ");
                 write!(f, "({})", repr)
             }
-            _ =>           write!(f, "<{}>", self.type_of()),
+            _ =>           write!(f, "<value>"),
         }
     }
 }

@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 // use crate::functions::{Func, UserFunc};
 use crate::session::Session;
-use crate::types::Type;
+use crate::types::{TyId, TyStore, Type};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
@@ -18,6 +18,15 @@ pub fn typecheck<'ctx>(
 ) -> std::result::Result<(), ErrorBuf> {
     let tc = Typechecker::new(ctx, sess);
     tc.typecheck()
+}
+
+/// A `typing context`. Unlike the similarly-named data structure in `rustc`,
+/// this doesn't do double duty--it's exactly what it says on the tin.
+pub struct TyCtx {
+    /// Types of functions
+    funcs: HashMap<FnId, TyId>,
+    /// The backing type store
+    types: TyStore,
 }
 
 /// This struct handles essentially all of the semantic analysis passes; the
@@ -40,7 +49,7 @@ impl<'ctx> Typechecker<'ctx> {
 
     /// Typecheck all funcitons in the AST
     pub fn typecheck(self) -> std::result::Result<(), ErrorBuf> {
-        todo!();
+        // todo!();
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
@@ -59,6 +68,36 @@ impl<'ctx> Typechecker<'ctx> {
     pub fn type_expr(&self, expr: &Expr) -> Result<()> {
         todo!()
     }
+
+    // /// Check the structural properties of each type
+    // #[rustfmt::skip]
+    // fn discipline(&self) -> StructuralDiscipline {
+    //     use Type::*;
+    //     match self {
+    //         Bool =>            StructuralDiscipline { linear: false },
+    //         U8 =>              StructuralDiscipline { linear: false },
+    //         U16 =>             StructuralDiscipline { linear: false },
+    //         U32 =>             StructuralDiscipline { linear: false },
+
+    //         Q_Bool =>          StructuralDiscipline { linear: true },
+    //         Q_U8 =>            StructuralDiscipline { linear: true },
+    //         Q_U16 =>           StructuralDiscipline { linear: true },
+    //         Q_U32 =>           StructuralDiscipline { linear: true },
+
+    //         Array(ty) =>      ty.discipline(),
+
+    //         // Tuples and structs are as constrained as their most constrained member
+    //         Tuple(types) =>    StructuralDiscipline {
+    //             linear: types.iter().any(|val| val.discipline().linear),
+    //         },
+    //         Measured(_) =>     StructuralDiscipline { linear: false },
+    //     }
+    // }
+
+    // /// Check if the type is linear
+    // pub fn is_linear(&self) -> bool {
+    //     self.discipline().linear
+    // }
 
     // /// Typecheck a statement. This will be executed after hoisting, so all items
     // /// will have been hoisted to the top.

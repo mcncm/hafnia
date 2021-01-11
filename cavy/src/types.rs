@@ -1,61 +1,65 @@
+use crate::index_triple;
 use crate::token::Token;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug)]
-pub struct TypeError {
-    msg: &'static str,
-    token: Option<Token>,
-}
-
-impl fmt::Display for TypeError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.token {
-            Some(token) => {
-                write!(f, "Type error at \"{}\" [{}]: {}",
-                    token, token.span, self.msg)
-            } ,
-            None => {
-                write!(f, "Type error: {}", self.msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for TypeError {}
+index_triple! { TyStore: TyId -> Type }
 
 /// This struct tracks the structural properties of a given type
 struct StructuralDiscipline {
     linear: bool,
 }
 
+/// The type of an unsigned integer. The variants of this type correspond to the
+/// integer sizes supported by Cavy, and their concrete values are their sizes
+/// in bits.
+#[allow(non_camel_case_types)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Uint {
+    U2 = 2,
+    U4 = 4,
+    U8 = 8,
+    U16 = 16,
+    U32 = 32,
+}
+
+impl fmt::Display for Uint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let repr = match self {
+            Self::U2 => "u2",
+            Self::U4 => "u4",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+        };
+        write!(f, "{}", repr)
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    /// A non-linear (classical) boolean
     Bool,
-    U8,
-    U16,
-    U32,
 
-    // Linear types
+    /// A non-linear (classical) unsigned integer
+    Uint(Uint),
+
+    /// A linear boolean, like `?false`
     Q_Bool,
-    Q_U8,
-    Q_U16,
-    Q_U32,
 
-    // Tuple
-    Tuple(Vec<Type>),
+    /// A linear unsigned integer, like `?7`
+    Q_Uint(Uint),
 
-    // Array
-    Array(Box<Type>),
+    /// Tuples
+    Tuple(Vec<TyId>),
 
-    // Struct
-    Struct(HashMap<String, Type>),
+    /// Arrays
+    Array(TyId),
 
-    // Type of measured value
-    Measured(Box<Type>),
+    /// Wrapper type of measured value
+    Measured(TyId),
 }
 
 impl Type {
@@ -66,75 +70,18 @@ impl Type {
 
     /// Create an instance of the size/index type
     pub const fn size_type() -> Self {
-        Self::U32
-    }
-
-    /// Check the structural properties of each type
-    #[rustfmt::skip]
-    fn discipline(&self) -> StructuralDiscipline {
-        use Type::*;
-        match self {
-            Bool =>            StructuralDiscipline { linear: false },
-            U8 =>              StructuralDiscipline { linear: false },
-            U16 =>             StructuralDiscipline { linear: false },
-            U32 =>             StructuralDiscipline { linear: false },
-
-            Q_Bool =>          StructuralDiscipline { linear: true },
-            Q_U8 =>            StructuralDiscipline { linear: true },
-            Q_U16 =>           StructuralDiscipline { linear: true },
-            Q_U32 =>           StructuralDiscipline { linear: true },
-
-            Array(ty) =>      ty.discipline(),
-
-            // Tuples and structs are as constrained as their most constrained member
-            Tuple(types) =>    StructuralDiscipline {
-                linear: types.iter().any(|val| val.discipline().linear),
-            },
-            Struct(members) => StructuralDiscipline {
-                linear: members.values().any(|val| val.discipline().linear),
-            },
-
-            Measured(_) =>     StructuralDiscipline { linear: false },
-        }
-    }
-
-    /// Check if the type is linear
-    pub fn is_linear(&self) -> bool {
-        self.discipline().linear
+        Type::Uint(Uint::U32)
     }
 }
 
 impl fmt::Display for Type {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Type::*;
-
-        match self {
-            Bool => write!(f, "bool"),
-            U8 =>   write!(f, "u8"),
-            U16 =>  write!(f, "u16"),
-            U32 =>  write!(f, "u32"),
-
-            Q_Bool => write!(f, "?bool"),
-            Q_U8 =>   write!(f, "?u8"),
-            Q_U16 =>  write!(f, "?u16"),
-            Q_U32 =>  write!(f, "?u32"),
-
-            Array(ty) => write!(f, "[{}]", ty),
-
-            Tuple(types) => {
-                let repr = types.iter().map(|typ| format!("{}", typ)).collect::<Vec<String>>().join(", ");
-                write!(f, "({})", repr)
-            }
-
-            Struct { .. } => todo!(),
-
-            Measured(typ) => write!(f, "!{{{}}}", typ),
-        }
+        write!(f, "<type>")
     }
 }
 
-#[cfg(test)]
+#[cfg(foo)]
 mod tests {
     use super::*;
     use Type::*;

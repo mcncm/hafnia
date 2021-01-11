@@ -330,15 +330,6 @@ impl FromToken for Literal {
 /// Expression node.
 pub type Expr = Spanned<ExprKind>;
 
-impl From<ExprKind> for Expr {
-    fn from(kind: ExprKind) -> Self {
-        Self {
-            data: kind,
-            span: Span::default(),
-        }
-    }
-}
-
 /// A kind of expression node.
 #[derive(Debug, Clone)]
 pub enum ExprKind {
@@ -380,12 +371,10 @@ pub enum ExprKind {
         // but they are currently also just identifiers.
         callee: Ident,
         args: Vec<Expr>,
-        paren: Token,
     },
     Index {
         head: Box<Expr>,
         index: Box<Expr>,
-        bracket: Token,
     },
 }
 
@@ -420,15 +409,6 @@ pub struct Block {
     /// The id of the associated symbol table
     pub table: TableId,
     pub span: Span,
-}
-
-impl Into<Expr> for Block {
-    fn into(self: Self) -> Expr {
-        Expr {
-            span: self.span.clone(),
-            data: ExprKind::Block(Box::new(self)),
-        }
-    }
 }
 
 /// Statement node.
