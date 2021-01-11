@@ -8,7 +8,7 @@ use crate::{
     session::{Phase, Session},
     source::SrcObject,
     // target::{ObjectCode, Target},
-    // typecheck::typecheck,
+    typecheck::typecheck,
 };
 use std::path::PathBuf;
 
@@ -27,6 +27,7 @@ pub fn compile(entry_point: PathBuf, sess: &mut Session) -> Result<(), ErrorBuf>
         println!("{:#?}", ctx);
     }
 
+    typecheck(&ctx, sess)?;
     Ok(())
     // if sess.config.phase_config.typecheck {
     //     let _ = typecheck(&mut stmts, &sess);

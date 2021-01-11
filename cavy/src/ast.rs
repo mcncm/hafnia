@@ -65,7 +65,9 @@ impl AstCtx {
     }
 }
 
-/// A scoped symbol table. This may correspond to a textual block or a module.
+/// A scoped symbol table. This may correspond to a lexical block, module, or
+/// function parameters. We should, however, consider splitting those up,
+/// possibly using a separate type for function parameters.
 #[derive(Debug, Default)]
 pub struct Table {
     /// The enclosing scope, if there is any
@@ -413,6 +415,8 @@ impl ExprKind {
 pub struct Block {
     /// The statements contained in the block
     pub stmts: Vec<Stmt>,
+    /// The terminal expression, if there is one
+    pub expr: Option<Box<Expr>>,
     /// The id of the associated symbol table
     pub table: TableId,
     pub span: Span,
@@ -530,8 +534,13 @@ pub enum AnnotKind {
 
 #[derive(Debug)]
 pub struct Func {
+    /// The signature of the function
     pub sig: Sig,
+    /// The id of the function body which, like in rustc, points not to a `Block`, but an `Expr`.
     pub body: BodyId,
+    /// The table where the function is defined: we must track this in order to
+    /// resolve types in its signature.
+    pub table: TableId,
     pub span: Span,
 }
 

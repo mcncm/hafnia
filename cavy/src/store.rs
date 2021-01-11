@@ -7,7 +7,10 @@
 //! retrieve them. The second is `Interner<V, Idx>`, which is a wrapper around a
 //! `HashMap<V, Idx>`.
 
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{
+    hash_map::{Entry, Iter},
+    HashMap,
+};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::{borrow::Borrow, num::NonZeroU32};

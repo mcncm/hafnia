@@ -111,6 +111,33 @@ impl<'ctx> Parser<'ctx> {
         })
     }
 
+    /// Do something in a child table environment; return from that environment
+    /// with a handle to the table. The real reason for having this is the
+    /// slight subtlety of recovering gracefully from errors *after* pushing a
+    /// child table, which could be easily forgotten by an uncareful future you.
+    fn with_table<T, F>(&mut self, f: F) -> Result<(T, TableId)>
+    where
+        F: FnOnce(&mut Parser) -> Result<T>,
+    {
+        self.push_table();
+        let t = match f(self) {
+            Ok(t) => t,
+            Err(err) => {
+                // recover!
+                self.pop_table();
+                return Err(err);
+            }
+        };
+        Ok((t, self.pop_table().unwrap()))
+    }
+
+    /// A convenience function for inserting locals, since the parser is
+    /// tracking the symbol table stack.
+    #[inline]
+    fn insert_local(&mut self, symb: SymbolId, ty: Option<Annot>) -> Option<TableEntry> {
+        self.ctx.insert_local(self.table_id, symb, ty)
+    }
+
     /// Check if you're in a root table.
     ///
     /// NOTE: This check is currently being used to validate `main` by ensuring
@@ -241,13 +268,21 @@ impl<'ctx> Parser<'ctx> {
     /// Parse a function item and insert it in the functions table
     fn fn_item(&mut self) -> Result<()> {
         let name = self.consume_ident()?;
-        let sig = self.function_sig()?;
-        let body: Expr = self.block()?.into();
-        let span = name.span.join(&body.span).unwrap();
-        let body: BodyId = self.ctx.bodies.insert(body);
 
-        // Span should include the `fn` token...
-        let func = Func { sig, body, span };
+        // Should we create a parameters table as the parent of the function
+        // body? I'm not totally sure about this.
+
+        let sig = self.function_sig()?;
+        let sig_span = sig.span;
+        let body: Expr = self.block()?.into();
+        let body_span = name.span.join(&body.span).unwrap();
+        let body: BodyId = self.ctx.bodies.insert(body);
+        let func = Func {
+            sig,
+            body,
+            span: sig_span.join(&body_span).unwrap(),
+            table: self.table_id,
+        };
 
         // Insert the function into the function table
         let func_id = self.ctx.funcs.insert(func);
@@ -263,7 +298,9 @@ impl<'ctx> Parser<'ctx> {
             // No other function with this name
             None => Ok(()),
             // A function with this name was already in the local symbol table
-            Some(_) => Err(self.errors.push(errors::MultipleDefinitions { span })),
+            Some(_) => Err(self
+                .errors
+                .push(errors::MultipleDefinitions { span: name.span })),
         }
     }
 
@@ -465,24 +502,43 @@ impl<'ctx> Parser<'ctx> {
 
     fn block(&mut self) -> Result<Block> {
         let opening = self.consume(Lexeme::LBrace)?.span;
-        // Replace the active table with a child
-        self.push_table();
         // Start collecting the contents of the block
-        let mut stmts: Vec<Stmt> = vec![];
-        while let Some(lexeme) = self.peek_lexeme() {
-            match lexeme {
-                Lexeme::RBrace => {
-                    break;
+        let (mut stmts, table) = self.with_table(|prsr| {
+            let mut stmts: Vec<Stmt> = vec![];
+            while let Some(lexeme) = prsr.peek_lexeme() {
+                match lexeme {
+                    Lexeme::RBrace => {
+                        break;
+                    }
+                    Fn => prsr.item()?,
+                    _ => stmts.push(prsr.statement()?),
                 }
-                Fn => self.item()?,
-                _ => stmts.push(self.statement()?),
             }
-        }
+            Ok(stmts)
+        })?;
         let closing = self.consume(Lexeme::RBrace)?.span;
-        // Pop the new table off the stack; retrieve its id
-        let table = self.pop_table().unwrap();
         let span = opening.join(&closing).unwrap();
-        Ok(Block { stmts, table, span })
+
+        // Set the `expr` field: if the last statement is a nonterminated
+        // expression statement, unwrap it and put it there.
+        let expr = match stmts.pop() {
+            Some(Spanned {
+                data: StmtKind::Expr(expr),
+                ..
+            }) => Some(expr),
+            Some(tail) => {
+                stmts.push(tail);
+                None
+            }
+            None => None,
+        };
+
+        Ok(Block {
+            stmts,
+            expr,
+            table,
+            span,
+        })
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt> {
