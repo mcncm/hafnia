@@ -1,4 +1,5 @@
 use crate::index_triple;
+use crate::num::Uint;
 use crate::token::Token;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,32 +10,6 @@ index_triple! { TyStore: TyId -> Type }
 /// This struct tracks the structural properties of a given type
 struct StructuralDiscipline {
     linear: bool,
-}
-
-/// The type of an unsigned integer. The variants of this type correspond to the
-/// integer sizes supported by Cavy, and their concrete values are their sizes
-/// in bits.
-#[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Uint {
-    U2 = 2,
-    U4 = 4,
-    U8 = 8,
-    U16 = 16,
-    U32 = 32,
-}
-
-impl fmt::Display for Uint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repr = match self {
-            Self::U2 => "u2",
-            Self::U4 => "u4",
-            Self::U8 => "u8",
-            Self::U16 => "u16",
-            Self::U32 => "u32",
-        };
-        write!(f, "{}", repr)
-    }
 }
 
 #[allow(non_camel_case_types)]

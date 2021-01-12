@@ -8,6 +8,7 @@
 //! HIR, while the CFG is very similar to its MIR.
 
 use crate::index_triple;
+use crate::num::Uint;
 use crate::source::{Span, SrcStore};
 use crate::token::{Token, Unsigned};
 use std::collections::HashMap;
@@ -505,9 +506,7 @@ pub type Annot = Spanned<AnnotKind>;
 #[derive(Debug, Clone)]
 pub enum AnnotKind {
     Bool,
-    U8,
-    U16,
-    U32,
+    Uint(Uint),
 
     Tuple(Vec<Annot>),
     Array(Box<Annot>),

@@ -1,7 +1,6 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    lowering,
     // circuit::Circuit,
     // interpreter::Interpreter,
     parser,
@@ -9,7 +8,7 @@ use crate::{
     session::{Phase, Session},
     source::SrcObject,
     // target::{ObjectCode, Target},
-    typecheck::typecheck,
+    typecheck,
 };
 use std::path::PathBuf;
 
@@ -28,7 +27,7 @@ pub fn compile(entry_point: PathBuf, sess: &mut Session) -> Result<(), ErrorBuf>
         println!("{:#?}", ast);
     }
 
-    let cfg = lowering::lower(ast, sess);
+    let cfg = typecheck::lower(ast, sess)?;
     if sess.config.debug && sess.last_phase() == &Phase::Typecheck {
         println!("{:#?}", cfg);
     }

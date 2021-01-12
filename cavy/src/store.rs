@@ -21,7 +21,7 @@ pub type InnerIndex = NonZeroU32;
 /// A counter of `NonZeroU32`s
 #[derive(Debug, Default)]
 struct IdxCounter<Idx> {
-    next_inner: u32,
+    inner: u32,
     phantom: PhantomData<Idx>,
 }
 
@@ -31,7 +31,7 @@ impl<Idx: Index> IdxCounter<Idx> {
             // Starts at 0, but we increment it before attempting to build a
             // nonzero value. This makes it possible to derive Default and get
             // the correct behavior.
-            next_inner: 0,
+            inner: 0,
             phantom: PhantomData,
         }
     }
@@ -44,8 +44,8 @@ where
     type Item = Idx;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_inner += 1;
-        InnerIndex::new(self.next_inner).map(|idx| idx.into())
+        self.inner += 1;
+        InnerIndex::new(self.inner).map(|idx| idx.into())
     }
 }
 
@@ -128,12 +128,24 @@ where
         idx
     }
 
+    #[inline]
     pub fn get(&self, idx: &Idx) -> Option<&V> {
         self.backing_store.get(idx)
     }
 
+    #[inline]
     pub fn get_mut(&mut self, idx: &Idx) -> Option<&mut V> {
         self.backing_store.get_mut(idx)
+    }
+
+    #[inline]
+    pub fn iter(&self) -> Iter<'_, Idx, V> {
+        self.backing_store.iter()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.backing_store.len()
     }
 }
 

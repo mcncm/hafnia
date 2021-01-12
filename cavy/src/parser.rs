@@ -21,7 +21,7 @@ use crate::token::{
     Lexeme::{self, *},
     Token,
 };
-use crate::types::Type;
+use crate::{num::Uint, types::Type};
 use errors::*;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -643,17 +643,9 @@ impl<'ctx> Parser<'ctx> {
                 span,
                 data: AnnotKind::Bool,
             },
-            U8 => Annot {
+            U4 | U8 | U16 | U32 => Annot {
                 span,
-                data: AnnotKind::U8,
-            },
-            U16 => Annot {
-                span,
-                data: AnnotKind::U16,
-            },
-            U32 => Annot {
-                span,
-                data: AnnotKind::U32,
+                data: AnnotKind::Uint(Uint::from_lexeme(lexeme).unwrap()),
             },
             LBracket => self.finish_array_type(span)?,
             LParen => self.finish_tuple_type(span)?,

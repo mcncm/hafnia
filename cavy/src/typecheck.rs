@@ -2,45 +2,46 @@ use crate::ast::*;
 use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 // use crate::functions::{Func, UserFunc};
 use crate::session::Session;
-use crate::types::{TyId, TyStore, Type};
+use crate::{
+    cfg::*,
+    types::{TyId, TyStore, Type},
+};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
-///
-/// Run a type-checking pass, annotating the AST as you go, and return a valid
-/// symbol table. For now, this is the single entry point for all semantic
-/// analysis passes, not just type-checking proper. It will also mutate the AST,
-/// adding type annotations where necessary (or possible).
-pub fn typecheck<'ctx>(
-    ctx: &'ctx AstCtx,
-    sess: &'ctx Session,
-) -> std::result::Result<(), ErrorBuf> {
-    let tc = Typechecker::new(ctx, sess);
-    tc.typecheck()
+pub fn lower(ast: AstCtx, sess: &Session) -> std::result::Result<Cfg, ErrorBuf> {
+    let mut cfg = Cfg::new(&ast);
+    Typechecker::new(&mut cfg, &ast, &sess).lower().map(|_| cfg)
 }
 
-/// This struct handles essentially all of the semantic analysis passes; the
-/// name might be a little misleading. However, its main job is to produce a
-/// well-typed symbol table.
-pub struct Typechecker<'ctx> {
-    ctx: &'ctx AstCtx,
-    sess: &'ctx Session,
+/// This struct handles both typechecking and lowering to the cfg; the name
+/// might be a little misleading. This is similar to how `parser::Parser` has a
+/// double role building a syntax tree and symbol tables.
+pub struct Typechecker<'cfg> {
+    ast: &'cfg AstCtx,
+    sess: &'cfg Session,
+    cfg: &'cfg mut Cfg,
     pub errors: ErrorBuf,
 }
 
-impl<'ctx> Typechecker<'ctx> {
-    pub fn new(ctx: &'ctx AstCtx, sess: &'ctx Session) -> Self {
+impl<'cfg> Typechecker<'cfg> {
+    pub fn new(cfg: &'cfg mut Cfg, ast: &'cfg AstCtx, sess: &'cfg Session) -> Self {
         Self {
-            ctx,
+            ast,
             sess,
+            cfg,
             errors: ErrorBuf::new(),
         }
     }
 
-    /// Typecheck all funcitons in the AST
-    pub fn typecheck(self) -> std::result::Result<(), ErrorBuf> {
-        // todo!();
+    /// Typecheck all functions in the AST, enter the lowered functions in the cfg
+    pub fn lower(mut self) -> std::result::Result<(), ErrorBuf> {
+        // FIXME iterate over keys without discarding values?
+        for (id, _) in self.ast.funcs.iter() {
+            let _ = self.lower_fn(*id);
+        }
+
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
@@ -48,16 +49,89 @@ impl<'ctx> Typechecker<'ctx> {
         }
     }
 
-    pub fn type_fn(&self, fn_id: FnId) -> Result<()> {
-        let func = &self.ctx.funcs[fn_id];
-        let body = &self.ctx.bodies[func.body];
-        let ty = self.type_expr(body);
+    pub fn lower_fn(&mut self, fn_id: FnId) -> Result<()> {
+        let func = &self.ast.funcs[fn_id];
+        // let body = &self.ast.bodies[func.body];
+        let sig = self.type_sig(&func.sig, &func.table)?;
+        // let ty = self.type_expr(body);
         // compare ty to func's return value
+        let gr = Graph::new(sig);
+        self.cfg.graphs.insert(fn_id, gr);
         Ok(())
     }
 
-    pub fn type_expr(&self, expr: &Expr) -> Result<()> {
-        todo!()
+    pub fn type_sig(&mut self, sig: &Sig, tab: &TableId) -> Result<TypedSig> {
+        let params = sig
+            .params
+            .iter()
+            .map(|p| self.resolve_type(&p.ty, tab))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let output = match &sig.output {
+            None => self.cfg.types.insert(Type::unit()),
+            Some(annot) => self.resolve_type(annot, tab)?,
+        };
+        let sig = TypedSig { params, output };
+        Ok(sig)
+    }
+
+    /// Resolve an annotation to a type, given a table (scope) in which it should appear.
+    fn resolve_type(&mut self, annot: &Annot, tab: &TableId) -> Result<TyId> {
+        let ty = match &annot.data {
+            AnnotKind::Bool => {
+                let ty = Type::Bool;
+                self.cfg.types.insert(ty)
+            }
+            AnnotKind::Uint(u) => {
+                let ty = Type::Uint(*u);
+                self.cfg.types.insert(ty)
+            }
+            AnnotKind::Tuple(inners) => {
+                let inner_types = inners
+                    .iter()
+                    .map(|ann| self.resolve_type(ann, tab))
+                    .collect::<Result<Vec<TyId>>>()?;
+                self.cfg.types.insert(Type::Tuple(inner_types))
+            }
+            AnnotKind::Array(inner) => {
+                let inner = self.resolve_type(inner, tab)?;
+                self.cfg.types.insert(Type::Array(inner))
+            }
+            AnnotKind::Question(inner) => {
+                let ty = self.resolve_type(inner, tab)?;
+                self.resolve_annot_question(ty)?
+            }
+            AnnotKind::Bang(inner) => {
+                let ty = self.resolve_type(inner, tab)?;
+                self.resolve_annot_bang(ty)?
+            }
+            AnnotKind::Ident(_ident) => {
+                todo!()
+            }
+        };
+
+        Ok(ty)
+    }
+
+    fn resolve_annot_question(&mut self, inner: TyId) -> Result<TyId> {
+        use Type::*;
+        // can this be done with just pointer comparisons?
+        let ty = match &self.cfg.types[inner] {
+            Bool => Q_Bool,
+            Uint(u) => Q_Uint(*u),
+            _ => unimplemented!(),
+        };
+        Ok(self.cfg.types.insert(ty))
+    }
+
+    fn resolve_annot_bang(&mut self, inner: TyId) -> Result<TyId> {
+        use Type::*;
+        // can this be done with just pointer comparisons?
+        let ty = match &self.cfg.types[inner] {
+            Q_Bool => Bool,
+            Q_Uint(u) => Uint(*u),
+            _ => unimplemented!(),
+        };
+        Ok(self.cfg.types.insert(ty))
     }
 
     // /// Check the structural properties of each type
@@ -253,43 +327,6 @@ impl<'ctx> Typechecker<'ctx> {
     //     Ok(ty_r)
     // }
 
-    // fn resolve_annot(&self, annot: &Annot, table: &SymbolTable) -> Result<Type> {
-    //     let ty = match &annot.kind {
-    //         AnnotKind::Bool => Type::Bool,
-    //         AnnotKind::U8 => Type::U8,
-    //         AnnotKind::U16 => Type::U16,
-    //         AnnotKind::U32 => Type::U32,
-
-    //         AnnotKind::Tuple(inners) => {
-    //             let inner_types = inners
-    //                 .iter()
-    //                 .map(|ann| self.resolve_annot(ann, table))
-    //                 .collect::<Result<Vec<Type>>>()?;
-    //             Type::Tuple(inner_types)
-    //         }
-    //         AnnotKind::Array(inner) => {
-    //             let ty = Box::new(self.resolve_annot(inner, table)?);
-    //             Type::Array(ty)
-    //         }
-
-    //         AnnotKind::Question(inner) => {
-    //             let ty = self.resolve_annot(inner, table)?;
-    //             self.resolve_annot_question(ty, table)?
-    //         }
-
-    //         AnnotKind::Bang(inner) => {
-    //             let ty = self.resolve_annot(inner, table)?;
-    //             self.resolve_annot_bang(ty)?
-    //         }
-
-    //         AnnotKind::Ident(_ident) => {
-    //             todo!()
-    //         }
-    //     };
-
-    //     Ok(ty)
-    // }
-
     // fn type_literal(&mut self, lit: &Literal, _table: &SymbolTable) -> Result<Type> {
     //     use LiteralKind::*;
     //     use Type::*;
@@ -316,30 +353,6 @@ impl<'ctx> Typechecker<'ctx> {
     //         Ok(symb) => Ok(symb.ty.clone()),
     //         Err(err) => Err(err),
     //     }
-    // }
-
-    // fn resolve_annot_question(&self, inner: Type, _table: &SymbolTable) -> Result<Type> {
-    //     let ty = match inner {
-    //         Type::Bool => Type::Q_Bool,
-    //         Type::U8 => Type::Q_U8,
-    //         Type::U16 => Type::Q_U16,
-    //         Type::U32 => Type::Q_U32,
-
-    //         _ => unimplemented!(),
-    //     };
-    //     Ok(ty)
-    // }
-
-    // fn resolve_annot_bang(&self, inner: Type) -> Result<Type> {
-    //     let ty = match inner {
-    //         Type::Q_Bool => Type::Bool,
-    //         Type::Q_U8 => Type::U8,
-    //         Type::Q_U16 => Type::U16,
-    //         Type::Q_U32 => Type::U32,
-
-    //         _ => unimplemented!(),
-    //     };
-    //     Ok(ty)
     // }
 
     // /// Insert local bindings, recursively destructuring the LValue and type
