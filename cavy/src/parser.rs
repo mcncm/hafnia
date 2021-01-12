@@ -6,6 +6,7 @@
 //! Some of the validations performed at this stage include:
 //! * The uniqueness of the `main` function, as well its type signature
 //! * No shadowing (this will presumably be relaxed in the future)
+//! * Use before declaration
 //!
 //! Other checks cannot be performed at this time, because the data may not be
 //! available on this pass.

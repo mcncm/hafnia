@@ -74,4 +74,8 @@ impl Session {
             eprintln!("{}", msg);
         }
     }
+
+    pub fn last_phase(&self) -> &Phase {
+        &self.config.phase_config.last_phase
+    }
 }

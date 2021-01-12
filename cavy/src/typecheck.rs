@@ -20,15 +20,6 @@ pub fn typecheck<'ctx>(
     tc.typecheck()
 }
 
-/// A `typing context`. Unlike the similarly-named data structure in `rustc`,
-/// this doesn't do double duty--it's exactly what it says on the tin.
-pub struct TyCtx {
-    /// Types of functions
-    funcs: HashMap<FnId, TyId>,
-    /// The backing type store
-    types: TyStore,
-}
-
 /// This struct handles essentially all of the semantic analysis passes; the
 /// name might be a little misleading. However, its main job is to produce a
 /// well-typed symbol table.

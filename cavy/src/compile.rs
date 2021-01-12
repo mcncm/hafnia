@@ -1,6 +1,7 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
+    lowering,
     // circuit::Circuit,
     // interpreter::Interpreter,
     parser,
@@ -21,13 +22,19 @@ pub fn compile(entry_point: PathBuf, sess: &mut Session) -> Result<(), ErrorBuf>
     // TODO Replace these unwraps.
     let id = sess.sources.insert_path(entry_point).unwrap();
     let tokens = scanner::tokenize(id, sess)?;
-    let ctx = parser::parse(tokens, sess)?;
 
-    if sess.config.debug {
-        println!("{:#?}", ctx);
+    let ast = parser::parse(tokens, sess)?;
+    if sess.config.debug && sess.last_phase() == &Phase::Parse {
+        println!("{:#?}", ast);
     }
 
-    typecheck(&ctx, sess)?;
+    let cfg = lowering::lower(ast, sess);
+    if sess.config.debug && sess.last_phase() == &Phase::Typecheck {
+        println!("{:#?}", cfg);
+    }
+
+    // typecheck(&ctx, sess)?;
+    //
     Ok(())
     // if sess.config.phase_config.typecheck {
     //     let _ = typecheck(&mut stmts, &sess);

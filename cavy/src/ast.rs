@@ -1,3 +1,12 @@
+//! The highest-level representation of the Cavy program. This is not exactly a
+//! pure parse tree; it is already somewhat lowered, with symbols already
+//! interned, functions and structs already hoisted, and a few basic
+//! (lexically-checkable) invariants checked.
+//!
+//! The IRs (in `ast.rs` and `cfg.rs`) are, of course, very similar to those
+//! found in rustc. `ast.rs` is somewhere in between that compiler's AST and
+//! HIR, while the CFG is very similar to its MIR.
+
 use crate::index_triple;
 use crate::source::{Span, SrcStore};
 use crate::token::{Token, Unsigned};
