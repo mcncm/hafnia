@@ -7,107 +7,69 @@
 //! retrieve them. The second is `Interner<V, Idx>`, which is a wrapper around a
 //! `HashMap<V, Idx>`.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{
     hash_map::{Entry, Iter},
     HashMap,
 };
-use std::hash::Hash;
 use std::marker::PhantomData;
-use std::{borrow::Borrow, num::NonZeroU32};
-
-/// The concrete index type
-pub type InnerIndex = NonZeroU32;
-
-/// A counter of `NonZeroU32`s
-#[derive(Debug, Default)]
-struct IdxCounter<Idx> {
-    inner: u32,
-    phantom: PhantomData<Idx>,
-}
-
-impl<Idx: Index> IdxCounter<Idx> {
-    fn new() -> Self {
-        IdxCounter {
-            // Starts at 0, but we increment it before attempting to build a
-            // nonzero value. This makes it possible to derive Default and get
-            // the correct behavior.
-            inner: 0,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<Idx: Index> Iterator for IdxCounter<Idx>
-where
-    Idx: Index,
-{
-    type Item = Idx;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner += 1;
-        InnerIndex::new(self.inner).map(|idx| idx.into())
-    }
-}
+use std::{borrow::Borrow, hash::Hash, rc::Rc};
 
 /// A trait automatically implemented by index types
-pub trait Index: From<InnerIndex> + Default + Clone + Eq + Hash {}
+pub trait Index: Default + Clone + Copy + Eq {
+    fn new(u: u32) -> Self;
+    fn into_usize(&self) -> usize;
+}
 
 /// A macro for building implementers of Index. This is exactly analogous to
-/// rustc's `rustc_index::newtype_index`. If the arrow goes left-to-right, it
-/// will build a *store*, while if it goes right-to-left, it will build an *interner*.
+/// rustc's `rustc_index::newtype_index`.
 #[macro_export]
-macro_rules! index_triple {
-    // This branch just makes the index type itself
+macro_rules! index_type {
     ($index:ident) => {
-        #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
-        pub struct $index(crate::store::InnerIndex);
-
-        // Thm: this index has no memory overhead over a simple u32, even when
-        // wrapped in an Option.
-        const _: fn() = || {
-            let _ = core::mem::transmute::<Option<$index>, u32>;
-        };
+        #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        pub struct $index(u32);
 
         /// Seems to be required by some other part of my code
         impl Default for $index {
             fn default() -> Self {
-                Self(std::num::NonZeroU32::new(1).unwrap())
+                Self(0)
             }
         }
 
-        impl From<crate::store::InnerIndex> for $index {
-            fn from(val: crate::store::InnerIndex) -> Self {
-                Self(val)
+        impl crate::store::Index for $index {
+            fn new(u: u32) -> Self {
+                Self(u)
+            }
+
+            fn into_usize(&self) -> usize {
+                self.0 as usize
             }
         }
-
-        impl crate::store::Index for $index {}
-    };
-
-    // This branch is for making a store
-    ($store:ident : $index:ident -> $V:ty) => {
-        index_triple! { $index }
-        pub type $store = crate::store::Store<$index, $V>;
-    };
-
-    // This branch is for making an interner
-    ($store:ident : $index:ident <- $V:ty) => {
-        index_triple! { $index }
-        pub type $store = crate::store::Interner<$V, $index>;
     };
 }
 
-/// Something like a set, which however returns indices into its backing store.
-/// This makes it possible to keep references to objects that would otherwise be
-/// difficult to access due to ownership contraints, and involve a lot more
-/// `Rc<RefCell<T>>`s than anyone wants to deal with.
+#[macro_export]
+macro_rules! store_type {
+    // This branch just makes the index type itself
+
+    // This branch is for making a store
+    ($store:ident : $index:ident -> $V:ty) => {
+        crate::index_type! { $index }
+        pub type $store = crate::store::Store<$index, $V>;
+    };
+}
+
+#[macro_export]
+macro_rules! interner_type {
+    ($interner:ident : $index:ident -> $V:ty) => {
+        crate::index_type! { $index }
+        pub type $interner = crate::store::Interner<$index, $V>;
+    };
+}
+
 #[derive(Debug)]
-pub struct Store<Idx, V>
-where
-    Idx: Index,
-{
-    ctr: IdxCounter<Idx>,
-    backing_store: HashMap<Idx, V>,
+pub struct Store<Idx, V> {
+    backing_store: Vec<V>,
     phantom: PhantomData<Idx>,
 }
 
@@ -119,44 +81,33 @@ where
         Self::default()
     }
 
-    pub fn insert(&mut self, val: V) -> Idx {
-        // NOTE: This is *technically* a bug, but if anyone ever discovers it by
-        // having more than 2^32 unique idendifiers or what-have-you, I will
-        // have suffered from massive success.
-        let idx = self.ctr.next().unwrap();
-        self.backing_store.insert(idx.clone(), val);
-        idx
-    }
-
-    #[inline]
-    pub fn get(&self, idx: &Idx) -> Option<&V> {
-        self.backing_store.get(idx)
-    }
-
-    #[inline]
-    pub fn get_mut(&mut self, idx: &Idx) -> Option<&mut V> {
-        self.backing_store.get_mut(idx)
-    }
-
-    #[inline]
-    pub fn iter(&self) -> Iter<'_, Idx, V> {
-        self.backing_store.iter()
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            backing_store: Vec::with_capacity(n),
+            phantom: PhantomData,
+        }
     }
 
     #[inline]
     pub fn len(&self) -> usize {
         self.backing_store.len()
     }
+
+    pub fn insert(&mut self, item: V) -> Idx {
+        let idx = Idx::new(self.len() as u32);
+        self.backing_store.push(item);
+        idx
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, V> {
+        self.backing_store.iter()
+    }
 }
 
-impl<Idx, V> Default for Store<Idx, V>
-where
-    Idx: Index,
-{
+impl<Idx, V> Default for Store<Idx, V> {
     fn default() -> Self {
         Self {
-            ctr: IdxCounter::new(),
-            backing_store: HashMap::default(),
+            backing_store: vec![],
             phantom: PhantomData,
         }
     }
@@ -168,10 +119,8 @@ where
 {
     type Output = V;
 
-    /// This can easily panic if you're not really careful about not making Inx
-    /// types manually.
     fn index(&self, index: Idx) -> &Self::Output {
-        self.backing_store.get(&index).unwrap()
+        &self.backing_store[index.into_usize()]
     }
 }
 
@@ -180,53 +129,7 @@ where
     Idx: Index,
 {
     fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
-        self.backing_store.get_mut(&index).unwrap()
-    }
-}
-
-/// The *other* main data structure in this module. This is used for
-/// "insert-only" use, where you want to check membership and easily compare the
-/// lightweight tokens you get back.
-///
-/// This just a wrapper around a hash table.
-#[derive(Debug, Default)]
-pub struct Interner<V, Idx> {
-    ctr: IdxCounter<Idx>,
-    backing_store: HashMap<V, Idx>,
-}
-
-impl<V, Idx> Interner<V, Idx>
-where
-    Idx: Index,
-    V: Eq + Hash,
-{
-    fn new() -> Self {
-        Self {
-            ctr: IdxCounter::new(),
-            backing_store: HashMap::new(),
-        }
-    }
-
-    /// Insert a value in the interner, and return its index, wrapped to
-    /// indicated whether this was the first insertion or some later one.
-    pub fn intern(&mut self, val: V) -> Interned<Idx> {
-        match self.backing_store.entry(val) {
-            Entry::Occupied(entry) => Interned::Already(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                // NOTE: Also *technically* a bug
-                let idx = self.ctr.next().unwrap();
-                entry.insert(idx.clone());
-                Interned::First(idx)
-            }
-        }
-    }
-
-    pub fn get<Q: ?Sized>(&self, val: &Q) -> Option<&Idx>
-    where
-        V: Borrow<Q>,
-        Q: Hash + Eq,
-    {
-        self.backing_store.get(val)
+        &mut self.backing_store[index.into_usize()]
     }
 }
 
@@ -246,5 +149,72 @@ impl<Idx> Interned<Idx> {
             Self::Already(idx) => idx,
             Self::First(idx) => idx,
         }
+    }
+}
+
+/// The *other* main data structure, which is like an invertible finite map.
+#[derive(Debug, Default)]
+pub struct Interner<Idx, V>
+where
+    Idx: Index,
+    V: Eq + Hash,
+{
+    /// Let us defer the awkward lifetime issues for now by cloning all of the
+    /// stored items. This *explicitly* throws away performance, but it's a lot
+    /// easier.
+    store: Store<Idx, V>,
+    reverse: HashMap<V, Idx>,
+}
+
+impl<Idx, V> Interner<Idx, V>
+where
+    Idx: Index,
+    V: Eq + Hash + Clone,
+{
+    pub fn new() -> Self {
+        Self {
+            store: Store::new(),
+            reverse: HashMap::new(),
+        }
+    }
+
+    pub fn intern(&mut self, item: V) -> Idx {
+        if let Some(&item) = self.reverse.get(&item) {
+            return item;
+        }
+
+        let idx = self.store.insert(item.clone());
+        self.reverse.insert(item, idx);
+        idx
+    }
+
+    pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
+    where
+        V: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.reverse.contains_key(item)
+    }
+}
+
+impl<Idx, V> std::ops::Index<Idx> for Interner<Idx, V>
+where
+    Idx: Index,
+    V: Eq + Hash,
+{
+    type Output = V;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.store[index]
+    }
+}
+
+impl<Idx, V> std::ops::IndexMut<Idx> for Interner<Idx, V>
+where
+    Idx: Index,
+    V: Eq + Hash,
+{
+    fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
+        &mut self.store[index]
     }
 }

@@ -104,7 +104,7 @@ impl<'ctx> Parser<'ctx> {
 
     /// Pop a symbol table from the stack, unless you're at the root
     fn pop_table(&mut self) -> Option<TableId> {
-        let table = self.ctx.tables.get(&self.table_id).unwrap();
+        let table = &self.ctx.tables[self.table_id];
         table.parent.map(|parent_id| {
             let tid = self.table_id;
             self.table_id = parent_id;
@@ -156,12 +156,7 @@ impl<'ctx> Parser<'ctx> {
     /// longer work if there are multiple root tables in multiple modules one
     /// day.
     fn root_table(&self) -> bool {
-        self.ctx
-            .tables
-            .get(&self.table_id)
-            .unwrap()
-            .parent
-            .is_none()
+        self.ctx.tables[self.table_id].parent.is_none()
     }
 
     /// Check the next lexeme
@@ -299,7 +294,7 @@ impl<'ctx> Parser<'ctx> {
         let func_id = self.ctx.funcs.insert(func);
 
         // Validate the `main` function
-        if self.root_table() && self.ctx.symbols.get("main") == Some(&name.data) {
+        if self.root_table() && self.ctx.symbols.contains("main") {
             self.validate_main(func_id)?;
             self.ctx.entry_point = Some(func_id);
         }
@@ -658,7 +653,7 @@ impl<'ctx> Parser<'ctx> {
             }
             // overly verbose...
             Ident(symb) => {
-                let data = self.ctx.symbols.intern(symb).unwrap();
+                let data = self.ctx.symbols.intern(symb);
                 Annot {
                     span,
                     data: AnnotKind::Ident(ast::Ident { span, data }),

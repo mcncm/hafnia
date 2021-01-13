@@ -7,10 +7,10 @@
 //! found in rustc. `ast.rs` is somewhere in between that compiler's AST and
 //! HIR, while the CFG is very similar to its MIR.
 
-use crate::index_triple;
 use crate::num::Uint;
 use crate::source::{Span, SrcStore};
 use crate::token::{Token, Unsigned};
+use crate::{index_type, interner_type, store_type};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -20,11 +20,10 @@ use std::fmt;
 // that item. This pattern was borrowed from rustc itself, as I found that it
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
-index_triple! { FnStore : FnId -> Func }
-index_triple! { BodyStore : BodyId -> Expr }
-index_triple! { TableStore : TableId -> Table }
-// Note the opposite direction of the arrow: this one is an /interner/.
-index_triple! { SymbolStore : SymbolId <- String }
+store_type! { FnStore : FnId -> Func }
+store_type! { BodyStore : BodyId -> Expr }
+store_type! { TableStore : TableId -> Table }
+interner_type! { SymbolStore : SymbolId -> String }
 
 /// This data structure holds the AST-level symbol tables, arenas and interners,
 /// etc., associated with a single compilation unit. All the surrounding data
@@ -193,7 +192,7 @@ impl FromToken for Ident {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
-                data: ctx.symbols.intern(name).unwrap(),
+                data: ctx.symbols.intern(name),
                 span: token.span,
             }),
             _ => Err(()),

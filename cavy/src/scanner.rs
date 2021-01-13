@@ -239,9 +239,7 @@ macro_rules! push_token {
 
 impl<'s> Scanner<'s> {
     pub fn new(src_id: SrcId, store: &'s mut SrcStore) -> Self {
-        // NOTE: This unwrap probably isn't safe, unless we're careful only to
-        // pass in a SrcId that hasn't been invalidated.
-        let src = store.get_mut(&src_id).unwrap();
+        let src = &mut store[src_id];
         Scanner {
             scan_head: ScanHead::new(src.code.chars().peekable(), &mut src.newlines),
             src_id,

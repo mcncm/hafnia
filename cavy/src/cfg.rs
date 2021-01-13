@@ -3,22 +3,22 @@
 //! all names resolved.
 
 use crate::ast::{AstCtx, FnId};
-use crate::index_triple;
+use crate::store_type;
 use crate::{
     num::Uint,
-    types::{TyId, TyStore, Type},
+    types::{TyId, TyInterner, Type},
 };
 use std::{collections::HashMap, env::args};
 
-index_triple! { BlockStore : BlockId -> BasicBlock }
-index_triple! { LocalStore : LocalId -> Local }
+store_type! { BlockStore : BlockId -> BasicBlock }
+store_type! { LocalStore : LocalId -> Local }
 
 /// I'm not so sure that the `ctx` naming pattern makes very much sense here,
 /// but we're provisionally sticking with the convention, I guess.
 #[derive(Debug)]
 pub struct Cfg {
     pub graphs: HashMap<FnId, Graph>,
-    pub types: TyStore,
+    pub types: TyInterner,
     pub entry_point: Option<FnId>,
 }
 
@@ -26,7 +26,7 @@ impl Cfg {
     pub fn new(ast: &AstCtx) -> Self {
         Self {
             graphs: HashMap::with_capacity(ast.funcs.len()),
-            types: TyStore::new(),
+            types: TyInterner::new(),
             entry_point: ast.entry_point,
         }
     }

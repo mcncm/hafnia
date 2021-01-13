@@ -4,7 +4,8 @@ use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 use crate::session::Session;
 use crate::{
     cfg::*,
-    types::{TyId, TyStore, Type},
+    store::Index,
+    types::{TyId, TyInterner, Type},
 };
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -38,8 +39,8 @@ impl<'cfg> Typechecker<'cfg> {
     /// Typecheck all functions in the AST, enter the lowered functions in the cfg
     pub fn lower(mut self) -> std::result::Result<(), ErrorBuf> {
         // FIXME iterate over keys without discarding values?
-        for (id, _) in self.ast.funcs.iter() {
-            let _ = self.lower_fn(*id);
+        for (id, func) in self.ast.funcs.iter().enumerate() {
+            let _ = self.lower_fn(FnId::new(id as u32), func);
         }
 
         if !self.errors.is_empty() {
@@ -49,8 +50,7 @@ impl<'cfg> Typechecker<'cfg> {
         }
     }
 
-    pub fn lower_fn(&mut self, fn_id: FnId) -> Result<()> {
-        let func = &self.ast.funcs[fn_id];
+    pub fn lower_fn(&mut self, fn_id: FnId, func: &Func) -> Result<()> {
         // let body = &self.ast.bodies[func.body];
         let sig = self.type_sig(&func.sig, &func.table)?;
         // let ty = self.type_expr(body);
@@ -67,7 +67,7 @@ impl<'cfg> Typechecker<'cfg> {
             .map(|p| self.resolve_type(&p.ty, tab))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let output = match &sig.output {
-            None => self.cfg.types.insert(Type::unit()),
+            None => self.cfg.types.intern(Type::unit()),
             Some(annot) => self.resolve_type(annot, tab)?,
         };
         let sig = TypedSig { params, output };
@@ -79,22 +79,22 @@ impl<'cfg> Typechecker<'cfg> {
         let ty = match &annot.data {
             AnnotKind::Bool => {
                 let ty = Type::Bool;
-                self.cfg.types.insert(ty)
+                self.cfg.types.intern(ty)
             }
             AnnotKind::Uint(u) => {
                 let ty = Type::Uint(*u);
-                self.cfg.types.insert(ty)
+                self.cfg.types.intern(ty)
             }
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
                     .map(|ann| self.resolve_type(ann, tab))
                     .collect::<Result<Vec<TyId>>>()?;
-                self.cfg.types.insert(Type::Tuple(inner_types))
+                self.cfg.types.intern(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
                 let inner = self.resolve_type(inner, tab)?;
-                self.cfg.types.insert(Type::Array(inner))
+                self.cfg.types.intern(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
                 let ty = self.resolve_type(inner, tab)?;
@@ -120,7 +120,7 @@ impl<'cfg> Typechecker<'cfg> {
             Uint(u) => Q_Uint(*u),
             _ => unimplemented!(),
         };
-        Ok(self.cfg.types.insert(ty))
+        Ok(self.cfg.types.intern(ty))
     }
 
     fn resolve_annot_bang(&mut self, inner: TyId) -> Result<TyId> {
@@ -131,7 +131,7 @@ impl<'cfg> Typechecker<'cfg> {
             Q_Uint(u) => Uint(*u),
             _ => unimplemented!(),
         };
-        Ok(self.cfg.types.insert(ty))
+        Ok(self.cfg.types.intern(ty))
     }
 
     // /// Check the structural properties of each type

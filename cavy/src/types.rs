@@ -1,11 +1,11 @@
-use crate::index_triple;
+use crate::interner_type;
 use crate::num::Uint;
 use crate::token::Token;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-index_triple! { TyStore: TyId -> Type }
+interner_type! { TyInterner: TyId -> Type }
 
 /// This struct tracks the structural properties of a given type
 struct StructuralDiscipline {
@@ -13,7 +13,7 @@ struct StructuralDiscipline {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// A non-linear (classical) boolean
     Bool,

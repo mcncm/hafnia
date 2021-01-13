@@ -1,7 +1,7 @@
 //! Data strucures for holding and manipulating source code
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
-use crate::index_triple;
+use crate::store_type;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -24,7 +24,7 @@ fn count_digits(n: usize) -> usize {
 
 // /// Unique identifier of a source object. I'll be surprised if anyone ever needs more
 // /// than two bytes to identify all of their source objects.
-index_triple! { SrcStore : SrcId -> SrcObject }
+store_type! { SrcStore : SrcId -> SrcObject }
 
 /// Type returned by the public SrcStore interface. This is expected to be
 /// passed to a Scanner.
@@ -117,7 +117,7 @@ impl SrcStore {
     }
 
     fn format_span(&self, span: &Span) -> String {
-        let src = self.get(&span.src_id).unwrap();
+        let src = &self[span.src_id];
         let line = src.get_line(span.start);
         // FIXME assume for now that spans don't cross lines
         if src.get_line(span.end) != line {
