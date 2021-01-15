@@ -680,9 +680,12 @@ impl<'ctx> Parser<'ctx> {
     /// Finish parsing a type that may be either a tuple or the unit type.
     fn finish_tuple_type(&mut self, opening: Span) -> Result<Annot> {
         let mut types = vec![];
-        while !self.match_lexeme(RParen) {
+        if self.peek_lexeme() != Some(&RParen) {
             types.push(self.type_annotation()?);
-            self.consume(Comma)?;
+            while self.peek_lexeme() != Some(&RParen) {
+                self.consume(Comma)?;
+                types.push(self.type_annotation()?);
+            }
         }
         let closing = self.consume(RParen)?;
         let span = opening.join(&closing.span).unwrap();
