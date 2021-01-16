@@ -1,34 +1,35 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
+    context::Context,
     // circuit::Circuit,
     // interpreter::Interpreter,
     parser,
     scanner,
-    session::{Phase, Session},
+    session::Phase,
     source::SrcObject,
     // target::{ObjectCode, Target},
     typecheck,
 };
 use std::path::PathBuf;
 
-pub fn compile(entry_point: PathBuf, sess: &mut Session) -> Result<(), ErrorBuf> {
+pub fn compile(entry_point: PathBuf, ctx: &mut Context) -> Result<(), ErrorBuf> {
     // There shouldn't be any validation happening here... Should be back up in
     // main(). Or maybe not--this might be the one kind of input validation that
     // can wait. After all, we won't know every file we need to read until we've
     // started reading *some* file.
     //
     // TODO Replace these unwraps.
-    let id = sess.sources.insert_path(entry_point).unwrap();
-    let tokens = scanner::tokenize(id, sess)?;
+    let id = ctx.srcs.insert_path(entry_point).unwrap();
+    let tokens = scanner::tokenize(id, ctx)?;
 
-    let ast = parser::parse(tokens, sess)?;
-    if sess.config.debug && sess.last_phase() == &Phase::Parse {
+    let ast = parser::parse(tokens, ctx)?;
+    if ctx.conf.debug && ctx.last_phase() == &Phase::Parse {
         println!("{:#?}", ast);
     }
 
-    let cfg = typecheck::lower(ast, sess)?;
-    if sess.config.debug && sess.last_phase() == &Phase::Typecheck {
+    let cfg = typecheck::lower(ast, ctx)?;
+    if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
         println!("{:#?}", cfg);
     }
 

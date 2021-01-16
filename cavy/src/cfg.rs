@@ -2,7 +2,7 @@
 //! rustc's MIR. Like the MIR, it is a fully-typed version of the program, with
 //! all names resolved.
 
-use crate::ast::{AstCtx, FnId};
+use crate::ast::{Ast, FnId};
 use crate::store_type;
 use crate::{
     num::Uint,
@@ -13,17 +13,16 @@ use std::{collections::HashMap, env::args};
 store_type! { BlockStore : BlockId -> BasicBlock }
 store_type! { LocalStore : LocalId -> Local }
 
-/// I'm not so sure that the `ctx` naming pattern makes very much sense here,
-/// but we're provisionally sticking with the convention, I guess.
+/// The whole-program middle intermediate representation.
 #[derive(Debug)]
-pub struct Cfg {
+pub struct Mir {
     pub graphs: HashMap<FnId, Graph>,
     pub types: TyInterner,
     pub entry_point: Option<FnId>,
 }
 
-impl Cfg {
-    pub fn new(ast: &AstCtx) -> Self {
+impl Mir {
+    pub fn new(ast: &Ast) -> Self {
         Self {
             graphs: HashMap::with_capacity(ast.funcs.len()),
             types: TyInterner::new(),

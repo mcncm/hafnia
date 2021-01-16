@@ -49,33 +49,3 @@ pub struct Config {
     /// Which compilation phases to run
     pub phase_config: PhaseConfig,
 }
-
-/// The main Session type containing all data that should be accessible to
-/// many compiler passes.
-#[derive(Debug, Default)]
-pub struct Session {
-    /// Configuration data used throughout compilation
-    pub config: Config,
-    /// The source files used during compilation
-    pub sources: SrcStore,
-}
-
-impl Session {
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            sources: SrcStore::new(),
-        }
-    }
-
-    pub fn emit_diagnostics(&self, errors: ErrorBuf) {
-        for err in errors.0.into_iter() {
-            let msg = self.sources.format_err(err);
-            eprintln!("{}", msg);
-        }
-    }
-
-    pub fn last_phase(&self) -> &Phase {
-        &self.config.phase_config.last_phase
-    }
-}

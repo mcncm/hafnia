@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 // use crate::functions::{Func, UserFunc};
-use crate::session::Session;
+use crate::context::Context;
 use crate::{
     cfg::*,
     store::Index,
@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
-pub fn lower(ast: AstCtx, sess: &Session) -> std::result::Result<Cfg, ErrorBuf> {
-    let mut cfg = Cfg::new(&ast);
+pub fn lower(ast: Ast, sess: &Context) -> std::result::Result<Mir, ErrorBuf> {
+    let mut cfg = Mir::new(&ast);
     Typechecker::new(&mut cfg, &ast, &sess).lower().map(|_| cfg)
 }
 
@@ -20,17 +20,17 @@ pub fn lower(ast: AstCtx, sess: &Session) -> std::result::Result<Cfg, ErrorBuf> 
 /// might be a little misleading. This is similar to how `parser::Parser` has a
 /// double role building a syntax tree and symbol tables.
 pub struct Typechecker<'cfg> {
-    ast: &'cfg AstCtx,
-    sess: &'cfg Session,
-    cfg: &'cfg mut Cfg,
+    ast: &'cfg Ast,
+    ctx: &'cfg Context<'cfg>,
+    cfg: &'cfg mut Mir,
     pub errors: ErrorBuf,
 }
 
 impl<'cfg> Typechecker<'cfg> {
-    pub fn new(cfg: &'cfg mut Cfg, ast: &'cfg AstCtx, sess: &'cfg Session) -> Self {
+    pub fn new(cfg: &'cfg mut Mir, ast: &'cfg Ast, ctx: &'cfg Context) -> Self {
         Self {
             ast,
-            sess,
+            ctx,
             cfg,
             errors: ErrorBuf::new(),
         }

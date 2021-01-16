@@ -8,7 +8,7 @@
 //! HIR, while the CFG is very similar to its MIR.
 
 use crate::num::Uint;
-use crate::source::{Span, SrcStore};
+use crate::source::Span;
 use crate::token::{Token, Unsigned};
 use crate::{index_type, interner_type, store_type};
 use std::collections::HashMap;
@@ -25,12 +25,12 @@ store_type! { BodyStore : BodyId -> Expr }
 store_type! { TableStore : TableId -> Table }
 interner_type! { SymbolStore : SymbolId -> String }
 
-/// This data structure holds the AST-level symbol tables, arenas and interners,
-/// etc., associated with a single compilation unit. All the surrounding data
-/// structures used by parsers go here. Note that this is conceptually similar
-/// to the `rustc_hir::hir::Crate` struct in rustc.
+/// This data structure holds the AST-level symbol tables, etc., associated with
+/// a single compilation unit. All the surrounding data structures used by
+/// parsers go here. Note that this is conceptually similar to the
+/// `rustc_hir::hir::Crate` struct in rustc.
 #[derive(Debug, Default)]
-pub struct AstCtx {
+pub struct Ast {
     /// Function items
     pub funcs: FnStore,
     /// Function bodies
@@ -43,7 +43,7 @@ pub struct AstCtx {
     pub entry_point: Option<FnId>,
 }
 
-impl AstCtx {
+impl Ast {
     pub fn new() -> Self {
         Self::default()
     }
@@ -106,7 +106,7 @@ impl Table {
     }
 
     /// Look up the data associated with a symbol, recursively
-    fn get<'ctx>(&'ctx self, symb: &SymbolId, ctx: &'ctx AstCtx) -> Option<&'ctx TableEntry> {
+    fn get<'ctx>(&'ctx self, symb: &SymbolId, ctx: &'ctx Ast) -> Option<&'ctx TableEntry> {
         match self.get_inner(symb) {
             v @ Some(_) => v,
             None => match self.parent {
@@ -176,7 +176,7 @@ where
 /// Interface for ast nodes that can be made from a single token. Returns
 /// Err(()) when the received token can't be transformed as the requested node.
 pub trait FromToken {
-    fn from_token(token: Token, ctx: &mut AstCtx) -> Result<Self, ()>
+    fn from_token(token: Token, ctx: &mut Ast) -> Result<Self, ()>
     where
         Self: Sized;
 }
@@ -188,7 +188,7 @@ pub type Mod = Spanned<Vec<Item>>;
 pub type Ident = Spanned<SymbolId>;
 
 impl FromToken for Ident {
-    fn from_token(token: Token, ctx: &mut AstCtx) -> Result<Self, ()> {
+    fn from_token(token: Token, ctx: &mut Ast) -> Result<Self, ()> {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
@@ -217,7 +217,7 @@ pub enum BinOpKind {
 }
 
 impl FromToken for BinOp {
-    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
         use crate::token::Lexeme;
         use BinOpKind::*;
         let kind = match token.lexeme {
@@ -274,7 +274,7 @@ pub enum UnOpKind {
 }
 
 impl FromToken for UnOp {
-    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Minus => UnOpKind::Minus,
@@ -319,7 +319,7 @@ pub enum LiteralKind {
 }
 
 impl FromToken for Literal {
-    fn from_token(token: Token, _ctx: &mut AstCtx) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Nat(n) => LiteralKind::Nat(n),

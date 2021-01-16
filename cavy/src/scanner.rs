@@ -1,4 +1,4 @@
-use crate::session::Session;
+use crate::context::Context;
 use crate::source::{Span, SrcId, SrcObject, SrcPoint, SrcStore};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
@@ -15,14 +15,13 @@ use std::str::Chars;
 use std::vec::Vec;
 
 /// Main entry point for scanning
-pub fn tokenize(src_id: SrcId, sess: &mut Session) -> Result<Vec<Token>, ErrorBuf> {
+pub fn tokenize(src_id: SrcId, ctx: &mut Context) -> Result<Vec<Token>, ErrorBuf> {
     use crate::session::Phase;
-    let last_phase = sess.config.phase_config.last_phase;
-    if last_phase < Phase::Tokenize {
+    if ctx.last_phase() < &Phase::Tokenize {
         crate::sys::exit(0);
     }
 
-    Scanner::new(src_id, &mut sess.sources).tokenize()
+    Scanner::new(src_id, &mut ctx.srcs).tokenize()
 }
 
 lazy_static! {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
-use cavy::session::{Config, Phase, PhaseConfig, Session};
+use cavy::session::{Config, Phase, PhaseConfig, Context};
 // use cavy::target;
 use cavy::{compile, sys};
 
@@ -137,7 +137,7 @@ fn main() {
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
     let config = get_config(&argmatches);
-    let mut sess = Session::new(config);
+    let mut sess = Context::new(config);
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed. The reason for

@@ -15,7 +15,7 @@
 
 use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Result};
-use crate::session::Session;
+use crate::context::Context;
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
@@ -33,14 +33,13 @@ use std::{mem, vec::IntoIter};
 /// Main entry point for parsing: consumes a token stream and produces a module.
 /// This api will almost certainly change when, some fine day, a program can
 /// have more than one module in it.
-pub fn parse(tokens: Vec<Token>, sess: &mut Session) -> std::result::Result<AstCtx, ErrorBuf> {
+pub fn parse(tokens: Vec<Token>, ctx: &mut Context) -> std::result::Result<Ast, ErrorBuf> {
     use crate::session::Phase;
-    let last_phase = sess.config.phase_config.last_phase;
-    if last_phase < Phase::Parse {
+    if ctx.last_phase() < &Phase::Parse {
         crate::sys::exit(0);
     }
 
-    let mut ctx = AstCtx::new();
+    let mut ctx = Ast::new();
     Parser::new(tokens, &mut ctx).parse().map(|_| ctx)
 }
 
@@ -72,7 +71,7 @@ lazy_static! {
 pub struct Parser<'ctx> {
     /// We may want to parse more than one token stream in the future, so we
     /// don't want exclusive ownership of this data.
-    ctx: &'ctx mut AstCtx,
+    ctx: &'ctx mut Ast,
     /// Currently active symbol table.
     table_id: TableId,
     /// The representation of the token stream is subject to change.
@@ -85,7 +84,7 @@ pub struct Parser<'ctx> {
 }
 
 impl<'ctx> Parser<'ctx> {
-    pub fn new(tokens: Vec<Token>, ctx: &'ctx mut AstCtx) -> Self {
+    pub fn new(tokens: Vec<Token>, ctx: &'ctx mut Ast) -> Self {
         // For now, just allocate some new table, which will be the root.
         let table_id = ctx.new_table();
         Self {
@@ -970,7 +969,7 @@ mod tests {
             }
         };
 
-        // Literals and variables. In this case, include the AstCtx in order to
+        // Literals and variables. In this case, include the Ast in order to
         // resolve symbols, which must be interned before comparison
         ($ast:expr, {$($lit:tt)*}) => {
             match &$ast.data {
@@ -1004,7 +1003,7 @@ mod tests {
         // If there's only a list of lexemes, just try to parse it!
         ([$($lexeme:expr),+]) => {
             let tokens = vec![$(token($lexeme)),+];
-            let mut ctx = AstCtx::new();
+            let mut ctx = Ast::new();
             let mut parser = Parser::new(tokens, &mut ctx);
             parser.expression().unwrap();
         };
@@ -1012,7 +1011,7 @@ mod tests {
         // against the S-expression it contains.
         ([$($lexeme:expr),+], $($s_expr:tt)+) => {
             let tokens = vec![$(token($lexeme)),+];
-            let mut ctx = AstCtx::new();
+            let mut ctx = Ast::new();
             let mut parser = Parser::new(tokens, &mut ctx);
             let ast = parser.expression().unwrap();
             test_s_expr!(ast, $($s_expr)+);
