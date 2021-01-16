@@ -1,5 +1,8 @@
 use crate::interner_type;
-use crate::num::Uint;
+use crate::{
+    context::{Context, CtxFmt},
+    num::Uint,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -48,10 +51,49 @@ impl Type {
     }
 }
 
-impl fmt::Display for Type {
-    #[rustfmt::skip]
+/// We need context data to format a `Graph` struct, at least to resolve the
+/// types and symbols.
+impl<'t> CtxFmt<'t, TypeFmt<'t>> for Type {
+    fn fmt_with(&'t self, ctx: &'t Context) -> TypeFmt<'t> {
+        TypeFmt { ty: self, ctx }
+    }
+}
+
+/// A wrapper type for formatting Mir with a context.
+pub struct TypeFmt<'t> {
+    pub ty: &'t Type,
+    pub ctx: &'t Context<'t>,
+}
+
+impl<'t> fmt::Display for TypeFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<type>")
+        match self.ty {
+            Type::Bool => f.write_str("bool"),
+            Type::Uint(u) => write!(f, "{}", u),
+            Type::Q_Bool => f.write_str("?bool"),
+            Type::Q_Uint(u) => write!(f, "?{}", u),
+            Type::Tuple(tys) => {
+                let _ = f.write_str("(");
+                for (n, ty) in tys.iter().enumerate() {
+                    let ty = &self.ctx.types[*ty];
+                    if n == tys.len() - 1 {
+                        let _ = write!(f, "{}", ty.fmt_with(self.ctx));
+                    } else {
+                        let _ = write!(f, "{}, ", ty.fmt_with(self.ctx));
+                    }
+                }
+                f.write_str(")")
+            }
+            Type::Array(ty) => write!(f, "[{}]", &self.ctx.types[*ty]),
+            Type::Measured(ty) => write!(f, "!{}", &self.ctx.types[*ty]),
+        }
+    }
+}
+
+/// Legacy cruft--this is still required by the error formatting.
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<type>")
     }
 }
 

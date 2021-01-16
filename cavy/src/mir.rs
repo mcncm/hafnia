@@ -14,6 +14,12 @@ use std::{collections::HashMap, env::args, fmt};
 store_type! { BlockStore : BlockId -> BasicBlock }
 store_type! { LocalStore : LocalId -> Local }
 
+impl fmt::Display for LocalId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_{}", self.0)
+    }
+}
+
 /// The whole-program middle intermediate representation.
 #[derive(Debug)]
 pub struct Mir {
@@ -46,7 +52,10 @@ pub struct MirFmt<'t> {
 
 impl<'t> fmt::Display for MirFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.mir)
+        for (fn_id, gr) in &self.mir.graphs {
+            let _ = write!(f, "{}", gr.fmt_with(&self.ctx));
+        }
+        f.write_str("")
     }
 }
 
@@ -90,6 +99,36 @@ impl Graph {
             blocks,
             entry_block: block,
         }
+    }
+}
+
+/// We need context data to format a `Graph` struct, at least to resolve the
+/// types and symbols.
+impl<'t> CtxFmt<'t, GraphFmt<'t>> for Graph {
+    fn fmt_with(&'t self, ctx: &'t Context) -> GraphFmt<'t> {
+        GraphFmt { gr: self, ctx }
+    }
+}
+
+/// A wrapper type for formatting Mir with a context.
+pub struct GraphFmt<'t> {
+    pub gr: &'t Graph,
+    pub ctx: &'t Context<'t>,
+}
+
+impl<'t> fmt::Display for GraphFmt<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let _ = f.write_str("function {\n");
+        for (n, local) in self.gr.locals.iter().enumerate() {
+            let ty = &self.ctx.types[local.ty];
+            let _ = writeln!(f, "\t_{}: {}", n, ty.fmt_with(self.ctx),);
+        }
+
+        for (n, block) in self.gr.blocks.iter().enumerate() {
+            let _ = writeln!(f, "\tbb{} {{", n);
+            let _ = f.write_str("\t\t// block contents\n\t}");
+        }
+        f.write_str("}\n")
     }
 }
 
