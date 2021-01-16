@@ -7,21 +7,6 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
 
-/// Count the digits in a number; useful for formatting lines of source code.
-fn count_digits(n: usize) -> usize {
-    match n {
-        0 => 1,
-        mut n => {
-            let mut digits = 0;
-            while n > 0 {
-                n /= 10;
-                digits += 1;
-            }
-            digits
-        }
-    }
-}
-
 // /// Unique identifier of a source object. I'll be surprised if anyone ever needs more
 // /// than two bytes to identify all of their source objects.
 store_type! { SrcStore : SrcId -> SrcObject }
@@ -50,7 +35,7 @@ impl SrcObject {
     ///     0     1     2      found position
     ///
     ///  ```
-    fn get_line(&self, pos: SrcPoint) -> &str {
+    pub fn get_line(&self, pos: SrcPoint) -> &str {
         // Pointing to a newline character shouldn't happen; actual spans
         // shouldn't point *at* newlines, but they might cross them.
         let n = self
@@ -105,44 +90,6 @@ impl SrcStore {
             origin: "<input>".to_owned(),
         };
         self.insert(src)
-    }
-
-    pub fn format_err(&self, err: Box<dyn Diagnostic>) -> String {
-        format!(
-            "{}: {}\n{}",
-            err.code(),
-            err.message(),
-            self.format_span(err.main_span())
-        )
-    }
-
-    fn format_span(&self, span: &Span) -> String {
-        let src = &self[span.src_id];
-        let line = src.get_line(span.start);
-        // FIXME assume for now that spans don't cross lines
-        if src.get_line(span.end) != line {
-            panic!("Span crossed a line boundary");
-        }
-        // Columns to annotate: remember that columns are 1-indexed.
-        let start = span.start.col;
-        let end = span.end.col;
-        // Carets
-        let annot = "^".repeat(end - start + 1);
-        // How long should line numbers be?
-        let digits = count_digits(span.start.line);
-        // Reported code with annotations. This is a little ad-hoc, and should
-        // really be some kind of "join" over reported lines.
-        let origin = format!("{} {}", src.origin, span);
-        let report = format!(
-            "{s:digits$} |\n{s:digits$} | {}\n{s:digits$} | {s:start$}{}",
-            line,
-            annot,
-            s = "",
-            digits = digits,
-            // start of annotation
-            start = start - 1
-        );
-        format!("{}\n{}", origin, report)
     }
 }
 

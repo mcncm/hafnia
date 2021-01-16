@@ -6,11 +6,11 @@
 pub mod arch;
 pub mod ast;
 pub mod cavy_errors;
-pub mod cfg;
+pub mod mir;
 // pub mod circuit;
 pub mod compile;
-pub mod session;
 pub mod context;
+pub mod session;
 // pub mod environment;
 // pub mod functions;
 // pub mod interpreter;

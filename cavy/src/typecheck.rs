@@ -3,35 +3,39 @@ use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 // use crate::functions::{Func, UserFunc};
 use crate::context::Context;
 use crate::{
-    cfg::*,
+    mir::*,
     store::Index,
-    types::{TyId, TyInterner, Type},
+    types::{TyId, Type},
 };
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
-pub fn lower(ast: Ast, sess: &Context) -> std::result::Result<Mir, ErrorBuf> {
-    let mut cfg = Mir::new(&ast);
-    Typechecker::new(&mut cfg, &ast, &sess).lower().map(|_| cfg)
+pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> std::result::Result<Mir, ErrorBuf> {
+    let mut mir = Mir::new(&ast);
+    match Typechecker::new(&mut mir, &ast, ctx).lower() {
+        Ok(_) => {}
+        Err(errs) => return Err(errs),
+    };
+    Ok(mir)
 }
 
 /// This struct handles both typechecking and lowering to the cfg; the name
 /// might be a little misleading. This is similar to how `parser::Parser` has a
 /// double role building a syntax tree and symbol tables.
-pub struct Typechecker<'cfg> {
-    ast: &'cfg Ast,
-    ctx: &'cfg Context<'cfg>,
-    cfg: &'cfg mut Mir,
+pub struct Typechecker<'mir, 'ctx> {
+    ast: &'mir Ast,
+    ctx: &'mir mut Context<'ctx>,
+    mir: &'mir mut Mir,
     pub errors: ErrorBuf,
 }
 
-impl<'cfg> Typechecker<'cfg> {
-    pub fn new(cfg: &'cfg mut Mir, ast: &'cfg Ast, ctx: &'cfg Context) -> Self {
+impl<'mir, 'ctx> Typechecker<'mir, 'ctx> {
+    pub fn new(mir: &'mir mut Mir, ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
         Self {
             ast,
             ctx,
-            cfg,
+            mir,
             errors: ErrorBuf::new(),
         }
     }
@@ -56,7 +60,7 @@ impl<'cfg> Typechecker<'cfg> {
         // let ty = self.type_expr(body);
         // compare ty to func's return value
         let gr = Graph::new(sig);
-        self.cfg.graphs.insert(fn_id, gr);
+        self.mir.graphs.insert(fn_id, gr);
         Ok(())
     }
 
@@ -67,7 +71,7 @@ impl<'cfg> Typechecker<'cfg> {
             .map(|p| self.resolve_type(&p.ty, tab))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let output = match &sig.output {
-            None => self.cfg.types.intern(Type::unit()),
+            None => self.ctx.types.intern(Type::unit()),
             Some(annot) => self.resolve_type(annot, tab)?,
         };
         let sig = TypedSig { params, output };
@@ -79,22 +83,22 @@ impl<'cfg> Typechecker<'cfg> {
         let ty = match &annot.data {
             AnnotKind::Bool => {
                 let ty = Type::Bool;
-                self.cfg.types.intern(ty)
+                self.ctx.types.intern(ty)
             }
             AnnotKind::Uint(u) => {
                 let ty = Type::Uint(*u);
-                self.cfg.types.intern(ty)
+                self.ctx.types.intern(ty)
             }
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
                     .map(|ann| self.resolve_type(ann, tab))
                     .collect::<Result<Vec<TyId>>>()?;
-                self.cfg.types.intern(Type::Tuple(inner_types))
+                self.ctx.types.intern(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
                 let inner = self.resolve_type(inner, tab)?;
-                self.cfg.types.intern(Type::Array(inner))
+                self.ctx.types.intern(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
                 let ty = self.resolve_type(inner, tab)?;
@@ -115,23 +119,23 @@ impl<'cfg> Typechecker<'cfg> {
     fn resolve_annot_question(&mut self, inner: TyId) -> Result<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
-        let ty = match &self.cfg.types[inner] {
+        let ty = match &self.ctx.types[inner] {
             Bool => Q_Bool,
             Uint(u) => Q_Uint(*u),
             _ => unimplemented!(),
         };
-        Ok(self.cfg.types.intern(ty))
+        Ok(self.ctx.types.intern(ty))
     }
 
     fn resolve_annot_bang(&mut self, inner: TyId) -> Result<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
-        let ty = match &self.cfg.types[inner] {
+        let ty = match &self.ctx.types[inner] {
             Q_Bool => Bool,
             Q_Uint(u) => Uint(*u),
             _ => unimplemented!(),
         };
-        Ok(self.cfg.types.intern(ty))
+        Ok(self.ctx.types.intern(ty))
     }
 
     // /// Check the structural properties of each type

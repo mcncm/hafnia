@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
-use cavy::session::{Config, Phase, PhaseConfig, Context};
+use cavy::context::{Context, CtxFmt};
+use cavy::session::{Config, Phase, PhaseConfig};
 // use cavy::target;
 use cavy::{compile, sys};
 
@@ -136,8 +137,8 @@ fn main() {
     let yaml = load_yaml!("cli.yml");
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
-    let config = get_config(&argmatches);
-    let mut sess = Context::new(config);
+    let conf = get_config(&argmatches);
+    let mut ctx = Context::new(&conf);
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed. The reason for
@@ -151,7 +152,7 @@ fn main() {
 
     #[cfg(debug_assertions)]
     {
-        if !sess.config.debug {
+        if !ctx.conf.debug {
             panic::set_hook(Box::new(sys::panic_hook));
         }
     }
@@ -159,8 +160,10 @@ fn main() {
     match get_entry_point(&argmatches) {
         Some(path) => {
             let _object_path = get_object_path(&argmatches);
-            let _object_code = compile::compile(path, &mut sess).unwrap_or_else(|errs| {
-                sess.emit_diagnostics(errs);
+            let _object_code = compile::compile(path, &mut ctx).unwrap_or_else(|errs| {
+                for err in errs.0 {
+                    eprintln!("{}", err.fmt_with(&ctx))
+                }
                 sys::exit(1);
             });
             // emit_object_code(object_code, object_path)

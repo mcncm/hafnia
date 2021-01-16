@@ -5,10 +5,11 @@
 use crate::ast::{Ast, FnId};
 use crate::store_type;
 use crate::{
+    context::{Context, CtxFmt},
     num::Uint,
-    types::{TyId, TyInterner, Type},
+    types::{TyId, Type},
 };
-use std::{collections::HashMap, env::args};
+use std::{collections::HashMap, env::args, fmt};
 
 store_type! { BlockStore : BlockId -> BasicBlock }
 store_type! { LocalStore : LocalId -> Local }
@@ -17,7 +18,6 @@ store_type! { LocalStore : LocalId -> Local }
 #[derive(Debug)]
 pub struct Mir {
     pub graphs: HashMap<FnId, Graph>,
-    pub types: TyInterner,
     pub entry_point: Option<FnId>,
 }
 
@@ -25,9 +25,28 @@ impl Mir {
     pub fn new(ast: &Ast) -> Self {
         Self {
             graphs: HashMap::with_capacity(ast.funcs.len()),
-            types: TyInterner::new(),
             entry_point: ast.entry_point,
         }
+    }
+}
+
+/// We need context data to format a `Mir` struct, at least to resolve the types
+/// and symbols.
+impl<'t> CtxFmt<'t, MirFmt<'t>> for Mir {
+    fn fmt_with(&'t self, ctx: &'t Context) -> MirFmt<'t> {
+        MirFmt { mir: self, ctx }
+    }
+}
+
+/// A wrapper type for formatting Mir with a context.
+pub struct MirFmt<'t> {
+    mir: &'t Mir,
+    ctx: &'t Context<'t>,
+}
+
+impl<'t> fmt::Display for MirFmt<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.mir)
     }
 }
 

@@ -1,5 +1,8 @@
 use crate::source::Span;
-use crate::sys;
+use crate::{
+    context::{Context, CtxFmt},
+    sys,
+};
 use std::error::Error;
 use std::fmt;
 
@@ -18,6 +21,12 @@ pub trait Diagnostic: std::fmt::Debug {
 
     /// Returns the error code
     fn code(&self) -> &str;
+}
+
+impl<'t> CtxFmt<'t, DiagnosticFmt<'t>> for Box<dyn Diagnostic> {
+    fn fmt_with(&'t self, ctx: &'t Context) -> DiagnosticFmt<'t> {
+        DiagnosticFmt { err: self, ctx }
+    }
 }
 
 /// Like `std::error::Error`, we would often like to enjoy automatic conversion
@@ -53,9 +62,8 @@ impl std::fmt::Display for CavyError {
 
 impl Error for CavyError {}
 
-/// Let’s simplify error propagation with with a typedef. This should be an
-/// acceptable thing to do; it mimics `io::Result`, and it's seen in plenty of
-/// projects.
+/// Simplify error propagation with a typedef. This should be an acceptable
+/// thing to do; it mimics `io::Result`, and it's seen in plenty of projects.
 pub type Result<T> = std::result::Result<T, CavyError>;
 
 #[derive(Debug)]
@@ -75,6 +83,77 @@ impl ErrorBuf {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+pub struct DiagnosticFmt<'d> {
+    // Ok, it isn't really any loss to have a `Box` here, since we'll only ever
+    // use this through a `Box`. But it does annoy me that I can't figure out
+    // how to accomplish this with just a `&'d dyn Diagnostic`.
+    err: &'d Box<dyn Diagnostic>,
+    ctx: &'d Context<'d>,
+}
+
+impl<'d> fmt::Display for DiagnosticFmt<'d> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {}\n{}",
+            self.err.code(),
+            self.err.message(),
+            self.format_span(self.err.main_span()),
+        )
+    }
+}
+
+impl<'d> DiagnosticFmt<'d> {
+    /// Format the main span of a diagnostic. consider implementations that
+    /// could avoid the extra allocation.
+    fn format_span(&self, span: &Span) -> String {
+        let src = &self.ctx.srcs[span.src_id];
+        let line = src.get_line(span.start);
+        // FIXME assume for now that spans don't cross lines
+        if src.get_line(span.end) != line {
+            panic!("Span crossed a line boundary");
+        }
+        // Columns to annotate: remember that columns are 1-indexed.
+        let start = span.start.col;
+        let end = span.end.col;
+        // Carets
+        let annot = "^".repeat(end - start + 1);
+        // How long should line numbers be?
+        let digits = util::count_digits(span.start.line);
+        // Reported code with annotations. This is a little ad-hoc, and should
+        // really be some kind of "join" over reported lines.
+        let origin = format!("{} {}", src.origin, span);
+        let report = format!(
+            "{s:digits$} |\n{s:digits$} | {}\n{s:digits$} | {s:start$}{}",
+            line,
+            annot,
+            s = "",
+            digits = digits,
+            // start of annotation
+            start = start - 1
+        );
+        format!("{}\n{}", origin, report)
+    }
+}
+
+/// Internal helper functions
+mod util {
+    /// Count the digits in a number; useful for formatting lines of source code.
+    pub fn count_digits(n: usize) -> usize {
+        match n {
+            0 => 1,
+            mut n => {
+                let mut digits = 0;
+                while n > 0 {
+                    n /= 10;
+                    digits += 1;
+                }
+                digits
+            }
+        }
     }
 }
 

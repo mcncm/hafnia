@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-interner_type! { TyInterner: TyId -> Type }
+interner_type! { TypeInterner : TyId -> Type }
 
 /// This struct tracks the structural properties of a given type
 struct StructuralDiscipline {

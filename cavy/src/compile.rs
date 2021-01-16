@@ -1,7 +1,7 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    context::Context,
+    context::{Context, CtxFmt},
     // circuit::Circuit,
     // interpreter::Interpreter,
     parser,
@@ -13,7 +13,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-pub fn compile(entry_point: PathBuf, ctx: &mut Context) -> Result<(), ErrorBuf> {
+pub fn compile<'a, 'ctx>(entry_point: PathBuf, ctx: &'a mut Context<'ctx>) -> Result<(), ErrorBuf> {
     // There shouldn't be any validation happening here... Should be back up in
     // main(). Or maybe not--this might be the one kind of input validation that
     // can wait. After all, we won't know every file we need to read until we've
@@ -26,11 +26,13 @@ pub fn compile(entry_point: PathBuf, ctx: &mut Context) -> Result<(), ErrorBuf> 
     let ast = parser::parse(tokens, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Parse {
         println!("{:#?}", ast);
+        return Ok(());
     }
 
-    let cfg = typecheck::lower(ast, ctx)?;
+    let mir = typecheck::lower(ast, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
-        println!("{:#?}", cfg);
+        println!("{}", mir.fmt_with(&ctx));
+        return Ok(());
     }
 
     // typecheck(&ctx, sess)?;
