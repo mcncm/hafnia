@@ -1,9 +1,9 @@
-use crate::ast::*;
+use crate::ast::{self, *};
 use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
 // use crate::functions::{Func, UserFunc};
 use crate::context::Context;
 use crate::{
-    mir::*,
+    mir::{self, *},
     store::Index,
     types::{TyId, Type},
 };
@@ -12,26 +12,20 @@ use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
 pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> std::result::Result<Mir, ErrorBuf> {
-    let mut mir = Mir::new(&ast);
-    match Typechecker::new(&mut mir, &ast, ctx).lower() {
-        Ok(_) => {}
-        Err(errs) => return Err(errs),
-    };
-    Ok(mir)
+    MirBuilder::new(&ast, ctx).lower()
 }
 
-/// This struct handles both typechecking and lowering to the cfg; the name
-/// might be a little misleading. This is similar to how `parser::Parser` has a
-/// double role building a syntax tree and symbol tables.
-pub struct Typechecker<'mir, 'ctx> {
+/// This struct handles lowering from the Ast to the Mir.
+pub struct MirBuilder<'mir, 'ctx> {
     ast: &'mir Ast,
     ctx: &'mir mut Context<'ctx>,
-    mir: &'mir mut Mir,
+    mir: Mir,
     pub errors: ErrorBuf,
 }
 
-impl<'mir, 'ctx> Typechecker<'mir, 'ctx> {
-    pub fn new(mir: &'mir mut Mir, ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
+impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
+    pub fn new(ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
+        let mir = Mir::new(&ast);
         Self {
             ast,
             ctx,
@@ -41,7 +35,7 @@ impl<'mir, 'ctx> Typechecker<'mir, 'ctx> {
     }
 
     /// Typecheck all functions in the AST, enter the lowered functions in the cfg
-    pub fn lower(mut self) -> std::result::Result<(), ErrorBuf> {
+    pub fn lower(mut self) -> std::result::Result<Mir, ErrorBuf> {
         // FIXME iterate over keys without discarding values?
         for (id, func) in self.ast.funcs.iter().enumerate() {
             let _ = self.lower_fn(FnId::new(id as u32), func);
@@ -50,17 +44,130 @@ impl<'mir, 'ctx> Typechecker<'mir, 'ctx> {
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
-            Ok(())
+            Ok(self.mir)
         }
     }
 
     pub fn lower_fn(&mut self, fn_id: FnId, func: &Func) -> Result<()> {
-        // let body = &self.ast.bodies[func.body];
+        let body = &self.ast.bodies[func.body];
         let sig = self.type_sig(&func.sig, &func.table)?;
-        // let ty = self.type_expr(body);
-        // compare ty to func's return value
-        let gr = Graph::new(sig);
+        let mut gr = Graph::new(sig);
+        let place = gr.return_site();
+        self.lower_into(&mut gr, place, body)?;
         self.mir.graphs.insert(fn_id, gr);
+        // compare ty to func's return value
+        Ok(())
+    }
+
+    #[allow(unused_variables)]
+    pub fn lower_into(&mut self, gr: &mut Graph, place: LocalId, expr: &Expr) -> Result<()> {
+        match &expr.data {
+            ExprKind::BinOp { left, op, right } => {
+                self.lower_into_binop(place, gr, left, op, right)
+            }
+            ExprKind::UnOp { op, right } => self.lower_into_unop(place, gr, op, right),
+            ExprKind::Literal(lit) => self.lower_into_literal(place, gr, lit),
+            ExprKind::Ident(ident) => self.lower_into_ident(place, gr, ident),
+            ExprKind::Tuple(_) => {
+                todo!()
+            }
+            ExprKind::IntArr { item, reps } => {
+                todo!()
+            }
+            ExprKind::ExtArr(_) => {
+                todo!()
+            }
+            ExprKind::Block(block) => self.lower_into_block(place, gr, block),
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                todo!()
+            }
+            ExprKind::For { bind, iter, body } => {
+                todo!()
+            }
+            ExprKind::Call { callee, args } => {
+                todo!()
+            }
+            ExprKind::Index { head, index } => {
+                todo!()
+            }
+        }
+    }
+
+    fn lower_into_binop(
+        &mut self,
+        place: LocalId,
+        gr: &mut Graph,
+        left: &Expr,
+        op: &ast::BinOp,
+        right: &Expr,
+    ) -> Result<()> {
+        let ty = gr.locals[place].ty;
+        // Let's assume for now that all the binops take the same two types, in
+        // both arguments. This won't be true, but it's a convenient simplifying
+        // assumption.
+        let l_place = gr.auto_local(ty);
+        let r_place = gr.auto_local(ty);
+
+        let left = self.lower_into(gr, l_place, left);
+        let right = self.lower_into(gr, r_place, right);
+        if let (Err(e), _) | (_, Err(e)) = (left, right) {
+            return Err(e);
+        }
+
+        // FIXME for now, pretend that all operations are `Copy`.
+        let l_op = Operand::Copy(l_place);
+        let r_op = Operand::Copy(r_place);
+        let rhs = Rvalue::BinOp(op.data, l_op, r_op);
+        gr.push_stmt(mir::Stmt { place, rhs });
+        Ok(())
+    }
+
+    fn lower_into_unop(
+        &mut self,
+        place: LocalId,
+        gr: &mut Graph,
+        op: &ast::UnOp,
+        right: &Expr,
+    ) -> Result<()> {
+        let ty = gr.locals[place].ty;
+        let r_place = gr.auto_local(ty);
+        self.lower_into(gr, r_place, right)?;
+
+        // FIXME for now, pretend that all operations are `Copy`.
+        let r_op = Operand::Copy(r_place);
+        let rhs = Rvalue::UnOp(op.data, r_op);
+        gr.push_stmt(mir::Stmt { place, rhs });
+        Ok(())
+    }
+
+    fn lower_into_literal(&mut self, place: LocalId, gr: &mut Graph, lit: &Literal) -> Result<()> {
+        let constant = match &lit.data {
+            LiteralKind::True => Const::True,
+            LiteralKind::False => Const::False,
+            LiteralKind::Nat(n) => Const::Nat(*n),
+        };
+        let rhs = Rvalue::Const(constant);
+        gr.push_stmt(mir::Stmt { place, rhs });
+        Ok(())
+    }
+
+    fn lower_into_ident(&mut self, _place: LocalId, _gr: &mut Graph, _ident: &Ident) -> Result<()> {
+        Ok(())
+    }
+
+    fn lower_into_block(&mut self, _place: LocalId, _gr: &mut Graph, block: &Block) -> Result<()> {
+        #![allow(unused_variables)]
+        let Block {
+            stmts,
+            expr,
+            table,
+            span,
+        } = block;
+
         Ok(())
     }
 
@@ -78,7 +185,9 @@ impl<'mir, 'ctx> Typechecker<'mir, 'ctx> {
         Ok(sig)
     }
 
-    /// Resolve an annotation to a type, given a table (scope) in which it should appear.
+    /// Resolve an annotation to a type, given a table (scope) in which it
+    /// should appear. This should eventually be farmed out to a type inference
+    /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
     fn resolve_type(&mut self, annot: &Annot, tab: &TableId) -> Result<TyId> {
         let ty = match &annot.data {
             AnnotKind::Bool => {

@@ -24,6 +24,6 @@ pub mod store;
 pub mod sys;
 // pub mod target;
 pub mod token;
-pub mod typecheck;
+pub mod lowering;
 pub mod types;
 pub mod values;

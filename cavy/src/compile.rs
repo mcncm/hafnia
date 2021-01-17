@@ -2,14 +2,14 @@ use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
     context::{Context, CtxFmt},
+    // target::{ObjectCode, Target},
+    lowering,
     // circuit::Circuit,
     // interpreter::Interpreter,
     parser,
     scanner,
     session::Phase,
     source::SrcObject,
-    // target::{ObjectCode, Target},
-    typecheck,
 };
 use std::path::PathBuf;
 
@@ -29,7 +29,7 @@ pub fn compile<'a, 'ctx>(entry_point: PathBuf, ctx: &'a mut Context<'ctx>) -> Re
         return Ok(());
     }
 
-    let mir = typecheck::lower(ast, ctx)?;
+    let mir = lowering::lower(ast, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
         println!("{}", mir.fmt_with(&ctx));
         return Ok(());

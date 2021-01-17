@@ -2,11 +2,11 @@
 //! rustc's MIR. Like the MIR, it is a fully-typed version of the program, with
 //! all names resolved.
 
-use crate::ast::{Ast, FnId};
+use crate::ast::{self, Ast, FnId};
 use crate::store_type;
 use crate::{
     context::{Context, CtxFmt},
-    num::Uint,
+    num::{self, Uint},
     types::{TyId, Type},
 };
 use std::{collections::HashMap, env::args, fmt};
@@ -52,7 +52,7 @@ pub struct MirFmt<'t> {
 
 impl<'t> fmt::Display for MirFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (fn_id, gr) in &self.mir.graphs {
+        for (_fn_id, gr) in &self.mir.graphs {
             let _ = write!(f, "{}", gr.fmt_with(&self.ctx));
         }
         f.write_str("")
@@ -80,17 +80,28 @@ pub struct Graph {
     pub blocks: BlockStore,
     /// The first block of the Cfg
     pub entry_block: BlockId,
+    /// The active block
+    cursor: BlockId,
 }
 
 impl Graph {
     /// Create a graph with a single empty block
     pub fn new(TypedSig { params, output }: TypedSig) -> Self {
         let mut locals = LocalStore::new();
+
         let args = params.len();
-        locals.insert(Local { ty: output });
+        locals.insert(Local {
+            ty: output,
+            kind: LocalKind::User,
+        });
+
         for param in params {
-            locals.insert(Local { ty: param });
+            locals.insert(Local {
+                ty: param,
+                kind: LocalKind::User,
+            });
         }
+
         let mut blocks = BlockStore::new();
         let block = blocks.insert(BasicBlock::new());
         Self {
@@ -98,7 +109,31 @@ impl Graph {
             locals,
             blocks,
             entry_block: block,
+            cursor: block,
         }
+    }
+
+    /// The local corresponding to the routine's return value
+    pub fn return_site(&self) -> LocalId {
+        LocalId::default()
+    }
+
+    #[inline]
+    fn alloc_new_local(&mut self, ty: TyId, kind: LocalKind) -> LocalId {
+        let local = Local { ty, kind };
+        self.locals.insert(local)
+    }
+
+    pub fn auto_local(&mut self, ty: TyId) -> LocalId {
+        self.alloc_new_local(ty, LocalKind::Auto)
+    }
+
+    pub fn user_local(&mut self, ty: TyId) -> LocalId {
+        self.alloc_new_local(ty, LocalKind::User)
+    }
+
+    pub fn push_stmt(&mut self, stmt: Stmt) {
+        self.blocks[self.cursor].stmts.push(stmt)
     }
 }
 
@@ -124,9 +159,9 @@ impl<'t> fmt::Display for GraphFmt<'t> {
             let _ = writeln!(f, "\t_{}: {}", n, ty.fmt_with(self.ctx),);
         }
 
-        for (n, block) in self.gr.blocks.iter().enumerate() {
+        for (n, _block) in self.gr.blocks.iter().enumerate() {
             let _ = writeln!(f, "\tbb{} {{", n);
-            let _ = f.write_str("\t\t// block contents\n\t}");
+            let _ = f.write_str("\t\t// block contents\n\t}\n");
         }
         f.write_str("}\n")
     }
@@ -160,43 +195,60 @@ enum BlockKind {
         /// The indirect branch
         ind: Option<BlockId>,
     },
-    /// A return,
+    /// A return
     Ret,
 }
 
 #[derive(Debug)]
 pub struct Local {
     pub ty: TyId,
+    pub kind: LocalKind,
 }
 
 #[derive(Debug)]
-struct Stmt {
-    lhs: Local,
-    rhs: Rvalue,
+pub enum LocalKind {
+    /// A temporary variable inserted by the compiler
+    Auto,
+    /// A user-defined variable, as a in a `let` statement or function
+    /// parameter.
+    User,
+}
+
+/// For the time being, at least, lowered statements are *all* of the form `lhs
+/// = rhs`.
+#[derive(Debug)]
+pub struct Stmt {
+    pub place: LocalId,
+    pub rhs: Rvalue,
 }
 
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
-enum Rvalue {
+pub enum Rvalue {
     BinOp(BinOp, Operand, Operand),
     UnOp(UnOp, Operand),
-    Place,
+    Const(Const),
+    Local(LocalId),
 }
 
-#[derive(Debug)]
-enum BinOp {
-    Plus,
-}
+// Consider if you really want this alias, of if you ought to either lower the
+// operators, or factor them out of ast, the way you have done with `num.rs`.
+pub type BinOp = ast::BinOpKind;
 
-#[derive(Debug)]
-enum UnOp {
-    Not,
-}
+pub type UnOp = ast::UnOpKind;
 
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
-enum Operand {
-    Const,
-    Copy(Local),
-    Move(Local),
+pub enum Operand {
+    Const(Const),
+    Copy(LocalId),
+    Move(LocalId),
+}
+
+// This type is currently a *duplicate* of ast::LiteralKind.
+#[derive(Debug)]
+pub enum Const {
+    False,
+    True,
+    Nat(num::NativeNum),
 }
