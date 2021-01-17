@@ -63,11 +63,11 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     pub fn lower_into(&mut self, gr: &mut Graph, place: LocalId, expr: &Expr) -> Result<()> {
         match &expr.data {
             ExprKind::BinOp { left, op, right } => {
-                self.lower_into_binop(place, gr, left, op, right)
+                self.lower_into_binop(gr, place, left, op, right)
             }
-            ExprKind::UnOp { op, right } => self.lower_into_unop(place, gr, op, right),
-            ExprKind::Literal(lit) => self.lower_into_literal(place, gr, lit),
-            ExprKind::Ident(ident) => self.lower_into_ident(place, gr, ident),
+            ExprKind::UnOp { op, right } => self.lower_into_unop(gr, place, op, right),
+            ExprKind::Literal(lit) => self.lower_into_literal(gr, place, lit),
+            ExprKind::Ident(ident) => self.lower_into_ident(gr, place, ident),
             ExprKind::Tuple(_) => {
                 todo!()
             }
@@ -77,7 +77,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             ExprKind::ExtArr(_) => {
                 todo!()
             }
-            ExprKind::Block(block) => self.lower_into_block(place, gr, block),
+            ExprKind::Block(block) => self.lower_into_block(gr, place, block),
             ExprKind::If {
                 cond,
                 then_branch,
@@ -99,8 +99,8 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
     fn lower_into_binop(
         &mut self,
-        place: LocalId,
         gr: &mut Graph,
+        place: LocalId,
         left: &Expr,
         op: &ast::BinOp,
         right: &Expr,
@@ -128,11 +128,12 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
     fn lower_into_unop(
         &mut self,
-        place: LocalId,
         gr: &mut Graph,
+        place: LocalId,
         op: &ast::UnOp,
         right: &Expr,
     ) -> Result<()> {
+        // NOTE this is explicitly incorrect
         let ty = gr.locals[place].ty;
         let r_place = gr.auto_local(ty);
         self.lower_into(gr, r_place, right)?;
@@ -144,7 +145,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_literal(&mut self, place: LocalId, gr: &mut Graph, lit: &Literal) -> Result<()> {
+    fn lower_into_literal(&mut self, gr: &mut Graph, place: LocalId, lit: &Literal) -> Result<()> {
         let constant = match &lit.data {
             LiteralKind::True => Const::True,
             LiteralKind::False => Const::False,
@@ -155,11 +156,11 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_ident(&mut self, _place: LocalId, _gr: &mut Graph, _ident: &Ident) -> Result<()> {
+    fn lower_into_ident(&mut self, _gr: &mut Graph, _place: LocalId, _ident: &Ident) -> Result<()> {
         Ok(())
     }
 
-    fn lower_into_block(&mut self, _place: LocalId, _gr: &mut Graph, block: &Block) -> Result<()> {
+    fn lower_into_block(&mut self, gr: &mut Graph, place: LocalId, block: &Block) -> Result<()> {
         #![allow(unused_variables)]
         let Block {
             stmts,
@@ -168,7 +169,35 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             span,
         } = block;
 
-        Ok(())
+        for stmt in stmts.iter() {
+            self.lower_stmt(gr, stmt)?;
+        }
+
+        match expr {
+            Some(expr) => self.lower_into(gr, place, expr),
+            None => {
+                // todo!();
+                Ok(())
+            }
+        }
+    }
+
+    fn lower_stmt(&mut self, gr: &mut Graph, stmt: &ast::Stmt) -> Result<()> {
+        match &stmt.data {
+            StmtKind::Print(_) => {
+                todo!();
+            }
+            StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
+                todo!()
+            }
+            StmtKind::Local { lhs, rhs } => {
+                let local = gr.user_local(self.ctx.types.intern(Type::unit()));
+                self.lower_into(gr, local, rhs)
+            }
+            StmtKind::Item(_) => {
+                todo!()
+            }
+        }
     }
 
     pub fn type_sig(&mut self, sig: &Sig, tab: &TableId) -> Result<TypedSig> {

@@ -132,6 +132,18 @@ impl Graph {
         self.alloc_new_local(ty, LocalKind::User)
     }
 
+    pub fn auto_place(&mut self, ty: TyId) -> Place {
+        Place {
+            kind: PlaceKind::Local(self.auto_local(ty)),
+        }
+    }
+
+    pub fn user_place(&mut self, ty: TyId) -> Place {
+        Place {
+            kind: PlaceKind::Local(self.user_local(ty)),
+        }
+    }
+
     pub fn push_stmt(&mut self, stmt: Stmt) {
         self.blocks[self.cursor].stmts.push(stmt)
     }
@@ -159,9 +171,12 @@ impl<'t> fmt::Display for GraphFmt<'t> {
             let _ = writeln!(f, "\t_{}: {}", n, ty.fmt_with(self.ctx),);
         }
 
-        for (n, _block) in self.gr.blocks.iter().enumerate() {
+        for (n, block) in self.gr.blocks.iter().enumerate() {
             let _ = writeln!(f, "\tbb{} {{", n);
-            let _ = f.write_str("\t\t// block contents\n\t}\n");
+            for stmt in &block.stmts {
+                let _ = writeln!(f, "\t\t{}", stmt);
+            }
+            let _ = f.write_str("\t}\n");
         }
         f.write_str("}\n")
     }
@@ -214,12 +229,40 @@ pub enum LocalKind {
     User,
 }
 
+#[derive(Debug)]
+pub struct Place {
+    pub kind: PlaceKind,
+}
+
+#[derive(Debug)]
+pub enum PlaceKind {
+    /// A local variable: a temporary or a user-defined variable.
+    Local(LocalId),
+    /// The memory hole
+    Null,
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            PlaceKind::Local(local) => write!(f, "{}", local),
+            PlaceKind::Null => f.write_str("_"),
+        }
+    }
+}
+
 /// For the time being, at least, lowered statements are *all* of the form `lhs
 /// = rhs`.
 #[derive(Debug)]
 pub struct Stmt {
     pub place: LocalId,
     pub rhs: Rvalue,
+}
+
+impl fmt::Display for Stmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} = {};", self.place, self.rhs)
+    }
 }
 
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
@@ -229,6 +272,17 @@ pub enum Rvalue {
     UnOp(UnOp, Operand),
     Const(Const),
     Local(LocalId),
+}
+
+impl fmt::Display for Rvalue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BinOp(op, left, right) => write!(f, "{} {} {}", left, op, right),
+            Self::UnOp(op, right) => write!(f, "{} {}", op, right),
+            Self::Const(val) => write!(f, "{}", val),
+            Self::Local(local) => write!(f, "{}", local),
+        }
+    }
 }
 
 // Consider if you really want this alias, of if you ought to either lower the
@@ -245,10 +299,30 @@ pub enum Operand {
     Move(LocalId),
 }
 
+impl fmt::Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Const(val) => write!(f, "const {}", val),
+            Self::Copy(local) => write!(f, "copy {}", local),
+            Self::Move(local) => write!(f, "copy {}", local),
+        }
+    }
+}
+
 // This type is currently a *duplicate* of ast::LiteralKind.
 #[derive(Debug)]
 pub enum Const {
     False,
     True,
     Nat(num::NativeNum),
+}
+
+impl fmt::Display for Const {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::False => f.write_str("false"),
+            Self::True => f.write_str("true"),
+            Self::Nat(val) => write!(f, "{}", val),
+        }
+    }
 }
