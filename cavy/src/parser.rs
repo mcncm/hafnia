@@ -39,8 +39,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &mut Context) -> std::result::Result<Ast, 
         crate::sys::exit(0);
     }
 
-    let mut ctx = Ast::new();
-    Parser::new(tokens, &mut ctx).parse().map(|_| ctx)
+    Parser::new(tokens, ctx).parse()
 }
 
 /// The maximum allowed number of arguments to a function
@@ -68,10 +67,11 @@ lazy_static! {
 }
 
 /// The main data structure used for parsing a stream of tokens
-pub struct Parser<'ctx> {
+pub struct Parser<'p, 'ctx> {
     /// We may want to parse more than one token stream in the future, so we
     /// don't want exclusive ownership of this data.
-    ctx: &'ctx mut Ast,
+    ast: Ast,
+    ctx: &'p mut Context<'ctx>,
     /// Currently active symbol table.
     table_id: TableId,
     /// The representation of the token stream is subject to change.
@@ -83,11 +83,13 @@ pub struct Parser<'ctx> {
     errors: ErrorBuf,
 }
 
-impl<'ctx> Parser<'ctx> {
-    pub fn new(tokens: Vec<Token>, ctx: &'ctx mut Ast) -> Self {
+impl<'p, 'ctx> Parser<'p, 'ctx> {
+    pub fn new(tokens: Vec<Token>, ctx: &'p mut Context<'ctx>) -> Self {
         // For now, just allocate some new table, which will be the root.
-        let table_id = ctx.new_table();
+        let mut ast = Ast::new();
+        let table_id = ast.new_table();
         Self {
+            ast,
             ctx,
             table_id,
             tokens: tokens.into_iter().peekable(),
@@ -98,12 +100,12 @@ impl<'ctx> Parser<'ctx> {
 
     /// Push a new symbol table onto the stack
     fn push_table(&mut self) {
-        self.table_id = self.ctx.child_table(self.table_id);
+        self.table_id = self.ast.child_table(self.table_id);
     }
 
     /// Pop a symbol table from the stack, unless you're at the root
     fn pop_table(&mut self) -> Option<TableId> {
-        let table = &self.ctx.tables[self.table_id];
+        let table = &self.ast.tables[self.table_id];
         table.parent.map(|parent_id| {
             let tid = self.table_id;
             self.table_id = parent_id;
@@ -148,7 +150,7 @@ impl<'ctx> Parser<'ctx> {
     /// longer work if there are multiple root tables in multiple modules one
     /// day.
     fn root_table(&self) -> bool {
-        self.ctx.tables[self.table_id].parent.is_none()
+        self.ast.tables[self.table_id].parent.is_none()
     }
 
     /// Check the next lexeme
@@ -188,7 +190,7 @@ impl<'ctx> Parser<'ctx> {
     }
 
     /// Consumes the parser
-    pub fn parse(mut self) -> std::result::Result<(), ErrorBuf> {
+    pub fn parse(mut self) -> std::result::Result<Ast, ErrorBuf> {
         let mut items = vec![];
         while let Some(_) = self.tokens.peek() {
             match self.item() {
@@ -198,7 +200,7 @@ impl<'ctx> Parser<'ctx> {
                 }
             }
         }
-        Ok(())
+        Ok(self.ast)
     }
 
     fn item(&mut self) -> Result<()> {
@@ -277,22 +279,22 @@ impl<'ctx> Parser<'ctx> {
         let span = opening.join(&body.span).unwrap();
         let func = Func {
             sig,
-            body: self.ctx.bodies.insert(body),
+            body: self.ast.bodies.insert(body),
             span,
             table: self.table_id,
         };
 
         // Insert the function into the function table
-        let func_id = self.ctx.funcs.insert(func);
+        let func_id = self.ast.funcs.insert(func);
 
         // Validate the `main` function
         if self.root_table() && self.ctx.symbols.contains("main") {
             self.validate_main(func_id)?;
-            self.ctx.entry_point = Some(func_id);
+            self.ast.entry_point = Some(func_id);
         }
 
         // Finally, insert the function id into the local symbol table.
-        match self.ctx.insert_fn(self.table_id, name.data, func_id) {
+        match self.ast.insert_fn(self.table_id, name.data, func_id) {
             // No other function with this name
             None => Ok(()),
             // A function with this name was already in the local symbol table
@@ -306,9 +308,9 @@ impl<'ctx> Parser<'ctx> {
     /// acceps no parameters, and returns no value. We'll just take an `FnId` as
     /// we hope to only call this once, so the cost of lookup should not be too great.
     fn validate_main(&mut self, func_id: FnId) -> Result<()> {
-        let func = &self.ctx.funcs[func_id];
+        let func = &self.ast.funcs[func_id];
         // Make sure there are no other entry points
-        if self.ctx.entry_point.is_some() {
+        if self.ast.entry_point.is_some() {
             let span = func.span;
             Err(self.errors.push(errors::MultipleEntryPoints { span }))?;
         }

@@ -7,6 +7,7 @@
 //! found in rustc. `ast.rs` is somewhere in between that compiler's AST and
 //! HIR, while the CFG is very similar to its MIR.
 
+use crate::context::{Context, SymbolId};
 use crate::num::Uint;
 use crate::source::Span;
 use crate::token::{Token, Unsigned};
@@ -23,7 +24,6 @@ use std::fmt;
 store_type! { FnStore : FnId -> Func }
 store_type! { BodyStore : BodyId -> Expr }
 store_type! { TableStore : TableId -> Table }
-interner_type! { SymbolStore : SymbolId -> String }
 
 /// This data structure holds the AST-level symbol tables, etc., associated with
 /// a single compilation unit. All the surrounding data structures used by
@@ -35,8 +35,6 @@ pub struct Ast {
     pub funcs: FnStore,
     /// Function bodies
     pub bodies: BodyStore,
-    /// Interned strings: identifiers etc.
-    pub symbols: SymbolStore,
     /// Symbol tables associated with scoped environments
     pub tables: TableStore,
     /// `main` function
@@ -157,7 +155,7 @@ where
 /// Interface for ast nodes that can be made from a single token. Returns
 /// Err(()) when the received token can't be transformed as the requested node.
 pub trait FromToken {
-    fn from_token(token: Token, ctx: &mut Ast) -> Result<Self, ()>
+    fn from_token(token: Token, ctx: &mut Context) -> Result<Self, ()>
     where
         Self: Sized;
 }
@@ -169,7 +167,7 @@ pub type Mod = Spanned<Vec<Item>>;
 pub type Ident = Spanned<SymbolId>;
 
 impl FromToken for Ident {
-    fn from_token(token: Token, ctx: &mut Ast) -> Result<Self, ()> {
+    fn from_token(token: Token, ctx: &mut Context<'_>) -> Result<Self, ()> {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
@@ -198,7 +196,7 @@ pub enum BinOpKind {
 }
 
 impl FromToken for BinOp {
-    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
         use crate::token::Lexeme;
         use BinOpKind::*;
         let kind = match token.lexeme {
@@ -255,7 +253,7 @@ pub enum UnOpKind {
 }
 
 impl FromToken for UnOp {
-    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Minus => UnOpKind::Minus,
@@ -300,7 +298,7 @@ pub enum LiteralKind {
 }
 
 impl FromToken for Literal {
-    fn from_token(token: Token, _ctx: &mut Ast) -> Result<Self, ()> {
+    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Nat(n) => LiteralKind::Nat(n),

@@ -23,12 +23,6 @@ pub trait Diagnostic: std::fmt::Debug {
     fn code(&self) -> &str;
 }
 
-impl<'t> CtxFmt<'t, DiagnosticFmt<'t>> for Box<dyn Diagnostic> {
-    fn fmt_with(&'t self, ctx: &'t Context) -> DiagnosticFmt<'t> {
-        DiagnosticFmt { err: self, ctx }
-    }
-}
-
 /// Like `std::error::Error`, we would often like to enjoy automatic conversion
 /// to a boxed error type.
 impl<'a, T: Diagnostic + 'a> From<T> for Box<dyn Diagnostic + 'a> {
@@ -88,6 +82,34 @@ impl ErrorBuf {
     /// Append another ErrorBuf onto this one
     pub fn append(&mut self, other: &mut ErrorBuf) {
         self.0.append(&mut other.0)
+    }
+}
+
+// ====== Display and formatting ======
+
+impl<'t> CtxFmt<'t, ErrorBufFmt<'t>> for ErrorBuf {
+    fn fmt_with(&'t self, ctx: &'t Context) -> ErrorBufFmt<'t> {
+        ErrorBufFmt { buf: self, ctx }
+    }
+}
+
+pub struct ErrorBufFmt<'d> {
+    buf: &'d ErrorBuf,
+    ctx: &'d Context<'d>,
+}
+
+impl<'d> fmt::Display for ErrorBufFmt<'d> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for err in &self.buf.0 {
+            let _ = write!(f, "{}\n", err.fmt_with(self.ctx));
+        }
+        f.write_str("")
+    }
+}
+
+impl<'t> CtxFmt<'t, DiagnosticFmt<'t>> for Box<dyn Diagnostic> {
+    fn fmt_with(&'t self, ctx: &'t Context) -> DiagnosticFmt<'t> {
+        DiagnosticFmt { err: self, ctx }
     }
 }
 

@@ -78,3 +78,22 @@ where
 {
     fn fmt_with(&'t self, ctx: &'t Context) -> Fmt;
 }
+
+/// ====== Display and formatting ======
+
+impl<'t> CtxFmt<'t, SymbolFmt<'t>> for SymbolId {
+    fn fmt_with(&'t self, ctx: &'t Context) -> SymbolFmt<'t> {
+        SymbolFmt { symb: self, ctx }
+    }
+}
+
+pub struct SymbolFmt<'t> {
+    pub symb: &'t SymbolId,
+    pub ctx: &'t Context<'t>,
+}
+
+impl<'t> fmt::Display for SymbolFmt<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.ctx.symbols[*self.symb])
+    }
+}

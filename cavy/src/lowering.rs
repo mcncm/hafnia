@@ -4,7 +4,7 @@ use crate::{
     source::Span,
 };
 // use crate::functions::{Func, UserFunc};
-use crate::context::Context;
+use crate::context::{Context, SymbolId};
 use crate::{
     mir::{self, *},
     store::Index,
@@ -208,13 +208,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.gr.push_stmt(self.cursor, stmt);
     }
 
+    fn error<T: 'static + Diagnostic>(&mut self, err: T) -> Result<()> {
+        Err(self.errors.push(err))
+    }
+
     fn expect_type(&mut self, expected: TyId, actual: TyId, span: Span) -> Result<()> {
         if actual != expected {
-            Err(self.errors.push(errors::ExpectedType {
+            self.error(errors::ExpectedType {
                 span,
                 expected,
                 actual,
-            }))?;
+            })?
         }
         Ok(())
     }
@@ -324,11 +328,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     && ty != self.ctx.common.u16
                     && ty != self.ctx.common.u32
                 {
-                    Err(self.errors.push(errors::ExpectedType {
+                    self.error(errors::ExpectedType {
                         span: lit.span,
                         expected: ty,
                         actual: self.ctx.common.u32,
-                    }))?;
+                    })?;
                 }
                 Const::Nat(*n)
             }
@@ -338,7 +342,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_ident(&mut self, _place: LocalId, _ident: &Ident) -> Result<()> {
+    fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Result<()> {
+        let rhs = match self.st.get(&ident.data) {
+            Some(local) => Rvalue::Local(*local),
+            None => {
+                return self.error(errors::UnboundName {
+                    span: ident.span,
+                    name: ident.data,
+                });
+            }
+        };
+        self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
     }
 
@@ -398,14 +412,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 /// even a separate crate.
 mod typecheck {
     use super::*;
-
-    /// Do your best to guess the type of an expression. This isn't a great doc
-    /// comment, and it's not a great function.
-    #[allow(unused_variables)]
-    pub fn guess_type<'a>(ctx: &mut Context<'a>, expr: &Expr, tab: &TableId) -> TyId {
-        ctx.types.intern(Type::unit())
-    }
-
     /// Resolve an annotation to a type, given a table (scope) in which it
     /// should appear. This should eventually be farmed out to a type inference
     /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
@@ -472,6 +478,7 @@ mod typecheck {
 mod errors {
     use crate::ast::*;
     use crate::cavy_errors::Diagnostic;
+    use crate::context::SymbolId;
     use crate::source::Span;
     use crate::types::TyId;
     use cavy_macros::Diagnostic;
@@ -542,6 +549,7 @@ mod errors {
     pub struct UnboundName {
         #[msg = "name `{name}` is not bound"]
         pub span: Span,
-        pub name: String,
+        #[ctx]
+        pub name: SymbolId,
     }
 }

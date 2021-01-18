@@ -161,9 +161,7 @@ fn main() {
         Some(path) => {
             let _object_path = get_object_path(&argmatches);
             let _object_code = compile::compile(path, &mut ctx).unwrap_or_else(|errs| {
-                for err in errs.0 {
-                    eprintln!("{}", err.fmt_with(&ctx))
-                }
+                eprintln!("{}", errs.fmt_with(&ctx));
                 sys::exit(1);
             });
             // emit_object_code(object_code, object_path)
