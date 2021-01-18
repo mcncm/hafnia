@@ -479,7 +479,6 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     fn if_expr(&mut self) -> Result<Expr> {
         let opening = self.token()?.span;
-        // Here we assume that
         let cond = Box::new(self.expression()?);
         let then_branch = Box::new(self.block()?);
 
@@ -488,14 +487,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         if self.match_lexeme(Lexeme::Else) {
             let block = self.block()?;
             span = opening.join(&block.span).unwrap();
-            else_branch = Some(Box::new(self.block()?));
+            else_branch = Some(Box::new(block));
         } else {
             span = opening.join(&then_branch.span).unwrap();
         }
         let kind = ExprKind::If {
             cond,
-            then_branch,
-            else_branch,
+            dir: then_branch,
+            ind: else_branch,
         };
 
         Ok(self.node(kind, span))
@@ -928,6 +927,7 @@ mod errors {
 mod tests {
     use super::*;
     use crate::ast::ExprKind::{self, *};
+    use crate::session::Config;
     use crate::token::Token;
     use Lexeme::*;
 
@@ -1003,7 +1003,8 @@ mod tests {
         // If there's only a list of lexemes, just try to parse it!
         ([$($lexeme:expr),+]) => {
             let tokens = vec![$(token($lexeme)),+];
-            let mut ctx = Ast::new();
+            let conf = Config::default();
+            let mut ctx = Context::new(&conf);
             let mut parser = Parser::new(tokens, &mut ctx);
             parser.expression().unwrap();
         };
@@ -1011,7 +1012,8 @@ mod tests {
         // against the S-expression it contains.
         ([$($lexeme:expr),+], $($s_expr:tt)+) => {
             let tokens = vec![$(token($lexeme)),+];
-            let mut ctx = Ast::new();
+            let conf = Config::default();
+            let mut ctx = Context::new(&conf);
             let mut parser = Parser::new(tokens, &mut ctx);
             let ast = parser.expression().unwrap();
             test_s_expr!(ast, $($s_expr)+);

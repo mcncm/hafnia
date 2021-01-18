@@ -100,9 +100,13 @@ pub struct ErrorBufFmt<'d> {
 
 impl<'d> fmt::Display for ErrorBufFmt<'d> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for err in &self.buf.0 {
-            let _ = write!(f, "{}\n", err.fmt_with(self.ctx));
-        }
+        self.buf.0.iter().fold(true, |first, err| {
+            if !first {
+                let _ = f.write_str("\n");
+            }
+            let _ = write!(f, "{}", err.fmt_with(self.ctx));
+            false
+        });
         f.write_str("")
     }
 }
@@ -125,7 +129,7 @@ impl<'d> fmt::Display for DiagnosticFmt<'d> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: {}\n{}",
+            "{}: {}\n{}\n",
             self.err.code(),
             self.err.message(self.ctx),
             self.format_span(self.err.main_span()),

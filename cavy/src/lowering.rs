@@ -78,13 +78,20 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         let params = sig
             .params
             .iter()
-            .map(|p| typecheck::resolve_type(&mut self.ctx, &p.ty, tab))
+            .map(|p| {
+                let ty = typecheck::resolve_type(&mut self.ctx, &p.ty, tab);
+                Ok((p.name.data, ty?))
+            })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let output = match &sig.output {
             None => self.ctx.types.intern(Type::unit()),
             Some(annot) => typecheck::resolve_type(&mut self.ctx, annot, tab)?,
         };
-        let sig = TypedSig { params, output };
+        let sig = TypedSig {
+            params,
+            output,
+            span: sig.span,
+        };
         Ok(sig)
     }
 }
@@ -174,9 +181,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         sig: &'mir TypedSig,
         table: TableId,
     ) -> Self {
-        let TypedSig { params, output } = sig;
+        let TypedSig { params, output, .. } = sig;
 
         let mut gr = Graph::new();
+        let mut st = SymbolTable::new();
         let cursor = gr.entry_block;
 
         gr.locals.insert(Local {
@@ -184,28 +192,24 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             kind: LocalKind::User,
         });
 
-        for param in params {
-            gr.locals.insert(Local {
-                ty: *param,
+        for (param, ty) in params {
+            let local = gr.locals.insert(Local {
+                ty: *ty,
                 kind: LocalKind::User,
             });
+            st.insert(*param, local);
         }
 
         Self {
             ctx,
             body,
             gr,
-            st: SymbolTable::new(),
+            st,
             table,
             cursor,
             sig,
             errors: ErrorBuf::new(),
         }
-    }
-
-    #[inline]
-    pub fn push_stmt(&mut self, stmt: mir::Stmt) {
-        self.gr.push_stmt(self.cursor, stmt);
     }
 
     fn error<T: 'static + Diagnostic>(&mut self, err: T) -> Result<()> {
@@ -222,6 +226,35 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
         Ok(())
     }
+
+    // === Block-manipulating methods ===
+
+    pub fn push_stmt(&mut self, stmt: mir::Stmt) {
+        self.gr.push_stmt(self.cursor, stmt);
+    }
+
+    pub fn new_block(&mut self) -> BlockId {
+        self.gr.new_block()
+    }
+
+    pub fn set_terminator(&mut self, kind: BlockKind) {
+        self.gr.blocks[self.cursor].kind = kind;
+    }
+
+    /// Temporarily work within the environment of a new goto block
+    fn with_goto<T, F>(&mut self, block: BlockId, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut Self) -> Result<T>,
+    {
+        let old_block = self.cursor;
+        self.cursor = self.gr.goto_block(block);
+        f(self).and_then(|v| {
+            self.cursor = old_block;
+            Ok(v)
+        })
+    }
+
+    // === Lowering methods ===
 
     pub fn lower(mut self) -> std::result::Result<Graph, ErrorBuf> {
         let place = self.gr.return_site();
@@ -251,13 +284,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 todo!()
             }
             ExprKind::Block(block) => self.lower_into_block(place, block),
-            ExprKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                todo!()
-            }
+            ExprKind::If { cond, dir, ind } => self.lower_into_if(place, cond, dir, ind),
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
@@ -290,9 +317,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             return Err(e);
         }
 
-        // FIXME for now, pretend that all operations are `Copy`.
-        let l_op = Operand::Copy(l_place);
-        let r_op = Operand::Copy(r_place);
+        let l_op = Operand::Place(l_place);
+        let r_op = Operand::Place(r_place);
         let rhs = Rvalue::BinOp(op.data, l_op, r_op);
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
@@ -304,8 +330,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let r_place = self.gr.auto_local(ty);
         self.lower_into(r_place, right)?;
 
-        // FIXME for now, pretend that all operations are `Copy`.
-        let r_op = Operand::Copy(r_place);
+        let r_op = Operand::Place(r_place);
         let rhs = Rvalue::UnOp(op.data, r_op);
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
@@ -344,7 +369,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Result<()> {
         let rhs = match self.st.get(&ident.data) {
-            Some(local) => Rvalue::Local(*local),
+            // FIXME for now, pretend that all operations are `Copy`.
+            Some(local) => Rvalue::Copy(*local),
             None => {
                 return self.error(errors::UnboundName {
                     span: ident.span,
@@ -356,6 +382,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Result<()> {
         #![allow(unused_variables)]
         let Block {
@@ -377,6 +404,54 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             Some(expr) => self.lower_into(place, expr),
             None => Ok(()),
         }
+    }
+
+    fn lower_into_if(
+        &mut self,
+        place: LocalId,
+        cond: &Expr,
+        dir: &Block,
+        ind: &Option<Box<Block>>,
+    ) -> Result<()> {
+        // TODO: `lower_into`, and all the `lower_into_` functions, should
+        // return a `Result<LocalId>`, where on success they echo back the
+        // location they were lowered into. It would make this all a lot neater.
+        // Could expect to get Ok(cond), then unwrap in the same match as `dir`
+        // and `ind`.
+        //
+        // TODO: Again, I'm cheating by trying to fit this into a
+        // `bool`, when it could also be a `?bool`.
+        let cond_place = self.gr.auto_local(self.ctx.common.bool);
+        let cond = self.lower_into(cond_place, cond);
+        let tail_block = self.new_block();
+
+        // Direct branch
+        let dir = self.with_goto(tail_block, |this| {
+            this.lower_into_block(place, dir)?;
+            Ok(this.cursor)
+        });
+
+        // Indirect branch
+        let ind = match ind {
+            Some(ind) => self.with_goto(tail_block, |this| {
+                this.lower_into_block(place, ind)?;
+                Ok(this.cursor)
+            }),
+            None => Ok(tail_block),
+        };
+
+        let (dir, ind, cond) = match (dir, ind, cond) {
+            (Ok(dir), Ok(ind), Ok(cond)) => Ok((dir, ind, cond)),
+            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(err),
+        }?;
+
+        let switch = BlockKind::Switch {
+            cond: cond_place,
+            blks: vec![dir, ind],
+        };
+        self.set_terminator(switch);
+        self.cursor = tail_block;
+        Ok(())
     }
 
     #[allow(unused_variables)]

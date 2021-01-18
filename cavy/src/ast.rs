@@ -345,8 +345,8 @@ pub enum ExprKind {
     Block(Box<Block>),
     If {
         cond: Box<Expr>,
-        then_branch: Box<Block>,
-        else_branch: Option<Box<Block>>,
+        dir: Box<Block>,
+        ind: Option<Box<Block>>,
     },
     For {
         bind: Box<LValue>,
