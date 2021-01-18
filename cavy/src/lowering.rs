@@ -1,5 +1,8 @@
-use crate::ast::{self, *};
 use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
+use crate::{
+    ast::{self, *},
+    source::Span,
+};
 // use crate::functions::{Func, UserFunc};
 use crate::context::Context;
 use crate::{
@@ -205,6 +208,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.gr.push_stmt(self.cursor, stmt);
     }
 
+    fn expect_type(&mut self, expected: TyId, actual: TyId, span: Span) -> Result<()> {
+        if actual != expected {
+            Err(self.errors.push(errors::ExpectedType {
+                span,
+                expected,
+                actual,
+            }))?;
+        }
+        Ok(())
+    }
+
     pub fn lower(mut self) -> std::result::Result<Graph, ErrorBuf> {
         let place = self.gr.return_site();
         let _ = self.lower_into(place, self.body);
@@ -294,10 +308,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_literal(&mut self, place: LocalId, lit: &Literal) -> Result<()> {
+        let ty = self.gr.locals[place].ty;
         let constant = match &lit.data {
-            LiteralKind::True => Const::True,
-            LiteralKind::False => Const::False,
-            LiteralKind::Nat(n) => Const::Nat(*n),
+            LiteralKind::True => {
+                self.expect_type(ty, self.ctx.common.bool, lit.span)?;
+                Const::True
+            }
+            LiteralKind::False => {
+                self.expect_type(ty, self.ctx.common.bool, lit.span)?;
+                Const::False
+            }
+            LiteralKind::Nat(n) => {
+                if ty != self.ctx.common.u4
+                    && ty != self.ctx.common.u8
+                    && ty != self.ctx.common.u16
+                    && ty != self.ctx.common.u32
+                {
+                    Err(self.errors.push(errors::ExpectedType {
+                        span: lit.span,
+                        expected: ty,
+                        actual: self.ctx.common.u32,
+                    }))?;
+                }
+                Const::Nat(*n)
+            }
         };
         let rhs = Rvalue::Const(constant);
         self.push_stmt(mir::Stmt { place, rhs });
@@ -317,16 +351,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             span,
         } = block;
 
-        for stmt in stmts.iter() {
-            self.lower_stmt(stmt)?;
+        let (_, errors): (Vec<_>, Vec<_>) = stmts
+            .iter()
+            .map(|stmt| self.lower_stmt(stmt))
+            .partition(Result::is_ok);
+        if let Some(err) = errors.into_iter().next() {
+            err?;
         }
 
         match expr {
             Some(expr) => self.lower_into(place, expr),
-            None => {
-                // todo!();
-                Ok(())
-            }
+            None => Ok(()),
         }
     }
 
@@ -337,7 +372,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 todo!()
             }
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
-                todo!()
+                // ...Make something up, for now? But in fact, you'll have to do
+                // some kind of "weak"/"ad hoc" type inference to get this type.
+                let ty = self.ctx.types.intern(Type::unit());
+                let place = self.gr.auto_local(ty);
+                self.lower_into(place, expr)
             }
             StmtKind::Local { lhs, ty, rhs } => {
                 let ty = ty.as_ref().unwrap(); // For now, crash without annotation
@@ -349,9 +388,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 }
                 Ok(())
             }
-            StmtKind::Item(_) => {
-                todo!()
-            }
         }
     }
 }
@@ -362,6 +398,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 /// even a separate crate.
 mod typecheck {
     use super::*;
+
+    /// Do your best to guess the type of an expression. This isn't a great doc
+    /// comment, and it's not a great function.
+    #[allow(unused_variables)]
+    pub fn guess_type<'a>(ctx: &mut Context<'a>, expr: &Expr, tab: &TableId) -> TyId {
+        ctx.types.intern(Type::unit())
+    }
+
     /// Resolve an annotation to a type, given a table (scope) in which it
     /// should appear. This should eventually be farmed out to a type inference
     /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
@@ -429,8 +473,20 @@ mod errors {
     use crate::ast::*;
     use crate::cavy_errors::Diagnostic;
     use crate::source::Span;
-    use crate::types::Type;
+    use crate::types::TyId;
     use cavy_macros::Diagnostic;
+
+    // This will be a stand-in catch-all error for when a specific type is
+    // expected and not found.
+    #[derive(Diagnostic)]
+    pub struct ExpectedType {
+        #[msg = "expected type `{expected}`, found `{actual}`"]
+        pub span: Span,
+        #[ctx]
+        pub expected: TyId,
+        #[ctx]
+        pub actual: TyId,
+    }
 
     #[derive(Diagnostic)]
     pub struct BinOpTypeError {
@@ -439,9 +495,11 @@ mod errors {
         /// The operator
         pub kind: BinOpKind,
         /// The actual left operand type
-        pub left: Type,
+        #[ctx]
+        pub left: TyId,
         /// The actual right operand type
-        pub right: Type,
+        #[ctx]
+        pub right: TyId,
     }
 
     #[derive(Diagnostic)]
@@ -451,7 +509,8 @@ mod errors {
         /// The operator
         pub kind: UnOpKind,
         /// The actual right operand type
-        pub right: Type,
+        #[ctx]
+        pub right: TyId,
     }
 
     #[derive(Diagnostic)]
@@ -459,28 +518,24 @@ mod errors {
         #[msg = "pattern fails to match type `{actual}`"]
         pub span: Span,
         /// The type
-        pub actual: Type,
-    }
-
-    #[derive(Diagnostic)]
-    pub struct NameCollision {
-        #[msg = "name `{name}` was previously bound"]
-        pub span: Span,
-        pub name: String,
+        #[ctx]
+        pub actual: TyId,
     }
 
     #[derive(Diagnostic)]
     pub struct HeterogeneousArray {
         #[msg = "element's type differs from `{ty}`"]
         pub span: Span,
-        pub ty: Type,
+        #[ctx]
+        pub ty: TyId,
     }
 
     #[derive(Diagnostic)]
     pub struct ExpectedSizeType {
         #[msg = "expected size type, found `{ty}`"]
         pub span: Span,
-        pub ty: Type,
+        #[ctx]
+        pub ty: TyId,
     }
 
     #[derive(Diagnostic)]

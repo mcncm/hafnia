@@ -11,7 +11,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 /// Builds a Cavy error struct implementing Diagnostic. This is supposed to
 /// resemble rustc's `SessionDiagnostic` in both form and function.
-#[proc_macro_derive(Diagnostic, attributes(msg))]
+#[proc_macro_derive(Diagnostic, attributes(msg, ctx))]
 pub fn diagnostic(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     impl_cavy_error_macro(input)
@@ -22,7 +22,8 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     let DiagnosticData {
         main_span,
         msg,
-        fmt_fields,
+        ctx_fields,
+        dis_fields,
     } = DiagnosticData::new(&ast);
 
     let expanded = quote! {
@@ -33,11 +34,16 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
         }
 
         impl Diagnostic for #name {
-            fn message(&self) -> String {
-                format!(#msg, #(#fmt_fields = self.#fmt_fields,)*)
+            /// Can I do this without making an owned string?
+            fn message(&self, ctx: &crate::context::Context) -> String {
+                format!(
+                    #msg,
+                    #(#dis_fields = self.#dis_fields,)*
+                    #(#ctx_fields = crate::context::CtxFmt::fmt_with(&self.#ctx_fields, &ctx),)*
+                )
             }
 
-            fn main_span(&self) -> &Span {
+            fn main_span(&self) -> &crate::source::Span {
                 &self.#main_span
             }
 
@@ -58,8 +64,15 @@ struct DiagnosticData<'ast> {
     /// The main span that should be reported with the error
     #[allow(unused)]
     main_span: &'ast syn::Ident,
-    /// Fields that are referenced in the format string
-    fmt_fields: Vec<&'ast syn::Ident>,
+    /// Fields that are referenced in the format string and must be formatted with a context
+    ctx_fields: Vec<&'ast syn::Ident>,
+    /// Fields that are referenced in the format string and can be formatted with `fmt::Display`
+    dis_fields: Vec<&'ast syn::Ident>,
+}
+
+/// Check if a given field has a helper attribute.
+fn has_attr(field: &syn::Field, expected: &str) -> bool {
+    field.attrs.iter().any(|attr| attr.path.is_ident(expected))
 }
 
 impl<'ast> DiagnosticData<'ast> {
@@ -79,7 +92,11 @@ impl<'ast> DiagnosticData<'ast> {
             panic!("tried to derive diagnostic on a malformed struct")
         };
 
-        // Find the main span and message from among the fields
+        // Find the main span and message from among the fields. The main span
+        // must be annotated with the "msg" helper attribute.
+        //
+        // NOTE: Is there a simpler way to do this, like with
+        // `attr.path.is_ident` above?
         for field in fields.iter() {
             for attr in &field.attrs {
                 let meta = attr
@@ -98,7 +115,7 @@ impl<'ast> DiagnosticData<'ast> {
                             }
                         }
                     }
-                    _ => panic!("unexpected attribute in diagnostic"),
+                    _ => {} // panic!("unexpected attribute in diagnostic"),
                 };
             }
         }
@@ -107,29 +124,41 @@ impl<'ast> DiagnosticData<'ast> {
         let main_span = main_span.unwrap();
         // Get a set of &str naming the fields to be formatted
         let fmt_fields = Self::find_fmt_fields(&msg);
-        // Now we iterate through the fields again, this time in order to shadow
-        // fmt_fields from a HashSet<&str> to a Vec<syn::Ident> of the actual
-        // struct members.
-        let fmt_fields = fields
+        // Now we iterate through the fields again, this time in order to split
+        // up the `HashSet<&str>` to a pair of `Vec<syn::Ident>` of the actual
+        // struct members. The first vector consists of the format fields that
+        // need to be formatted with a context; the second is those that simply
+        // implement Display.
+        let (ctx_fields, dis_fields): (Vec<_>, Vec<_>) = fields
             .iter()
-            .filter_map(|field| {
+            // Take only the ones that were in the `fmt_fields` list
+            .filter(|field| {
                 let ident = field.ident.as_ref().unwrap();
-                if fmt_fields.contains(ident.to_string().as_str()) {
-                    Some(ident)
-                } else {
-                    None
-                }
+                fmt_fields.contains(ident.to_string().as_str())
             })
+            // And split them up according to whether or not they must be
+            // formatted with a context
+            .partition(|field| has_attr(field, "ctx"));
+
+        // Can I make this *at all* less repetitive?
+        let ctx_fields = ctx_fields
+            .iter()
+            .map(|field| field.ident.as_ref().unwrap())
+            .collect();
+        let dis_fields = dis_fields
+            .iter()
+            .map(|field| field.ident.as_ref().unwrap())
             .collect();
 
         Self {
             main_span,
             msg,
-            fmt_fields,
+            ctx_fields,
+            dis_fields,
         }
     }
 
-    /// Returns the set of all the fields that are formatted.
+    /// Parses the message for set of all the fields that are to be formatted
     ///
     /// There are some ownership issues in here. I’d like to return a
     /// HashSet<&str>, if possible.

@@ -147,8 +147,7 @@ impl<'t> fmt::Display for GraphFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let _ = f.write_str("function {\n");
         for (n, local) in self.gr.locals.iter().enumerate() {
-            let ty = &self.ctx.types[local.ty];
-            let _ = writeln!(f, "\t_{}: {}", n, ty.fmt_with(self.ctx),);
+            let _ = writeln!(f, "\t_{}: {}", n, local.ty.fmt_with(self.ctx));
         }
 
         for (n, block) in self.gr.blocks.iter().enumerate() {

@@ -53,7 +53,7 @@ impl Type {
 
 /// We need context data to format a `Graph` struct, at least to resolve the
 /// types and symbols.
-impl<'t> CtxFmt<'t, TypeFmt<'t>> for Type {
+impl<'t> CtxFmt<'t, TypeFmt<'t>> for TyId {
     fn fmt_with(&'t self, ctx: &'t Context) -> TypeFmt<'t> {
         TypeFmt { ty: self, ctx }
     }
@@ -61,13 +61,13 @@ impl<'t> CtxFmt<'t, TypeFmt<'t>> for Type {
 
 /// A wrapper type for formatting Mir with a context.
 pub struct TypeFmt<'t> {
-    pub ty: &'t Type,
+    pub ty: &'t TyId,
     pub ctx: &'t Context<'t>,
 }
 
 impl<'t> fmt::Display for TypeFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.ty {
+        match &self.ctx.types[*self.ty] {
             Type::Bool => f.write_str("bool"),
             Type::Uint(u) => write!(f, "{}", u),
             Type::Q_Bool => f.write_str("?bool"),
@@ -75,7 +75,6 @@ impl<'t> fmt::Display for TypeFmt<'t> {
             Type::Tuple(tys) => {
                 let _ = f.write_str("(");
                 for (n, ty) in tys.iter().enumerate() {
-                    let ty = &self.ctx.types[*ty];
                     if n == tys.len() - 1 {
                         let _ = write!(f, "{}", ty.fmt_with(self.ctx));
                     } else {

@@ -436,7 +436,6 @@ pub enum StmtKind {
         ty: Option<Annot>,
         rhs: Option<Box<Expr>>,
     },
-    Item(Item),
 }
 
 /// An item. For now this wrapper doesn't do anything, but it does make this AST

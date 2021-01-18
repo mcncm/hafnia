@@ -14,7 +14,7 @@ pub trait Diagnostic: std::fmt::Debug {
     }
 
     /// Formats the leading line of the error, warning, or lint message.
-    fn message(&self) -> String;
+    fn message(&self, ctx: &Context) -> String;
 
     /// Retrieves the main Span corresponding to the error
     fn main_span(&self) -> &Span;
@@ -105,7 +105,7 @@ impl<'d> fmt::Display for DiagnosticFmt<'d> {
             f,
             "{}: {}\n{}",
             self.err.code(),
-            self.err.message(),
+            self.err.message(self.ctx),
             self.format_span(self.err.main_span()),
         )
     }
