@@ -3,6 +3,7 @@
 //! all names resolved.
 
 use crate::ast::{self, Ast, FnId};
+// use crate::functions::{Func, UserFunc};
 use crate::store_type;
 use crate::{
     context::{Context, CtxFmt},
@@ -71,8 +72,6 @@ pub struct TypedSig {
 /// The control-flow graph of a function
 #[derive(Debug)]
 pub struct Graph {
-    /// The number of function arguments
-    pub args: usize,
     /// The variables used within the CFG. This also contains the parameter and
     /// return values.
     pub locals: LocalStore,
@@ -80,36 +79,18 @@ pub struct Graph {
     pub blocks: BlockStore,
     /// The first block of the Cfg
     pub entry_block: BlockId,
-    /// The active block
-    cursor: BlockId,
 }
 
 impl Graph {
     /// Create a graph with a single empty block
-    pub fn new(TypedSig { params, output }: TypedSig) -> Self {
-        let mut locals = LocalStore::new();
-
-        let args = params.len();
-        locals.insert(Local {
-            ty: output,
-            kind: LocalKind::User,
-        });
-
-        for param in params {
-            locals.insert(Local {
-                ty: param,
-                kind: LocalKind::User,
-            });
-        }
-
+    pub fn new() -> Self {
+        let locals = LocalStore::new();
         let mut blocks = BlockStore::new();
-        let block = blocks.insert(BasicBlock::new());
+        let entry_block = blocks.insert(BasicBlock::new());
         Self {
-            args,
             locals,
             blocks,
-            entry_block: block,
-            cursor: block,
+            entry_block,
         }
     }
 
@@ -144,8 +125,8 @@ impl Graph {
         }
     }
 
-    pub fn push_stmt(&mut self, stmt: Stmt) {
-        self.blocks[self.cursor].stmts.push(stmt)
+    pub fn push_stmt(&mut self, block: BlockId, stmt: Stmt) {
+        self.blocks[block].stmts.push(stmt)
     }
 }
 
@@ -184,8 +165,8 @@ impl<'t> fmt::Display for GraphFmt<'t> {
 
 #[derive(Debug)]
 pub struct BasicBlock {
-    stmts: Vec<Stmt>,
-    kind: BlockKind,
+    pub stmts: Vec<Stmt>,
+    pub kind: BlockKind,
 }
 
 impl BasicBlock {
@@ -199,7 +180,7 @@ impl BasicBlock {
 
 /// This specifies where the block points to next: either it
 #[derive(Debug)]
-enum BlockKind {
+pub enum BlockKind {
     /// This connects directly into another basic block (implying that this
     /// block has at least two parents)
     Goto(BlockId),

@@ -141,13 +141,6 @@ impl<'ctx> Parser<'ctx> {
         Expr { data: kind, span }
     }
 
-    /// A convenience function for inserting locals, since the parser is
-    /// tracking the symbol table stack.
-    #[inline]
-    fn insert_local(&mut self, symb: SymbolId, ty: Option<Annot>) -> Option<TableEntry> {
-        self.ctx.insert_local(self.table_id, symb, ty)
-    }
-
     /// Check if you're in a root table.
     ///
     /// NOTE: This check is currently being used to validate `main` by ensuring
@@ -385,7 +378,7 @@ impl<'ctx> Parser<'ctx> {
     /// let x = 3;
     /// ```
     fn local(&mut self) -> Result<Stmt> {
-        self.next();
+        let opening = self.next().unwrap().span;
         // For now, only admit symbols on the lhs.
         let lhs = Box::new(self.consume_ident()?);
         let ty = if self.match_lexeme(Colon) {
@@ -394,14 +387,19 @@ impl<'ctx> Parser<'ctx> {
             None
         };
         self.consume(Lexeme::Equal)?;
-        let rhs = Box::new(self.expression()?);
-        self.consume(Lexeme::Semicolon)?;
-        // Note: disallow shadowing for now
-        if self.ctx.insert_local(self.table_id, lhs.data, ty).is_some() {
-            Err(self.errors.push(errors::ShadowedLocal { span: lhs.span }))?;
-        }
+        let (rhs, semi) = match self.peek_lexeme() {
+            Some(Semicolon) => (None, self.token().unwrap().span),
+            _ => {
+                let rhs = Some(Box::new(self.expression()?));
+                (rhs, self.consume(Lexeme::Semicolon)?.span)
+            }
+        };
 
-        Ok(StmtKind::Local { lhs, rhs }.into())
+        let stmt = Stmt {
+            data: StmtKind::Local { lhs, ty, rhs },
+            span: opening.join(&semi).unwrap(),
+        };
+        Ok(stmt)
     }
 
     /// Recursively build an LValue

@@ -84,6 +84,11 @@ impl ErrorBuf {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Append another ErrorBuf onto this one
+    pub fn append(&mut self, other: &mut ErrorBuf) {
+        self.0.append(&mut other.0)
+    }
 }
 
 pub struct DiagnosticFmt<'d> {

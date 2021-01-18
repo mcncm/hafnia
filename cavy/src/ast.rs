@@ -54,15 +54,6 @@ impl Ast {
         self.tables[tab].funcs.insert(symb, func)
     }
 
-    pub fn insert_local(
-        &mut self,
-        tab: TableId,
-        symb: SymbolId,
-        ty: Option<Annot>,
-    ) -> Option<TableEntry> {
-        self.tables[tab].locals.insert(symb, TableEntry::Var(ty))
-    }
-
     /// Create a new table without parent
     pub fn new_table(&mut self) -> TableId {
         self.tables.insert(Table::new())
@@ -81,10 +72,6 @@ impl Ast {
 pub struct Table {
     /// The enclosing scope, if there is any
     pub parent: Option<TableId>,
-    /// Locals (`let` bindings) in this scope. Note that these could possibly
-    /// point to functions, although there is a separate table of functions
-    /// defined in this scope.
-    locals: HashMap<SymbolId, TableEntry>,
     /// Functions in this scope. While locals should also be able to "shadow"
     /// functions, and it will one day be possible to define lambda expressions,
     /// this table contains those functions defined with the `fn` keyword. They
@@ -100,7 +87,6 @@ impl Table {
     fn child(table: TableId) -> Self {
         Table {
             parent: Some(table),
-            locals: HashMap::new(),
             funcs: HashMap::new(),
         }
     }
@@ -119,16 +105,11 @@ impl Table {
         }
     }
 
-    fn get_inner(&self, symb: &SymbolId) -> Option<&TableEntry> {
+    fn get_inner(&self, _symb: &SymbolId) -> Option<&TableEntry> {
         // We'll try this: retrieve a local, if one exists, with higher
         // precedence; if there is none, check for a fn item.
-        if let Some(entry) = self.locals.get(symb) {
-            Some(entry)
-        // } else if let Some(fn_id) = self.funcs.get(symb) {
-        //     Some(TableEntry::Func(fn_id.clone()))
-        } else {
-            None
-        }
+        // FIXME
+        None
     }
 }
 
@@ -415,7 +396,8 @@ pub struct Block {
     pub stmts: Vec<Stmt>,
     /// The terminal expression, if there is one
     pub expr: Option<Box<Expr>>,
-    /// The id of the associated symbol table
+    /// The id of the table containing item definitions in
+    /// this block scope.
     pub table: TableId,
     pub span: Span,
 }
@@ -451,7 +433,8 @@ pub enum StmtKind {
         /// For now, though, we're going to ignore that possibility, disable
         /// destructuring, and allow only a symbol on the lhs.
         lhs: Box<Ident>,
-        rhs: Box<Expr>,
+        ty: Option<Annot>,
+        rhs: Option<Box<Expr>>,
     },
     Item(Item),
 }

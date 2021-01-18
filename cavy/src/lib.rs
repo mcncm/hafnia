@@ -23,7 +23,7 @@ pub mod source;
 pub mod store;
 pub mod sys;
 // pub mod target;
-pub mod token;
 pub mod lowering;
+pub mod token;
 pub mod types;
 pub mod values;
