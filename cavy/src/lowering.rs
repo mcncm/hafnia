@@ -19,7 +19,8 @@ pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> std::result::Result<Mir
 pub struct MirBuilder<'mir, 'ctx> {
     ast: &'mir Ast,
     /// The context must be mutable to add types to its interner. If type
-    /// checking and inference becomes a separate, earlier phase, this will no longer be necessary.
+    /// checking and inference becomes a separate, earlier phase, this will no
+    /// longer be necessary.
     ctx: &'mir mut Context<'ctx>,
     mir: Mir,
     pub errors: ErrorBuf,
@@ -49,7 +50,8 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
                     continue;
                 }
             };
-            let builder = GraphBuilder::new(self.ctx, body, &sig);
+            // The table argument serves to pass in the function's environment.
+            let builder = GraphBuilder::new(self.ctx, body, &sig, func.table);
             let graph = match builder.lower() {
                 Ok(gr) => gr,
                 Err(mut errs) => {
@@ -84,17 +86,91 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     }
 }
 
+// ====== Graph building ======
+
+/// A helper struct for tracking the reified referents (as `LocalId`s) of
+/// symbols. It's just a vector of maps, with a pointer to the currently active
+/// one. This should be a little less expensive than a linked list, since we
+/// need only clear a table and move back the cursor to pop a table.
+///
+/// Note: nobody is stopping you from trying to pop beyond the first table. such
+/// underflow would be a bug; therefore you must be careful always to call
+/// `push_table` and `pop_table` in pairs.
+struct SymbolTable {
+    tables: Vec<HashMap<SymbolId, LocalId>>,
+    current: usize,
+}
+
+impl SymbolTable {
+    fn new() -> Self {
+        Self {
+            tables: vec![HashMap::new()],
+            current: 0,
+        }
+    }
+
+    fn push_table(&mut self) {
+        if self.current == self.tables.len() - 1 {
+            self.tables.push(HashMap::new());
+        }
+        self.current += 1;
+    }
+
+    fn pop_table(&mut self) {
+        // NOTE: if you're clever, you won't even have to clear this.
+        self.tables[self.current].clear();
+        self.current -= 1;
+    }
+
+    /// NOTE: this is actually incorrect, because of how it should interact with function scope.
+    fn get(&self, item: &SymbolId) -> Option<&LocalId> {
+        let mut cursor = self.current;
+        loop {
+            if let local @ Some(_) = self.tables[cursor].get(&item) {
+                return local;
+            } else {
+                if cursor > 0 {
+                    cursor -= 1;
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+
+    /// Always insert in the top table
+    fn insert(&mut self, k: SymbolId, v: LocalId) -> Option<LocalId> {
+        self.tables[self.current].insert(k, v)
+    }
+}
+
 pub struct GraphBuilder<'mir, 'ctx> {
-    ctx: &'mir Context<'ctx>,
+    /// The context must be mutable to add types to its interner. If type
+    /// checking and inference becomes a separate, earlier phase, this will no
+    /// longer be necessary.
+    ctx: &'mir mut Context<'ctx>,
+    /// The AST body of this function
     body: &'mir Expr,
+    /// The MIR representation of this function
     gr: Graph,
+    /// A stack of locals tables
+    st: SymbolTable,
+    /// The currently active items table
+    table: TableId,
+    /// The currently active basic block
     cursor: BlockId,
+    /// This function's signature
     sig: &'mir TypedSig,
     pub errors: ErrorBuf,
 }
 
 impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
-    pub fn new(ctx: &'mir Context<'ctx>, body: &'mir Expr, sig: &'mir TypedSig) -> Self {
+    pub fn new(
+        ctx: &'mir mut Context<'ctx>,
+        body: &'mir Expr,
+        sig: &'mir TypedSig,
+        table: TableId,
+    ) -> Self {
         let TypedSig { params, output } = sig;
 
         let mut gr = Graph::new();
@@ -116,6 +192,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ctx,
             body,
             gr,
+            st: SymbolTable::new(),
+            table,
             cursor,
             sig,
             errors: ErrorBuf::new(),
@@ -131,7 +209,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let place = self.gr.return_site();
         let _ = self.lower_into(place, self.body);
 
-        // compare ty to func's return value
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
@@ -257,16 +334,20 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Result<()> {
         match &stmt.data {
             StmtKind::Print(_) => {
-                todo!();
+                todo!()
             }
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 todo!()
             }
             StmtKind::Local { lhs, ty, rhs } => {
+                let ty = ty.as_ref().unwrap(); // For now, crash without annotation
+                let ty = typecheck::resolve_type(&mut self.ctx, ty, &self.table)?;
+                let place = self.gr.user_local(ty);
+                self.st.insert(lhs.data, place);
+                if let Some(rhs) = rhs {
+                    self.lower_into(place, rhs)?;
+                }
                 Ok(())
-                // let ty = self.resolve_type(ty.unwrap().data);
-                // let local = gr.user_local(ty);
-                // self.lower_into(gr, local, rhs)
             }
             StmtKind::Item(_) => {
                 todo!()
@@ -343,352 +424,6 @@ mod typecheck {
         Ok(ctx.types.intern(ty))
     }
 }
-
-// /// Check the structural properties of each type
-// #[rustfmt::skip]
-// fn discipline(&self) -> StructuralDiscipline {
-//     use Type::*;
-//     match self {
-//         Bool =>            StructuralDiscipline { linear: false },
-//         U8 =>              StructuralDiscipline { linear: false },
-//         U16 =>             StructuralDiscipline { linear: false },
-//         U32 =>             StructuralDiscipline { linear: false },
-
-//         Q_Bool =>          StructuralDiscipline { linear: true },
-//         Q_U8 =>            StructuralDiscipline { linear: true },
-//         Q_U16 =>           StructuralDiscipline { linear: true },
-//         Q_U32 =>           StructuralDiscipline { linear: true },
-
-//         Array(ty) =>      ty.discipline(),
-
-//         // Tuples and structs are as constrained as their most constrained member
-//         Tuple(types) =>    StructuralDiscipline {
-//             linear: types.iter().any(|val| val.discipline().linear),
-//         },
-//         Measured(_) =>     StructuralDiscipline { linear: false },
-//     }
-// }
-
-// /// Check if the type is linear
-// pub fn is_linear(&self) -> bool {
-//     self.discipline().linear
-// }
-
-// /// Typecheck a statement. This will be executed after hoisting, so all items
-// /// will have been hoisted to the top.
-// pub fn type_stmt<'ast>(
-//     &mut self,
-//     stmt: &'ast Stmt,
-//     table: &mut SymbolTable<'ast>,
-// ) -> Result<()> {
-//     use StmtKind::*;
-//     match &stmt.kind {
-//         // No-op
-//         Print(_expr) => Ok(()),
-//         // An expression statement not decorated with a semicolon: could be a
-//         // return value from a block.
-//         Expr(expr) => self.type_expr(expr, table).map(|_| ()),
-//         // An expression statement decorated with a semicolon
-//         ExprSemi(expr) => self.type_expr(expr, table).map(|_| ()),
-//         // A new local binding: insert the name into the symbol table
-//         Local { lhs, ty, rhs } => {
-//             let ty = self.type_local(ty, rhs, table)?;
-//             self.insert_local(lhs, ty, table)?;
-//             Ok(())
-//         }
-//         // All these are expected to be at the top of the AST, as they’ve
-//         // already been hoisted.
-//         Item(item) => {
-//             table.insert_item(item);
-//             Ok(())
-//         }
-//     }
-// }
-
-// /// Typecheck a single expression
-// fn type_expr(&mut self, expr: &Expr, table: &SymbolTable) -> Result<Type> {
-//     match &expr.kind {
-//         ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right, table),
-//         ExprKind::UnOp { op, right } => self.type_unop(op, right, table),
-//         ExprKind::Literal(lit) => self.type_literal(lit, table),
-//         ExprKind::Tuple(vals) => self.type_tuple(vals, table),
-//         // There is some duplication following us around here--perhaps we
-//         // ought to lower the representation somewhat.
-//         ExprKind::ExtArr(vals) => self.type_ext_arr(vals, table),
-//         ExprKind::IntArr { item, reps } => self.type_int_arr(item, reps, table),
-//         ExprKind::Ident(ident) => self.type_ident(ident, table),
-//         _ => todo!(),
-//     }
-// }
-
-// fn type_binop(
-//     &mut self,
-//     left: &Box<Expr>,
-//     op: &BinOp,
-//     right: &Box<Expr>,
-//     table: &SymbolTable,
-// ) -> Result<Type> {
-//     use BinOpKind::*;
-//     use Type::*;
-//     let ty_l = self.type_expr(left, table)?;
-//     let ty_r = self.type_expr(right, table)?;
-//     let ty = match (op.kind, ty_l, ty_r) {
-//         // These are not quite right!
-//         (Equal, l, r) if l == r => l,
-//         (Nequal, l, r) if l == r => l,
-
-//         (Plus, U8, U8) => U8,
-//         (Plus, U16, U16) => U16,
-//         (Plus, U32, U32) => U32,
-
-//         (Plus, Q_U8, Q_U8) => U8,
-//         (Plus, Q_U16, Q_U16) => U16,
-//         (Plus, Q_U32, Q_U32) => U32,
-
-//         (kind, left, right) => {
-//             return Err(self.errors.push(errors::BinOpTypeError {
-//                 span: op.span,
-//                 kind,
-//                 left,
-//                 right,
-//             }));
-//         }
-//     };
-//     Ok(ty)
-// }
-
-// fn type_unop(&mut self, op: &UnOp, right: &Box<Expr>, table: &SymbolTable) -> Result<Type> {
-//     use Type::*;
-//     use UnOpKind::*;
-//     let ty_r = self.type_expr(right, table)?;
-//     let ty = match (op.kind, ty_r) {
-//         (Minus, _) => unimplemented!(),
-
-//         (Not, Bool) => Bool,
-//         (Not, Q_Bool) => Bool,
-
-//         (Linear, Bool) => Q_Bool,
-//         (Linear, U8) => Q_U8,
-//         (Linear, U16) => Q_U16,
-//         (Linear, U32) => Q_U32,
-
-//         (Delin, Q_Bool) => Bool,
-//         (Delin, Q_U8) => U8,
-//         (Delin, Q_U16) => U16,
-//         (Delin, Q_U32) => U32,
-
-//         (kind, right) => {
-//             return Err(self.errors.push(errors::UnOpTypeError {
-//                 span: op.span,
-//                 kind,
-//                 right,
-//             }));
-//         }
-//     };
-//     Ok(ty)
-// }
-
-// fn type_tuple(&mut self, vals: &Vec<Expr>, table: &SymbolTable) -> Result<Type> {
-//     let tys = vals
-//         .iter()
-//         .map(|v| self.type_expr(v, table))
-//         // NOTE: this short-circuits at the first error, which is really not
-//         // quite the behavior I want.
-//         .collect::<Result<Vec<Type>>>()?;
-//     Ok(Type::Tuple(tys))
-// }
-
-// fn type_ext_arr(&mut self, vals: &Vec<Expr>, table: &SymbolTable) -> Result<Type> {
-//     if vals.is_empty() {
-//         // This might have to wait for type inference to make sense.
-//         todo!();
-//     }
-
-//     let mut vals = vals.iter();
-//     // Unwrap safe because `vals` is known not to be empty.
-//     let ty = self.type_expr(vals.next().unwrap(), table)?;
-//     for v in vals {
-//         if self.type_expr(v, table)? != ty {
-//             return Err(self
-//                 .errors
-//                 .push(errors::HeterogeneousArray { span: v.span, ty }))?;
-//         }
-//     }
-
-//     Ok(Type::Array(Box::new(ty)))
-// }
-
-// fn type_int_arr(&mut self, item: &Expr, reps: &Expr, table: &SymbolTable) -> Result<Type> {
-//     let ty_item = self.type_expr(item, table)?;
-//     let ty_reps = self.type_expr(item, table)?;
-
-//     if ty_reps != Type::size_type() {
-//         return Err(self.errors.push(errors::ExpectedSizeType {
-//             span: reps.span,
-//             ty: ty_reps,
-//         }))?;
-//     }
-
-//     Ok(Type::Array(Box::new(ty_item)))
-// }
-
-// fn type_local(&mut self, _ty: &Option<Annot>, rhs: &Expr, table: &SymbolTable) -> Result<Type> {
-//     let ty_r = self.type_expr(rhs, table)?;
-//     Ok(ty_r)
-// }
-
-// fn type_literal(&mut self, lit: &Literal, _table: &SymbolTable) -> Result<Type> {
-//     use LiteralKind::*;
-//     use Type::*;
-//     match lit.kind {
-//         True => Ok(Bool),
-//         False => Ok(Bool),
-//         Nat(_) => Ok(U32),
-//     }
-// }
-
-// fn type_ident(&mut self, ident: &Ident, table: &SymbolTable) -> Result<Type> {
-//     // NOTE: cann’t use `ok_or` here because it evaluates its arguments
-//     // eagerly.
-//     let symb = table.get(&ident).ok_or_else(|| {
-//         self.errors.push(errors::UnboundName {
-//             span: ident.span,
-//             name: ident.name.clone(),
-//         })
-//     });
-
-//     match symb {
-//         // This clone is not wasted--we might well need to make a new symbol
-//         // that has the same type!
-//         Ok(symb) => Ok(symb.ty.clone()),
-//         Err(err) => Err(err),
-//     }
-// }
-
-// /// Insert local bindings, recursively destructuring the LValue and type
-// fn insert_local<'ast>(
-//     &mut self,
-//     lhs: &'ast LValue,
-//     ty: Type,
-//     table: &mut SymbolTable<'ast>,
-// ) -> Result<()> {
-//     match (&lhs.kind, ty) {
-//         (LValueKind::Tuple(lvalues), Type::Tuple(tys)) => {
-//             if lvalues.len() != tys.len() {
-//                 return Err(self.errors.push(errors::DestructuringError {
-//                     span: lhs.span,
-//                     // Have to rebuild the type because it was moved in here
-//                     actual: Type::Tuple(tys),
-//                 }))?;
-//             }
-
-//             for (lvalue, ty) in lvalues.iter().zip(tys.into_iter()) {
-//                 self.insert_local(lvalue, ty, table)?;
-//             }
-//         }
-
-//         (LValueKind::Ident(ident), ty) => match table.insert_var(ident, ty) {
-//             None => {}
-//             // TODO report some information about the contained symbol
-//             Some(_) => {
-//                 return Err(self.errors.push(errors::NameCollision {
-//                     span: lhs.span,
-//                     name: ident.name.clone(),
-//                 }))?;
-//             }
-//         },
-
-//         // In all other cases, we've failed to destructure
-//         (_, ty) => {
-//             return Err(self.errors.push(errors::DestructuringError {
-//                 span: lhs.span,
-//                 // Have to rebuild the type because it was moved in here
-//                 actual: ty,
-//             }))?;
-//         }
-//     };
-//     Ok(())
-// }
-
-// /// Hoists `fn`, `struct`, `enum` declarations to the top of a list of
-// /// statements, but does not insert them in a symbol table.
-// pub fn hoist_items(stmts: &mut Vec<Stmt>) {
-//     // `Vec::sort_by` is a stable sort, so all this will do is carry items to
-//     // the top, without reordering anything else. This significantly simplifies
-//     // the implementation, at least as long as `drain_filter` is unstable.
-//     stmts.sort_by(|left, right| {
-//         let left = left.kind.is_item();
-//         let right = right.kind.is_item();
-//         left.cmp(&right)
-//     });
-// }
-
-// /// Lives in symbol table; carries type, lifetime information and so on.
-// #[derive(Debug)]
-// pub struct Symbol {
-//     kind: SymbolKind,
-//     ty: Type,
-// }
-//
-// #[derive(Debug)]
-// pub enum SymbolKind {
-//     Fn(Box<dyn Func>),
-//     Var,
-// }
-//
-// #[derive(Debug)]
-// pub struct SymbolTable<'ast> {
-//     /// For now, there is a single namespace for all symbols. It might be better
-//     /// to have separate namespaces for functions, variables, types, and so on.
-//     symbols: HashMap<&'ast str, Symbol>,
-//     parent: Option<Weak<SymbolTable<'ast>>>,
-// }
-//
-// impl<'ast> SymbolTable<'ast> {
-//     pub fn new() -> Self {
-//         Self {
-//             symbols: HashMap::new(),
-//             parent: None,
-//         }
-//     }
-//
-//     fn insert_item(&mut self, item: &'ast Item) {
-//         match &item.kind {
-//             ItemKind::Fn {
-//                 name,
-//                 params: _,
-//                 typ: _,
-//                 body,
-//                 docstring,
-//             } => {
-//                 let func = Box::new(UserFunc {
-//                     params: vec![],
-//                     // FIXME temporarily defeating the borrow checker
-//                     body: body.clone(),
-//                     doc: docstring.clone(),
-//                 });
-//                 let symb = Symbol {
-//                     ty: Type::unit(),
-//                     kind: SymbolKind::Fn(func),
-//                 };
-//                 self.symbols.insert(&name.name, symb);
-//             }
-//         }
-//     }
-//
-//     fn insert_var(&mut self, ident: &'ast Ident, ty: Type) -> Option<Symbol> {
-//         let symb = Symbol {
-//             kind: SymbolKind::Var,
-//             ty,
-//         };
-//         let symb = self.symbols.insert(&ident.name, symb);
-//         symb
-//     }
-//
-//     fn get(&self, ident: &'ast Ident) -> Option<&Symbol> {
-//         self.symbols.get(ident.name.as_str())
-//     }
-// }
 
 mod errors {
     use crate::ast::*;

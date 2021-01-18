@@ -23,6 +23,10 @@ pub trait Index: Default + Clone + Copy + Eq {
 
 /// A macro for building implementers of Index. This is exactly analogous to
 /// rustc's `rustc_index::newtype_index`.
+///
+/// Note: don't remove `Copy` from the index types. This isn't just handy; it
+/// actually improves performance. `clear`ing a HashMap takes O(1) time for
+/// `Copy` types, while it takes O(n) time for non-`Copy` types.
 #[macro_export]
 macro_rules! index_type {
     ($index:ident) => {

@@ -84,11 +84,10 @@ pub struct Graph {
 impl Graph {
     /// Create a graph with a single empty block
     pub fn new() -> Self {
-        let locals = LocalStore::new();
         let mut blocks = BlockStore::new();
         let entry_block = blocks.insert(BasicBlock::new());
         Self {
-            locals,
+            locals: LocalStore::new(),
             blocks,
             entry_block,
         }
