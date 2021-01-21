@@ -30,7 +30,18 @@ pub trait Index: Default + Clone + Copy + Eq {
 #[macro_export]
 macro_rules! index_type {
     ($index:ident) => {
-        #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            Hash,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
         pub struct $index(u32);
 
         /// Seems to be required by some other part of my code

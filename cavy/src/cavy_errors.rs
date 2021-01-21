@@ -58,7 +58,12 @@ impl Error for CavyError {}
 
 /// Simplify error propagation with a typedef. This should be an acceptable
 /// thing to do; it mimics `io::Result`, and it's seen in plenty of projects.
-pub type Result<T> = std::result::Result<T, CavyError>;
+/// Now, I’m not sure about the name `Maybe`. It could be confusing to Haskell
+/// programmers, but on the other hand this _is_ isomorphic to `Option`:
+/// `CavyError` carries no data of its own. It's also convenient to use a name
+/// other than `Result` because we don't have to write `std::result::Result`
+/// everywhwere we want to specify an error type.
+pub type Maybe<T> = std::result::Result<T, CavyError>;
 
 #[derive(Debug)]
 pub struct ErrorBuf(pub Vec<Box<dyn Diagnostic>>);

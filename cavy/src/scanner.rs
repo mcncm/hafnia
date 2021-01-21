@@ -306,7 +306,7 @@ impl<'s> Scanner<'s> {
     /// This method, which consumes the `Scanner`, produces either a vector of
     /// tokens or of representable errors that the caller is expected, in one
     /// way or another, to display to the user.
-    pub fn tokenize(mut self) -> std::result::Result<Vec<Token>, ErrorBuf> {
+    pub fn tokenize(mut self) -> Result<Vec<Token>, ErrorBuf> {
         let mut ch;
         loop {
             // The invariant for this loop is that we're beginning a new token

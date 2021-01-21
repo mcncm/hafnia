@@ -14,7 +14,7 @@
 //!   can't check that type annotations refer to something in-scope.
 
 use crate::ast::{self, *};
-use crate::cavy_errors::{self, ErrorBuf, Result};
+use crate::cavy_errors::{self, ErrorBuf, Maybe};
 use crate::context::Context;
 use crate::source::Span;
 use crate::token::{
@@ -33,7 +33,7 @@ use std::{mem, vec::IntoIter};
 /// Main entry point for parsing: consumes a token stream and produces a module.
 /// This api will almost certainly change when, some fine day, a program can
 /// have more than one module in it.
-pub fn parse(tokens: Vec<Token>, ctx: &mut Context) -> std::result::Result<Ast, ErrorBuf> {
+pub fn parse(tokens: Vec<Token>, ctx: &mut Context) -> Result<Ast, ErrorBuf> {
     use crate::session::Phase;
     if ctx.last_phase() < &Phase::Parse {
         crate::sys::exit(0);
@@ -117,9 +117,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// with a handle to the table. The real reason for having this is the
     /// slight subtlety of recovering gracefully from errors *after* pushing a
     /// child table, which could be easily forgotten by an uncareful future you.
-    fn with_table<T, F>(&mut self, f: F) -> Result<(T, TableId)>
+    fn with_table<T, F>(&mut self, f: F) -> Maybe<(T, TableId)>
     where
-        F: FnOnce(&mut Parser) -> Result<T>,
+        F: FnOnce(&mut Parser) -> Maybe<T>,
     {
         self.push_table();
         let t = match f(self) {
@@ -181,7 +181,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Take a token if there is one; push an error otherwise
-    fn token(&mut self) -> Result<Token> {
+    fn token(&mut self) -> Maybe<Token> {
         // Note that this cannot be `ok_or`, which is eagerly evaluated.
         let token = self
             .next()
@@ -190,7 +190,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Consumes the parser
-    pub fn parse(mut self) -> std::result::Result<Ast, ErrorBuf> {
+    pub fn parse(mut self) -> Result<Ast, ErrorBuf> {
         let mut items = vec![];
         while let Some(_) = self.tokens.peek() {
             match self.item() {
@@ -203,7 +203,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.ast)
     }
 
-    fn item(&mut self) -> Result<()> {
+    fn item(&mut self) -> Maybe<()> {
         let Token { lexeme, span } = self.token()?;
         match lexeme {
             Lexeme::Fn => self.fn_item(span),
@@ -217,7 +217,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
-    fn consume(&mut self, lexeme: Lexeme) -> Result<Token> {
+    fn consume(&mut self, lexeme: Lexeme) -> Maybe<Token> {
         let token = self.token()?;
 
         if token.lexeme == lexeme {
@@ -232,7 +232,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
-    fn consume_ident(&mut self) -> Result<ast::Ident> {
+    fn consume_ident(&mut self) -> Maybe<ast::Ident> {
         let token = self.token()?;
         match token.lexeme {
             Lexeme::Ident(_) => Ok(ast::Ident::from_token(token, &mut self.ctx).unwrap()),
@@ -244,7 +244,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Produces a statement
-    pub fn statement(&mut self) -> Result<Stmt> {
+    pub fn statement(&mut self) -> Maybe<Stmt> {
         match self.peek_lexeme() {
             Some(Print) => Ok(self.print_stmt()?),
             Some(Let) => Ok(self.local()?),
@@ -266,7 +266,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Parse a function item and insert it in the functions table
-    fn fn_item(&mut self, opening: Span) -> Result<()> {
+    fn fn_item(&mut self, opening: Span) -> Maybe<()> {
         let name = self.consume_ident()?;
 
         // Should we create a parameters table as the parent of the function
@@ -307,7 +307,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Once a `main` function has been found, ensure that it's the only one,
     /// acceps no parameters, and returns no value. We'll just take an `FnId` as
     /// we hope to only call this once, so the cost of lookup should not be too great.
-    fn validate_main(&mut self, func_id: FnId) -> Result<()> {
+    fn validate_main(&mut self, func_id: FnId) -> Maybe<()> {
         let func = &self.ast.funcs[func_id];
         // Make sure there are no other entry points
         if self.ast.entry_point.is_some() {
@@ -323,7 +323,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Collect a function signature
-    fn function_sig(&mut self) -> Result<Sig> {
+    fn function_sig(&mut self) -> Maybe<Sig> {
         let opening = self.consume(Lexeme::LParen)?.span;
 
         // Get the parameters
@@ -360,7 +360,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Get a single function parameter comprising an LValue pattern and a type
     /// annotation.
-    fn function_param(&mut self) -> Result<Param> {
+    fn function_param(&mut self) -> Maybe<Param> {
         let name = self.consume_ident()?;
         self.consume(Colon)?;
         let ty = self.type_annotation()?;
@@ -368,7 +368,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(Param { name, ty, span })
     }
 
-    fn function_return_type(&mut self) -> Result<Option<Annot>> {
+    fn function_return_type(&mut self) -> Maybe<Option<Annot>> {
         if self.match_lexeme(MinusRAngle) {
             return Ok(Some(self.type_annotation()?));
         }
@@ -379,7 +379,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// ```cavy
     /// let x = 3;
     /// ```
-    fn local(&mut self) -> Result<Stmt> {
+    fn local(&mut self) -> Maybe<Stmt> {
         let opening = self.next().unwrap().span;
         // For now, only admit symbols on the lhs.
         let lhs = Box::new(self.consume_ident()?);
@@ -405,7 +405,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Recursively build an LValue
-    fn lvalue(&mut self) -> Result<LValue> {
+    fn lvalue(&mut self) -> Maybe<LValue> {
         // We' anticipate being able to find an lvalue here, so produce an error
         // if a token isn't found.
         let token = self.token()?;
@@ -433,7 +433,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// NOTE We should inline this because it’s only called from `lvalue`, with which
     /// it is mutually recursive.
     #[inline(always)]
-    fn finish_lvalue_tuple(&mut self, opening: Span) -> Result<LValue> {
+    fn finish_lvalue_tuple(&mut self, opening: Span) -> Maybe<LValue> {
         // Finish right away if the next token is a close-paren
         if let Some(&Lexeme::RParen) = self.peek_lexeme() {
             let closing = self.next().unwrap().span;
@@ -470,14 +470,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(lvalue)
     }
 
-    fn print_stmt(&mut self) -> Result<Stmt> {
+    fn print_stmt(&mut self) -> Maybe<Stmt> {
         self.next();
         let expr = self.expression()?;
         self.consume(Lexeme::Semicolon)?;
         Ok(StmtKind::Print(Box::new(expr)).into())
     }
 
-    fn if_expr(&mut self) -> Result<Expr> {
+    fn if_expr(&mut self) -> Maybe<Expr> {
         let opening = self.token()?.span;
         let cond = Box::new(self.expression()?);
         let then_branch = Box::new(self.block()?);
@@ -500,7 +500,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
-    fn for_expr(&mut self) -> Result<Expr> {
+    fn for_expr(&mut self) -> Maybe<Expr> {
         let opening = self.token()?.span;
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
@@ -511,13 +511,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
-    fn block_expr(&mut self) -> Result<Expr> {
+    fn block_expr(&mut self) -> Maybe<Expr> {
         let block = self.block()?;
         let block_span = block.span;
         Ok(self.node(ExprKind::Block(Box::new(block)), block_span))
     }
 
-    fn block(&mut self) -> Result<Block> {
+    fn block(&mut self) -> Maybe<Block> {
         let opening = self.consume(Lexeme::LBrace)?.span;
         // Start collecting the contents of the block
         let (mut stmts, table) = self.with_table(|prsr| {
@@ -558,13 +558,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         })
     }
 
-    fn expr_stmt(&mut self) -> Result<Stmt> {
+    fn expr_stmt(&mut self) -> Maybe<Stmt> {
         let res = StmtKind::Expr(Box::new(self.expression()?));
         self.consume(Lexeme::Semicolon)?;
         Ok(res.into())
     }
 
-    pub fn expression(&mut self) -> Result<Expr> {
+    pub fn expression(&mut self) -> Maybe<Expr> {
         match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
@@ -577,7 +577,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
-    fn unary(&mut self) -> Result<Expr> {
+    fn unary(&mut self) -> Maybe<Expr> {
         if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
             let op = self.next().unwrap();
             let op = UnOp::from_token(op, self.ctx).unwrap();
@@ -595,7 +595,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         self.call()
     }
 
-    fn finish_array(&mut self, opening: Span) -> Result<Expr> {
+    fn finish_array(&mut self, opening: Span) -> Maybe<Expr> {
         // Empty array:
         if let Some(RBracket) = self.peek_lexeme() {
             let closing = self.token().unwrap().span;
@@ -624,7 +624,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(arr, span))
     }
 
-    fn type_annotation(&mut self) -> Result<Annot> {
+    fn type_annotation(&mut self) -> Maybe<Annot> {
         // Get another token. We're anticipating being able to form a type
         // annotation here, so it's an error if none is available.
         let Token { lexeme, span } = self.token()?;
@@ -665,7 +665,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Finish parsing an array type.
-    fn finish_array_type(&mut self, opening: Span) -> Result<Annot> {
+    fn finish_array_type(&mut self, opening: Span) -> Maybe<Annot> {
         let ty = Box::new(self.type_annotation()?);
         let closing = self.consume(RBracket)?;
         let span = opening.join(&closing.span).unwrap();
@@ -676,7 +676,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Finish parsing a type that may be either a tuple or the unit type.
-    fn finish_tuple_type(&mut self, opening: Span) -> Result<Annot> {
+    fn finish_tuple_type(&mut self, opening: Span) -> Maybe<Annot> {
         let mut types = vec![];
         if self.peek_lexeme() != Some(&RParen) {
             types.push(self.type_annotation()?);
@@ -693,7 +693,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Call a function or index into an array.
     #[rustfmt::skip]
-    fn call(&mut self) -> Result<Expr> {
+    fn call(&mut self) -> Maybe<Expr> {
         let mut expr = self.primary()?;
 
         // This is a function call
@@ -717,7 +717,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     // Inline(always) because there is only one call site.
     #[inline(always)]
-    fn finish_call(&mut self, callee: ast::Ident) -> Result<Expr> {
+    fn finish_call(&mut self, callee: ast::Ident) -> Maybe<Expr> {
         let mut args = vec![];
         if self.peek_lexeme() != Some(&RParen) {
             loop {
@@ -734,7 +734,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     #[inline(always)]
-    fn finish_index(&mut self, head: Expr) -> Result<Expr> {
+    fn finish_index(&mut self, head: Expr) -> Maybe<Expr> {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
         let bracket = self.consume(RBracket)?.span;
@@ -743,7 +743,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
-    fn primary(&mut self) -> Result<Expr> {
+    fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
             Nat(_) | True | False => {
@@ -768,7 +768,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// After reaching an `(` in the position of a primary token, we must have
     /// either a group or a sequence.
-    fn finish_group(&mut self, opening: Span) -> Result<Expr> {
+    fn finish_group(&mut self, opening: Span) -> Maybe<Expr> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
         if let Some(RParen) = self.peek_lexeme() {
             let span = opening.join(&self.token().unwrap().span).unwrap();
@@ -797,7 +797,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
-    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Result<Expr> {
+    fn precedence_climb(&mut self, lhs: Expr, min_precedence: u8) -> Maybe<Expr> {
         let Expr {
             data: mut lhs,
             mut span,

@@ -1,4 +1,4 @@
-use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Result};
+use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe};
 use crate::{
     ast::{self, *},
     source::Span,
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
-pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> std::result::Result<Mir, ErrorBuf> {
+pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> Result<Mir, ErrorBuf> {
     MirBuilder::new(&ast, ctx).lower()
 }
 
@@ -41,7 +41,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     }
 
     /// Typecheck all functions in the AST, enter the lowered functions in the cfg
-    pub fn lower(mut self) -> std::result::Result<Mir, ErrorBuf> {
+    pub fn lower(mut self) -> Result<Mir, ErrorBuf> {
         for (id, func) in self.ast.funcs.iter().enumerate() {
             // TODO a better way to do this
             let fn_id = FnId::new(id as u32);
@@ -74,18 +74,18 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     }
 
     /// Resolve the types in a function signature
-    pub fn type_sig(&mut self, sig: &Sig, tab: &TableId) -> Result<TypedSig> {
+    pub fn type_sig(&mut self, sig: &Sig, tab: &TableId) -> Maybe<TypedSig> {
         let params = sig
             .params
             .iter()
             .map(|p| {
-                let ty = typecheck::resolve_type(&mut self.ctx, &p.ty, tab);
+                let ty = typecheck::resolve_type(&p.ty, tab, &mut self.ctx);
                 Ok((p.name.data, ty?))
             })
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let output = match &sig.output {
             None => self.ctx.types.intern(Type::unit()),
-            Some(annot) => typecheck::resolve_type(&mut self.ctx, annot, tab)?,
+            Some(annot) => typecheck::resolve_type(annot, tab, &mut self.ctx)?,
         };
         let sig = TypedSig {
             params,
@@ -212,11 +212,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    fn error<T: 'static + Diagnostic>(&mut self, err: T) -> Result<()> {
+    fn error<T: 'static + Diagnostic>(&mut self, err: T) -> Maybe<()> {
         Err(self.errors.push(err))
     }
 
-    fn expect_type(&mut self, expected: TyId, actual: TyId, span: Span) -> Result<()> {
+    fn expect_type(&mut self, expected: TyId, actual: TyId, span: Span) -> Maybe<()> {
         if actual != expected {
             self.error(errors::ExpectedType {
                 span,
@@ -242,9 +242,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     /// Temporarily work within the environment of a new goto block
-    fn with_goto<T, F>(&mut self, block: BlockId, f: F) -> Result<T>
+    fn with_goto<T, F>(&mut self, block: BlockId, f: F) -> Maybe<T>
     where
-        F: FnOnce(&mut Self) -> Result<T>,
+        F: FnOnce(&mut Self) -> Maybe<T>,
     {
         let old_block = self.cursor;
         self.cursor = self.gr.goto_block(block);
@@ -256,7 +256,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     // === Lowering methods ===
 
-    pub fn lower(mut self) -> std::result::Result<Graph, ErrorBuf> {
+    pub fn lower(mut self) -> Result<Graph, ErrorBuf> {
         let place = self.gr.return_site();
         let _ = self.lower_into(place, self.body);
 
@@ -268,7 +268,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     #[allow(unused_variables)]
-    pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Result<()> {
+    pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
         match &expr.data {
             ExprKind::BinOp { left, op, right } => self.lower_into_binop(place, left, op, right),
             ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right),
@@ -303,7 +303,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         left: &Expr,
         op: &ast::BinOp,
         right: &Expr,
-    ) -> Result<()> {
+    ) -> Maybe<()> {
         let ty = self.gr.locals[place].ty;
         // Let's assume for now that all the binops take the same two types, in
         // both arguments. This won't be true, but it's a convenient simplifying
@@ -324,9 +324,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_unop(&mut self, place: LocalId, op: &ast::UnOp, right: &Expr) -> Result<()> {
+    fn lower_into_unop(&mut self, place: LocalId, op: &ast::UnOp, right: &Expr) -> Maybe<()> {
         // NOTE this is explicitly incorrect
         let ty = self.gr.locals[place].ty;
+        // Should not be here, of course
         let r_place = self.gr.auto_local(ty);
         self.lower_into(r_place, right)?;
 
@@ -336,7 +337,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_literal(&mut self, place: LocalId, lit: &Literal) -> Result<()> {
+    fn lower_into_literal(&mut self, place: LocalId, lit: &Literal) -> Maybe<()> {
         let ty = self.gr.locals[place].ty;
         let constant = match &lit.data {
             LiteralKind::True => {
@@ -367,7 +368,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Result<()> {
+    fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Maybe<()> {
         let rhs = match self.st.get(&ident.data) {
             // FIXME for now, pretend that all operations are `Copy`.
             Some(local) => Rvalue::Copy(*local),
@@ -383,7 +384,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     /// Lower an AST block and store its value in the given location.
-    fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Result<()> {
+    fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Maybe<()> {
         #![allow(unused_variables)]
         let Block {
             stmts,
@@ -395,7 +396,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let (_, errors): (Vec<_>, Vec<_>) = stmts
             .iter()
             .map(|stmt| self.lower_stmt(stmt))
-            .partition(Result::is_ok);
+            .partition(Maybe::is_ok);
         if let Some(err) = errors.into_iter().next() {
             err?;
         }
@@ -412,7 +413,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         cond: &Expr,
         dir: &Block,
         ind: &Option<Box<Block>>,
-    ) -> Result<()> {
+    ) -> Maybe<()> {
         // TODO: `lower_into`, and all the `lower_into_` functions, should
         // return a `Result<LocalId>`, where on success they echo back the
         // location they were lowered into. It would make this all a lot neater.
@@ -421,7 +422,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         //
         // TODO: Again, I'm cheating by trying to fit this into a
         // `bool`, when it could also be a `?bool`.
-        let cond_place = self.gr.auto_local(self.ctx.common.bool);
+        let cond_ty = match self.infer_type(cond) {
+            Some(ty) => ty,
+            None => {
+                return self.error(errors::InferenceFailure { span: cond.span });
+            }
+        };
+        let cond_place = self.gr.auto_local(cond_ty);
         let cond = self.lower_into(cond_place, cond);
         let tail_block = self.new_block();
 
@@ -440,7 +447,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             None => Ok(tail_block),
         };
 
-        let (dir, ind, cond) = match (dir, ind, cond) {
+        let (dir, ind, _) = match (dir, ind, cond) {
             (Ok(dir), Ok(ind), Ok(cond)) => Ok((dir, ind, cond)),
             (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(err),
         }?;
@@ -455,7 +462,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     #[allow(unused_variables)]
-    fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Result<()> {
+    fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
             StmtKind::Print(_) => {
                 todo!()
@@ -468,8 +475,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.lower_into(place, expr)
             }
             StmtKind::Local { lhs, ty, rhs } => {
-                let ty = ty.as_ref().unwrap(); // For now, crash without annotation
-                let ty = typecheck::resolve_type(&mut self.ctx, ty, &self.table)?;
+                // Is this annotated, or must we infer the type?
+                let ty = match (ty, rhs) {
+                    // This should work if we ever have proper type inferece; in
+                    // the *near* future it should emit an error message, but for now let's just fail.
+                    (None, None) => unimplemented!(),
+                    (Some(ty), _) => typecheck::resolve_type(ty, &self.table, self.ctx)?,
+                    (_, Some(rhs)) => match self.infer_type(rhs) {
+                        Some(ty) => ty,
+                        None => return self.error(errors::InferenceFailure { span: rhs.span }),
+                    },
+                };
                 let place = self.gr.user_local(ty);
                 self.st.insert(lhs.data, place);
                 if let Some(rhs) = rhs {
@@ -487,10 +503,196 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 /// even a separate crate.
 mod typecheck {
     use super::*;
+
+    /// These should all be very small, simple types. We have nothing fancy: no
+    /// generics, just a few numeric types, and so on.
+    pub type TySet = Vec<TyId>;
+
+    fn intersect(fst: &mut TySet, snd: &TySet) {
+        let mut snd = snd.iter();
+        let r = snd.next();
+        fst.retain(|l| match r {
+            None => false,
+            Some(r) => match l.cmp(r) {
+                std::cmp::Ordering::Greater => {
+                    while let Some(r) = snd.next() {
+                        if r == l {
+                            return true;
+                        }
+                        if r > l {
+                            break;
+                        }
+                    }
+                    r == l
+                }
+                std::cmp::Ordering::Equal => true,
+                std::cmp::Ordering::Less => false,
+            },
+        })
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn intersect_simple() {
+        let mut v1 = vec![TyId::new(1), TyId::new(2), TyId::new(3)];
+        let v2 = vec![TyId::new(2), TyId::new(3), TyId::new(4)];
+        let expect = vec![TyId::new(2), TyId::new(3)];
+        intersect(&mut v1, &v2);
+        assert_eq!(v1, expect);
+    }
+
+    /// We're not doing full type inference, but we do need to know what to do
+    /// when we call a function and ignore its return value. Or, when we move a
+    /// variable into a new binding that doesn't have an annotation. These
+    /// methods provide the "ad hoc," weak type inference needed to lower such
+    /// expressions. Note that we're spreading out type checking and inference
+    /// across this file, so it might be ugly to clean up later.
+    ///
+    /// Also note that all this is a horribly inefficient stopgap.
+    impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
+        pub fn infer_type<'a>(&self, expr: &Expr) -> Option<TyId> {
+            let tys = self.infer_type_inner(expr);
+            // This is very naive and silly, but I just want to get *some* element,
+            // if there is one.
+            tys.last().map(|t| *t)
+        }
+
+        #[allow(unused_variables)]
+        pub fn infer_type_inner(&self, expr: &Expr) -> TySet {
+            match &expr.data {
+                ExprKind::BinOp { left, op, right } => self.infer_binop(left, op, right),
+                ExprKind::UnOp { op, right } => self.infer_unop(op, right),
+                ExprKind::Literal(lit) => self.infer_literal(lit),
+                ExprKind::Ident(ident) => self.infer_ident(ident),
+                ExprKind::Tuple(_) => todo!(),
+                ExprKind::IntArr { item, reps } => todo!(),
+                ExprKind::ExtArr(_) => todo!(),
+                ExprKind::Block(block) => self.infer_block(block),
+                ExprKind::If { cond, dir, ind } => {
+                    let mut dir = self.infer_block(dir);
+                    let ind = ind
+                        .as_ref()
+                        .map_or(vec![self.ctx.common.unit], |b| self.infer_block(&b));
+                    intersect(&mut dir, &ind);
+                    dir
+                }
+                ExprKind::For { bind, iter, body } => {
+                    // should be the unit type
+                    vec![self.ctx.common.unit]
+                }
+                ExprKind::Call { callee, args } => todo!(),
+                ExprKind::Index { head, index } => todo!(),
+            }
+        }
+
+        fn infer_binop(&self, left: &Expr, op: &ast::BinOp, right: &Expr) -> TySet {
+            // let set = TySet::new();
+            // set
+
+            let mut left = self.infer_type_inner(left);
+            let right = self.infer_type_inner(right);
+
+            match &op.data {
+                BinOpKind::Equal => vec![self.ctx.common.bool, self.ctx.common.q_bool],
+                BinOpKind::Nequal => vec![self.ctx.common.bool, self.ctx.common.q_bool],
+                BinOpKind::DotDot => todo!(),
+                BinOpKind::Plus => {
+                    intersect(&mut left, &right);
+                    left
+                }
+                BinOpKind::Minus => todo!(),
+                BinOpKind::Times => {
+                    intersect(&mut left, &right);
+                    left
+                }
+                BinOpKind::Mod => todo!(),
+                BinOpKind::Less => todo!(),
+                BinOpKind::Greater => todo!(),
+            }
+        }
+
+        fn infer_unop(&self, op: &ast::UnOp, right: &Expr) -> TySet {
+            let right = self.infer_type_inner(right);
+            match &op.data {
+                UnOpKind::Minus => todo!(),
+                UnOpKind::Not => right,
+                UnOpKind::Linear => {
+                    let mut tys = TySet::new();
+                    for ty in right {
+                        if ty == self.ctx.common.bool {
+                            tys.push(self.ctx.common.q_bool)
+                        } else if ty == self.ctx.common.u4 {
+                            tys.push(self.ctx.common.q_u4)
+                        } else if ty == self.ctx.common.u8 {
+                            tys.push(self.ctx.common.q_u8)
+                        } else if ty == self.ctx.common.u16 {
+                            tys.push(self.ctx.common.q_u16)
+                        } else if ty == self.ctx.common.u32 {
+                            tys.push(self.ctx.common.q_u32)
+                        }
+                    }
+                    tys.sort();
+                    tys
+                }
+                UnOpKind::Delin => {
+                    let mut tys = TySet::new();
+                    for ty in right {
+                        if ty == self.ctx.common.q_bool {
+                            tys.push(self.ctx.common.bool)
+                        } else if ty == self.ctx.common.q_u4 {
+                            tys.push(self.ctx.common.u4)
+                        } else if ty == self.ctx.common.q_u8 {
+                            tys.push(self.ctx.common.u8)
+                        } else if ty == self.ctx.common.q_u16 {
+                            tys.push(self.ctx.common.u16)
+                        } else if ty == self.ctx.common.q_u32 {
+                            tys.push(self.ctx.common.u32)
+                        }
+                    }
+                    tys.sort();
+                    tys
+                }
+            }
+        }
+
+        fn infer_literal(&self, lit: &Literal) -> TySet {
+            let mut tys = match &lit.data {
+                LiteralKind::True => vec![self.ctx.common.bool],
+                LiteralKind::False => vec![self.ctx.common.bool],
+                LiteralKind::Nat(_) => {
+                    vec![
+                        self.ctx.common.u4,
+                        self.ctx.common.u8,
+                        self.ctx.common.u16,
+                        self.ctx.common.u32,
+                    ]
+                }
+            };
+            tys.sort();
+            tys
+        }
+
+        fn infer_block(&self, block: &Block) -> TySet {
+            match &block.expr {
+                Some(expr) => self.infer_type_inner(expr),
+                None => vec![self.ctx.common.unit],
+            }
+        }
+
+        fn infer_ident(&self, ident: &Ident) -> TySet {
+            let mut set = TySet::new();
+            if let Some(local) = self.st.get(&ident.data) {
+                set.push(self.gr.locals[*local].ty)
+            }
+
+            set
+        }
+    }
+
     /// Resolve an annotation to a type, given a table (scope) in which it
     /// should appear. This should eventually be farmed out to a type inference
     /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
-    pub fn resolve_type<'a>(ctx: &mut Context<'a>, annot: &Annot, tab: &TableId) -> Result<TyId> {
+    pub fn resolve_type<'a>(annot: &Annot, tab: &TableId, ctx: &mut Context<'a>) -> Maybe<TyId> {
         let ty = match &annot.data {
             AnnotKind::Bool => {
                 let ty = Type::Bool;
@@ -503,20 +705,20 @@ mod typecheck {
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
-                    .map(|ann| resolve_type(ctx, ann, tab))
-                    .collect::<Result<Vec<TyId>>>()?;
+                    .map(|ann| resolve_type(ann, tab, ctx))
+                    .collect::<Maybe<Vec<TyId>>>()?;
                 ctx.types.intern(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
-                let inner = resolve_type(ctx, inner, tab)?;
+                let inner = resolve_type(inner, tab, ctx)?;
                 ctx.types.intern(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
-                let ty = resolve_type(ctx, inner, tab)?;
+                let ty = resolve_type(inner, tab, ctx)?;
                 resolve_annot_question(ctx, ty)?
             }
             AnnotKind::Bang(inner) => {
-                let ty = resolve_type(ctx, inner, tab)?;
+                let ty = resolve_type(inner, tab, ctx)?;
                 resolve_annot_bang(ctx, ty)?
             }
             AnnotKind::Ident(_ident) => {
@@ -527,7 +729,7 @@ mod typecheck {
         Ok(ty)
     }
 
-    fn resolve_annot_question<'a>(ctx: &mut Context<'a>, inner: TyId) -> Result<TyId> {
+    fn resolve_annot_question<'a>(ctx: &mut Context<'a>, inner: TyId) -> Maybe<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
@@ -538,7 +740,7 @@ mod typecheck {
         Ok(ctx.types.intern(ty))
     }
 
-    fn resolve_annot_bang(ctx: &mut Context, inner: TyId) -> Result<TyId> {
+    fn resolve_annot_bang(ctx: &mut Context, inner: TyId) -> Maybe<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
@@ -568,6 +770,14 @@ mod errors {
         pub expected: TyId,
         #[ctx]
         pub actual: TyId,
+    }
+
+    /// TODO This error should go in a type inference model when the day comes
+    /// that we add HM type inference to the language.
+    #[derive(Diagnostic)]
+    pub struct InferenceFailure {
+        #[msg = "could not infer a type for expression"]
+        pub span: Span,
     }
 
     #[derive(Diagnostic)]
