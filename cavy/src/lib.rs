@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 // pub mod alloc;
+pub mod analysis;
 pub mod arch;
 pub mod ast;
 pub mod cavy_errors;

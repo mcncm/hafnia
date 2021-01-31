@@ -84,6 +84,10 @@ impl ErrorBuf {
         self.0.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// Append another ErrorBuf onto this one
     pub fn append(&mut self, other: &mut ErrorBuf) {
         self.0.append(&mut other.0)

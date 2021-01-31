@@ -35,6 +35,8 @@ pub fn compile<'a, 'ctx>(entry_point: PathBuf, ctx: &'a mut Context<'ctx>) -> Re
         return Ok(());
     }
 
+    crate::analysis::check(&mir)?;
+
     // typecheck(&ctx, sess)?;
     //
     Ok(())

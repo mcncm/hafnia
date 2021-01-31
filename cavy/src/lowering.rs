@@ -279,8 +279,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // This is now the center of all type-checking
         self.expect_type(self.gr.locals[place].ty, ty, expr.span)?;
         match &expr.data {
-            ExprKind::BinOp { left, op, right } => self.lower_into_binop(place, left, op, right),
-            ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right),
+            ExprKind::BinOp { left, op, right } => {
+                self.lower_into_binop(place, left, op, right, &expr.span)
+            }
+            ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right, &expr.span),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Tuple(_) => {
@@ -312,6 +314,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         left: &Expr,
         op: &ast::BinOp,
         right: &Expr,
+        span: &Span,
     ) -> Maybe<()> {
         let ty = self.gr.locals[place].ty;
         // Let's assume for now that all the binops take the same two types, in
@@ -328,19 +331,34 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
         let l_op = Operand::Place(l_place);
         let r_op = Operand::Place(r_place);
-        let rhs = Rvalue::BinOp(op.data, l_op, r_op);
-        self.push_stmt(mir::Stmt { place, rhs });
+        let stmt = mir::Stmt {
+            place,
+            rhs: Rvalue {
+                span: *span,
+                data: RvalueKind::BinOp(op.data, l_op, r_op),
+            },
+        };
+        self.push_stmt(stmt);
         Ok(())
     }
 
-    fn lower_into_unop(&mut self, place: LocalId, op: &ast::UnOp, right: &Expr) -> Maybe<()> {
+    fn lower_into_unop(
+        &mut self,
+        place: LocalId,
+        op: &ast::UnOp,
+        right: &Expr,
+        span: &Span,
+    ) -> Maybe<()> {
         // Should not be here, of course
         let arg_ty = self.gamma.get(&right.node).unwrap();
         let r_place = self.gr.auto_local(*arg_ty);
         self.lower_into(r_place, right)?;
 
         let r_op = Operand::Place(r_place);
-        let rhs = Rvalue::UnOp(op.data, r_op);
+        let rhs = Rvalue {
+            span: *span,
+            data: RvalueKind::UnOp(op.data, r_op),
+        };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
     }
@@ -369,15 +387,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 Const::Nat(*n)
             }
         };
-        let rhs = Rvalue::Const(constant);
+        let rhs = Rvalue {
+            span: lit.span,
+            data: RvalueKind::Const(constant),
+        };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
     }
 
     fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Maybe<()> {
         let rhs = match self.st.get(&ident.data) {
-            // FIXME for now, pretend that all operations are `Copy`.
-            Some(local) => Rvalue::Copy(*local),
+            Some(id) => {
+                let local = &self.gr.locals[*id];
+                if local.ty.is_linear(self.ctx) {
+                    Rvalue {
+                        span: ident.span,
+                        data: RvalueKind::Move(*id),
+                    }
+                } else {
+                    Rvalue {
+                        span: ident.span,
+                        data: RvalueKind::Copy(*id),
+                    }
+                }
+            }
             None => {
                 return self.error(errors::UnboundName {
                     span: ident.span,

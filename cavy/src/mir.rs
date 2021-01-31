@@ -183,9 +183,16 @@ pub struct Stmt {
     pub place: LocalId,
     pub rhs: Rvalue,
 }
+
+#[derive(Debug)]
+pub struct Rvalue {
+    pub data: RvalueKind,
+    pub span: Span,
+}
+
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
-pub enum Rvalue {
+pub enum RvalueKind {
     BinOp(BinOp, Operand, Operand),
     UnOp(UnOp, Operand),
     Const(Const),
@@ -319,7 +326,7 @@ impl fmt::Display for Place {
     }
 }
 
-impl fmt::Display for Rvalue {
+impl fmt::Display for RvalueKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BinOp(op, left, right) => write!(f, "{} {} {}", left, op, right),
@@ -328,6 +335,12 @@ impl fmt::Display for Rvalue {
             Self::Copy(local) => write!(f, "copy {}", local),
             Self::Move(local) => write!(f, "move {}", local),
         }
+    }
+}
+
+impl fmt::Display for Rvalue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data)
     }
 }
 

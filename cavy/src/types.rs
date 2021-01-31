@@ -17,6 +17,12 @@ impl TyId {
             false
         }
     }
+
+    /// Mutually recursive with `Type::is_linear`.
+    pub fn is_linear(&self, ctx: &Context) -> bool {
+        let ty = &ctx.types[*self];
+        ty.is_linear(ctx)
+    }
 }
 
 /// This struct tracks the structural properties of a given type
@@ -58,6 +64,18 @@ impl Type {
     /// Create an instance of the size/index type
     pub const fn size_type() -> Self {
         Type::Uint(Uint::U32)
+    }
+
+    pub fn is_linear(&self, ctx: &Context) -> bool {
+        match self {
+            Type::Bool => false,
+            Type::Uint(_) => false,
+            Type::Q_Bool => true,
+            Type::Q_Uint(_) => true,
+            Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear(ctx)),
+            Type::Array(ty) => ty.is_linear(ctx),
+            Type::Measured(_) => false,
+        }
     }
 }
 
