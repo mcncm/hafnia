@@ -13,13 +13,16 @@
 //! * Most kinds of name resolution: we can't resolve types, so in particular we
 //!   can't check that type annotations refer to something in-scope.
 
-use crate::ast::{self, *};
 use crate::cavy_errors::{self, ErrorBuf, Maybe};
 use crate::context::Context;
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
     Token,
+};
+use crate::{
+    ast::{self, *},
+    store::Counter,
 };
 use crate::{num::Uint, types::Type};
 use errors::*;
@@ -71,6 +74,7 @@ pub struct Parser<'p, 'ctx> {
     /// We may want to parse more than one token stream in the future, so we
     /// don't want exclusive ownership of this data.
     ast: Ast,
+    /// The global context state
     ctx: &'p mut Context<'ctx>,
     /// Currently active symbol table.
     table_id: TableId,
@@ -140,7 +144,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// made in this file.
     #[inline(always)]
     fn node(&mut self, kind: ExprKind, span: Span) -> Expr {
-        Expr { data: kind, span }
+        Expr {
+            data: kind,
+            span,
+            node: self.ast.counter.new_index(),
+        }
     }
 
     /// Check if you're in a root table.
@@ -746,7 +754,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
-            Nat(_) | True | False => {
+            Nat(_, _) | True | False => {
                 let lit = ast::Literal::from_token(token, self.ctx).unwrap();
                 let lit_span = lit.span;
                 Ok(self.node(ExprKind::Literal(lit), lit_span))
@@ -801,6 +809,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let Expr {
             data: mut lhs,
             mut span,
+            ..
         } = lhs;
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {
@@ -979,7 +988,7 @@ mod tests {
                     let lexeme = match lit.data {
                         LiteralKind::True => Lexeme::True,
                         LiteralKind::False => Lexeme::False,
-                        LiteralKind::Nat(n) => Lexeme::Nat(n),
+                        LiteralKind::Nat(n, sz) => Lexeme::Nat(n, sz),
                     };
                     assert_eq!(lexeme, $($lit)*);
                 }
@@ -1027,8 +1036,8 @@ mod tests {
     #[test]
     fn single_nat_1() {
         test_parser! {
-            [Nat(1)],
-            {Nat(1)}
+            [Nat(1, None)],
+            {Nat(1, None)}
         };
     }
 
@@ -1036,8 +1045,8 @@ mod tests {
     #[should_panic]
     fn single_nat_2() {
         test_parser! {
-            [Nat(0)],
-            {Nat(1)}
+            [Nat(0, None)],
+            {Nat(1, None)}
         };
     }
 
@@ -1109,16 +1118,16 @@ mod tests {
     #[test]
     fn plus_simple() {
         test_parser! {
-            [Nat(1), Plus, Nat(1)],
-            ({Plus} {Nat(1)} {Nat(1)})
+            [Nat(1, None), Plus, Nat(1, None)],
+            ({Plus} {Nat(1, None)} {Nat(1, None)})
         }
     }
 
     #[test]
     fn star_simple() {
         test_parser! {
-            [Nat(1), Star, Nat(1)],
-            ({Times} {Nat(1)} {Nat(1)})
+            [Nat(1, None), Star, Nat(1, None)],
+            ({Times} {Nat(1, None)} {Nat(1, None)})
         }
     }
 
@@ -1126,10 +1135,10 @@ mod tests {
     #[rustfmt::skip]
     fn plus_left_assoc() {
         test_parser! {
-            [Nat(1), Plus, Nat(2), Plus, Nat(3)],
+            [Nat(1, None), Plus, Nat(2, None), Plus, Nat(3, None)],
             ({Plus}
-             ({Plus} {Nat(1)} {Nat(2)})
-             {Nat(3)})
+             ({Plus} {Nat(1, None)} {Nat(2, None)})
+             {Nat(3, None)})
         }
     }
 
@@ -1137,10 +1146,10 @@ mod tests {
     #[rustfmt::skip]
     fn star_left_assoc() {
         test_parser! {
-            [Nat(1), Star, Nat(2), Star, Nat(3)],
+            [Nat(1, None), Star, Nat(2, None), Star, Nat(3, None)],
             ({Times}
-             ({Times} {Nat(1)} {Nat(2)})
-             {Nat(3)})
+             ({Times} {Nat(1, None)} {Nat(2, None)})
+             {Nat(3, None)})
         }
     }
 
@@ -1148,10 +1157,10 @@ mod tests {
     #[rustfmt::skip]
     fn mixed_star_plus() {
         test_parser! {
-            [Nat(1), Star, Nat(2), Plus, Nat(3)],
+            [Nat(1, None), Star, Nat(2, None), Plus, Nat(3, None)],
             ({Plus}
-             ({Times} {Nat(1)} {Nat(2)})
-             {Nat(3)})
+             ({Times} {Nat(1, None)} {Nat(2, None)})
+             {Nat(3, None)})
         }
     }
 
@@ -1159,9 +1168,9 @@ mod tests {
     #[rustfmt::skip]
     fn mixed_plus_star() {
         test_parser! {
-            [Nat(1), Plus, Nat(2), Star, Nat(3)],
-            ({Plus} {Nat(1)}
-             ({Times} {Nat(2)} {Nat(3)}))
+            [Nat(1, None), Plus, Nat(2, None), Star, Nat(3, None)],
+            ({Plus} {Nat(1, None)}
+             ({Times} {Nat(2, None)} {Nat(3, None)}))
         }
     }
 
@@ -1169,10 +1178,10 @@ mod tests {
     #[rustfmt::skip]
     fn mixed_plus_equalequal() {
         test_parser! {
-            [Nat(2), Plus, Nat(2), EqualEqual, Nat(3), Plus, Nat(1)],
+            [Nat(2, None), Plus, Nat(2, None), EqualEqual, Nat(3, None), Plus, Nat(1, None)],
             ({Equal}
-             ({Plus} {Nat(2)} {Nat(2)})
-             ({Plus} {Nat(3)} {Nat(1)})
+             ({Plus} {Nat(2, None)} {Nat(2, None)})
+             ({Plus} {Nat(3, None)} {Nat(1, None)})
             )
         }
     }
@@ -1180,7 +1189,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn plus_nonterminal() {
-        test_parser! { [Nat(1), Plus, Plus] }
+        test_parser! { [Nat(1, None), Plus, Plus] }
     }
 
     //////////////////////////////
@@ -1190,26 +1199,26 @@ mod tests {
     #[test]
     fn bang_plus() {
         test_parser! {
-            [Bang, Nat(1), Plus, Nat(2)],
-            ({Plus} ({Delin} {Nat(1)}) {Nat(2)})
+            [Bang, Nat(1, None), Plus, Nat(2, None)],
+            ({Plus} ({Delin} {Nat(1, None)}) {Nat(2, None)})
         }
     }
 
     #[test]
     fn plus_bang() {
         test_parser! {
-            [Nat(1), Plus, Bang, Nat(2)],
-            ({Plus} {Nat(1)} ({Delin} {Nat(2)}))
+            [Nat(1, None), Plus, Bang, Nat(2, None)],
+            ({Plus} {Nat(1, None)} ({Delin} {Nat(2, None)}))
         }
     }
 
     #[test]
     fn plus_bang_plus() {
         test_parser! {
-            [Nat(1), Plus, Bang, Nat(2), Plus, Nat(3)],
+            [Nat(1, None), Plus, Bang, Nat(2, None), Plus, Nat(3, None)],
             ({Plus}
-             ({Plus} {Nat(1)} ({Delin} {Nat(2)}))
-             {Nat(3)})
+             ({Plus} {Nat(1, None)} ({Delin} {Nat(2, None)}))
+             {Nat(3, None)})
         }
     }
 
@@ -1221,8 +1230,8 @@ mod tests {
     #[test]
     fn non_operator() {
         test_parser! {
-            [Nat(1), Plus, Nat(2), Semicolon, Nat(4)],
-            ({Plus} {Nat(1)} {Nat(2)})
+            [Nat(1, None), Plus, Nat(2, None), Semicolon, Nat(4, None)],
+            ({Plus} {Nat(1, None)} {Nat(2, None)})
         }
     }
 
@@ -1232,9 +1241,9 @@ mod tests {
     #[should_panic]
     fn non_operator_sanity_check() {
         test_parser! {
-            [Nat(1), Plus, Nat(2), Plus, Nat(3), Plus, Nat(4)],
-            ({Plus} {Nat(1)}
-             ({Plus} {Nat(2)} {Nat(3)}))
+            [Nat(1, None), Plus, Nat(2, None), Plus, Nat(3, None), Plus, Nat(4, None)],
+            ({Plus} {Nat(1, None)}
+             ({Plus} {Nat(2, None)} {Nat(3, None)}))
         }
     }
 }

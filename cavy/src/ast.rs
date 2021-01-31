@@ -7,10 +7,13 @@
 //! found in rustc. `ast.rs` is somewhere in between that compiler's AST and
 //! HIR, while the CFG is very similar to its MIR.
 
-use crate::context::{Context, SymbolId};
 use crate::num::Uint;
 use crate::source::Span;
 use crate::token::{Token, Unsigned};
+use crate::{
+    context::{Context, SymbolId},
+    store::Counter,
+};
 use crate::{index_type, interner_type, store_type};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -24,6 +27,7 @@ use std::fmt;
 store_type! { FnStore : FnId -> Func }
 store_type! { BodyStore : BodyId -> Expr }
 store_type! { TableStore : TableId -> Table }
+index_type! { NodeId }
 
 /// This data structure holds the AST-level symbol tables, etc., associated with
 /// a single compilation unit. All the surrounding data structures used by
@@ -37,6 +41,10 @@ pub struct Ast {
     pub bodies: BodyStore,
     /// Symbol tables associated with scoped environments
     pub tables: TableStore,
+    /// Node Id counter. This might not be necessary if we choose to put each
+    /// node into a flat array ('store'), as we've done with the functions,
+    /// function bodies and tables.
+    pub counter: Counter<NodeId>,
     /// `main` function
     pub entry_point: Option<FnId>,
 }
@@ -294,14 +302,16 @@ pub type Literal = Spanned<LiteralKind>;
 pub enum LiteralKind {
     True,
     False,
-    Nat(Unsigned),
+    /// A natural number literal consists of a number in the internal
+    /// representation, together with an optional tag representing its size.
+    Nat(Unsigned, Option<Uint>),
 }
 
 impl FromToken for Literal {
     fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
-            Nat(n) => LiteralKind::Nat(n),
+            Nat(n, sz) => LiteralKind::Nat(n, sz),
             True => LiteralKind::True,
             False => LiteralKind::False,
             _ => {
@@ -316,7 +326,12 @@ impl FromToken for Literal {
 }
 
 /// Expression node.
-pub type Expr = Spanned<ExprKind>;
+#[derive(Debug, Clone)]
+pub struct Expr {
+    pub data: ExprKind,
+    pub span: Span,
+    pub node: NodeId,
+}
 
 /// A kind of expression node.
 #[derive(Debug, Clone)]

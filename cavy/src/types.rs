@@ -9,6 +9,16 @@ use std::fmt;
 
 interner_type! { TypeInterner : TyId -> Type }
 
+impl TyId {
+    pub fn is_uint(&self, ctx: &Context) -> bool {
+        if let Type::Uint(_) = ctx.types[*self] {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// This struct tracks the structural properties of a given type
 struct StructuralDiscipline {
     linear: bool,

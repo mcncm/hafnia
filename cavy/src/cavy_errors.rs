@@ -150,7 +150,7 @@ impl<'d> DiagnosticFmt<'d> {
         let line = src.get_line(span.start);
         // FIXME assume for now that spans don't cross lines
         if src.get_line(span.end) != line {
-            panic!("Span crossed a line boundary");
+            return String::from("Multiline span");
         }
         // Columns to annotate: remember that columns are 1-indexed.
         let start = span.start.col;
@@ -163,9 +163,14 @@ impl<'d> DiagnosticFmt<'d> {
         // really be some kind of "join" over reported lines.
         let origin = format!("{} {}", src.origin, span);
         let report = format!(
-            "{s:digits$} |\n{s:digits$} | {}\n{s:digits$} | {s:start$}{}",
+            "\
+{s:digits$} |
+{linum:digits$} | {}
+{s:digits$} | {s:start$}{}\
+",
             line,
             annot,
+            linum = span.start.line,
             s = "",
             digits = digits,
             // start of annotation

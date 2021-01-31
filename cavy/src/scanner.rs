@@ -1,4 +1,5 @@
 use crate::context::Context;
+use crate::num::Uint;
 use crate::source::{Span, SrcId, SrcObject, SrcPoint, SrcStore};
 use crate::token::Lexeme::{Ident, Nat};
 use crate::{
@@ -117,13 +118,13 @@ impl<'src> ScanHead<'src> {
     fn next_raw_char(&mut self) -> Option<char> {
         let next = self.src.next();
         if let Some(ch) = next {
-            self.pos += 1;
-            self.col += 1;
             if ch == '\n' {
                 self.newlines.push(self.pos);
                 self.line += 1;
-                self.col = 1;
+                self.col = 0;
             }
+            self.pos += 1;
+            self.col += 1;
         }
         next
     }
@@ -360,18 +361,39 @@ impl<'s> Scanner<'s> {
     }
 
     /// Either completes a `Nat` token ands adds it to the Scanner's `tokens`
-    /// vector, or adds an error. `Nat`s must consist solely of ascii digits.
+    /// vector, or adds an error. `Nat`s must consist solely of ascii digits
+    /// followed by an optional size specifier.
     fn consume_nat(&mut self) {
+        let mut sz = None;
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
                 self.next_char();
             } else if is_ident_char(*ch) {
-                self.errors.push(errors::NonDigitInNumber {
-                    span: self.loc_span(),
-                });
-                self.synchronize_to_non_alphanum();
-                self.token_buf.clear();
-                return;
+                // Get a size specifier, if you can. This solution, in which
+                // push a temporary to the token buffer, isn't easily compatible
+                // with turning the Scanner into an iterator. Also requires some
+                // awkward pointer juggling. This is by far the most awkward chunk of
+                // code in the scanner, in obvious need of reform.
+                let mut buf = TokenBuf::new();
+                std::mem::swap(&mut self.token_buf, &mut buf);
+                self.consume_ident();
+                let spec = self.tokens.pop().unwrap().lexeme;
+                std::mem::swap(&mut self.token_buf, &mut buf);
+                sz = match spec {
+                    Lexeme::U4 => Some(Uint::U4),
+                    Lexeme::U8 => Some(Uint::U8),
+                    Lexeme::U16 => Some(Uint::U16),
+                    Lexeme::U32 => Some(Uint::U32),
+                    _ => {
+                        self.errors.push(errors::NonDigitInNumber {
+                            span: self.loc_span(),
+                        });
+                        self.synchronize_to_non_alphanum();
+                        self.token_buf.clear();
+                        return;
+                    }
+                };
+                break;
             } else {
                 break;
             }
@@ -379,8 +401,9 @@ impl<'s> Scanner<'s> {
 
         // Shouldn't fail except for numbers larger than an `Unsigned`!
         let value: Result<Unsigned, _> = self.token_buf.digest().parse();
+
         if let Ok(value) = value {
-            push_token!(self, Nat(value));
+            push_token!(self, Nat(value, sz));
         } else {
             self.errors.push(errors::UnparsableNumber {
                 span: self.token_span(),
@@ -503,26 +526,32 @@ mod tests {
 
     #[test]
     fn numbers_simple() {
-        lex_test!("12 + 3 * 0"; Nat(12), Plus, Nat(3), Star, Nat(0));
+        lex_test!("12 + 3 * 0"; Nat(12, None), Plus, Nat(3, None), Star, Nat(0, None));
     }
 
     #[test]
     fn numbers_equality() {
-        lex_test!("1 == 1"; Nat(1), EqualEqual, Nat(1));
+        lex_test!("1 == 1"; Nat(1, None), EqualEqual, Nat(1, None));
     }
 
     #[test]
     fn numbers_equality_no_whitespace() {
-        lex_test!("2==2"; Nat(2), EqualEqual, Nat(2));
+        lex_test!("2==2"; Nat(2, None), EqualEqual, Nat(2, None));
     }
     #[test]
     fn numbers_inequality() {
-        lex_test!("3 ~= 3"; Nat(3), TildeEqual, Nat(3));
+        lex_test!("3 ~= 3"; Nat(3, None), TildeEqual, Nat(3, None));
     }
 
     #[test]
     fn numbers_no_whitespace() {
-        lex_test!("12*3"; Nat(12), Star, Nat(3));
+        lex_test!("12*3"; Nat(12, None), Star, Nat(3, None));
+    }
+
+    #[test]
+    fn number_with_specifier() {
+        use crate::num::Uint;
+        lex_test!("123u8"; Nat(123, Some(Uint::U8)));
     }
 
     // These `should_panic` tests are insufficiently sensitive: they don't in
@@ -531,13 +560,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn invalid_number_1() {
-        lex_test!("123if234"; Nat(123), If, Nat(234));
+        lex_test!("123if234"; Nat(123, None), If, Nat(234, None));
     }
 
     #[test]
     #[should_panic]
     fn invalid_number_2() {
-        lex_test!("123else"; Nat(123), Else);
+        lex_test!("123else"; Nat(123, None), Else);
     }
 
     #[test]
@@ -545,7 +574,7 @@ mod tests {
     #[allow(overflowing_literals)]
     fn large_number() {
         lex_test!("1111111111111111111111111111111";
-                  Nat(1111111111111111111111111111111)
+                  Nat(1111111111111111111111111111111, None)
         );
     }
 
@@ -619,7 +648,7 @@ mod tests {
     #[test]
     fn comment_on_own_line() {
         lex_test!("// now do other stuff\n1 + 2";
-                  Nat(1), Plus, Nat(2)
+                  Nat(1, None), Plus, Nat(2, None)
         );
     }
 }

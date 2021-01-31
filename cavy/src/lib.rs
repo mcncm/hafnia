@@ -14,6 +14,7 @@ pub mod session;
 // pub mod environment;
 // pub mod functions;
 // pub mod interpreter;
+// pub mod inference;
 pub mod parser;
 // pub mod qram;
 pub mod scanner;

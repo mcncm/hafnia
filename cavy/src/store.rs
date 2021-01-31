@@ -21,6 +21,37 @@ pub trait Index: Default + Clone + Copy + Eq {
     fn into_usize(&self) -> usize;
 }
 
+/// An index counter, which you might want to make independently of a store or
+/// interner.
+#[derive(Default, Debug)]
+pub struct Counter<I: Index> {
+    inner: u32,
+    phantom: PhantomData<I>,
+}
+
+impl<I> Counter<I>
+where
+    I: Index,
+{
+    pub fn new() -> Self {
+        Self {
+            inner: 0,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn new_index(&mut self) -> I {
+        let idx = I::new(self.inner);
+        self.inner += 1;
+        idx
+    }
+
+    /// The number of indices emitted so far
+    pub fn count(&self) -> usize {
+        self.inner as usize
+    }
+}
+
 /// A macro for building implementers of Index. This is exactly analogous to
 /// rustc's `rustc_index::newtype_index`.
 ///

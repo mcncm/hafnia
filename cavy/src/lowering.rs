@@ -1,7 +1,10 @@
-use crate::cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe};
 use crate::{
     ast::{self, *},
     source::Span,
+};
+use crate::{
+    cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
+    num::Uint,
 };
 // use crate::functions::{Func, UserFunc};
 use crate::context::{Context, SymbolId};
@@ -79,13 +82,13 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             .params
             .iter()
             .map(|p| {
-                let ty = typecheck::resolve_type(&p.ty, tab, &mut self.ctx);
+                let ty = typing::resolve_type(&p.ty, tab, &mut self.ctx);
                 Ok((p.name.data, ty?))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let output = match &sig.output {
             None => self.ctx.types.intern(Type::unit()),
-            Some(annot) => typecheck::resolve_type(annot, tab, &mut self.ctx)?,
+            Some(annot) => typing::resolve_type(annot, tab, &mut self.ctx)?,
         };
         let sig = TypedSig {
             params,
@@ -103,7 +106,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 /// one. This should be a little less expensive than a linked list, since we
 /// need only clear a table and move back the cursor to pop a table.
 ///
-/// Note: nobody is stopping you from trying to pop beyond the first table. such
+/// Note: nobody is stopping you from trying to pop beyond the first table. Such
 /// underflow would be a bug; therefore you must be careful always to call
 /// `push_table` and `pop_table` in pairs.
 struct SymbolTable {
@@ -167,6 +170,8 @@ pub struct GraphBuilder<'mir, 'ctx> {
     st: SymbolTable,
     /// The currently active items table
     table: TableId,
+    /// A "typing context" of types assigned to each expression node
+    gamma: HashMap<NodeId, TyId>,
     /// The currently active basic block
     cursor: BlockId,
     /// This function's signature
@@ -208,6 +213,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             table,
             cursor,
             sig,
+            gamma: HashMap::new(),
             errors: ErrorBuf::new(),
         }
     }
@@ -269,6 +275,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     #[allow(unused_variables)]
     pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
+        let ty = self.type_expr(expr)?;
+        // This is now the center of all type-checking
+        self.expect_type(self.gr.locals[place].ty, ty, expr.span)?;
         match &expr.data {
             ExprKind::BinOp { left, op, right } => self.lower_into_binop(place, left, op, right),
             ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right),
@@ -325,10 +334,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_unop(&mut self, place: LocalId, op: &ast::UnOp, right: &Expr) -> Maybe<()> {
-        // NOTE this is explicitly incorrect
-        let ty = self.gr.locals[place].ty;
         // Should not be here, of course
-        let r_place = self.gr.auto_local(ty);
+        let arg_ty = self.gamma.get(&right.node).unwrap();
+        let r_place = self.gr.auto_local(*arg_ty);
         self.lower_into(r_place, right)?;
 
         let r_op = Operand::Place(r_place);
@@ -348,18 +356,16 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.expect_type(ty, self.ctx.common.bool, lit.span)?;
                 Const::False
             }
-            LiteralKind::Nat(n) => {
-                if ty != self.ctx.common.u4
-                    && ty != self.ctx.common.u8
-                    && ty != self.ctx.common.u16
-                    && ty != self.ctx.common.u32
-                {
-                    self.error(errors::ExpectedType {
-                        span: lit.span,
-                        expected: ty,
-                        actual: self.ctx.common.u32,
-                    })?;
-                }
+            LiteralKind::Nat(n, sz) => {
+                let lit_ty = match sz {
+                    Some(Uint::U2) => todo!(),
+                    Some(Uint::U4) => self.ctx.common.u4,
+                    Some(Uint::U8) => self.ctx.common.u8,
+                    Some(Uint::U16) => self.ctx.common.u16,
+                    Some(Uint::U32) => self.ctx.common.u32,
+                    None => self.ctx.common.u32,
+                };
+                self.expect_type(ty, lit_ty, lit.span)?;
                 Const::Nat(*n)
             }
         };
@@ -422,12 +428,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         //
         // TODO: Again, I'm cheating by trying to fit this into a
         // `bool`, when it could also be a `?bool`.
-        let cond_ty = match self.infer_type(cond) {
-            Some(ty) => ty,
-            None => {
-                return self.error(errors::InferenceFailure { span: cond.span });
-            }
-        };
+        let cond_ty = self.type_expr(cond)?;
         let cond_place = self.gr.auto_local(cond_ty);
         let cond = self.lower_into(cond_place, cond);
         let tail_block = self.new_block();
@@ -480,11 +481,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     // This should work if we ever have proper type inferece; in
                     // the *near* future it should emit an error message, but for now let's just fail.
                     (None, None) => unimplemented!(),
-                    (Some(ty), _) => typecheck::resolve_type(ty, &self.table, self.ctx)?,
-                    (_, Some(rhs)) => match self.infer_type(rhs) {
-                        Some(ty) => ty,
-                        None => return self.error(errors::InferenceFailure { span: rhs.span }),
-                    },
+                    (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
+                    (_, Some(rhs)) => self.type_inner(rhs)?,
                 };
                 let place = self.gr.user_local(ty);
                 self.st.insert(lhs.data, place);
@@ -497,12 +495,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 }
 
-/// This module provides some helper functions for resolving type annotations,
-/// and might contain a little bit of ad-hoc type inference logic. Should we
-/// ever add real type inference, it will be broken out into another file or
-/// even a separate crate.
-mod typecheck {
+mod typing {
+    //! This module provides some helper functions for resolving type
+    //! annotations, and might contain a little bit of ad-hoc type inference
+    //! logic. The type inference supported here is supposed to be minimal, as
+    //! it's not the main focus of this language. Should we ever add "real"
+    //! Hindley-Milner type inference, it will be broken out into another file
+    //! or even a separate crate.
     use super::*;
+    use crate::{index_type, store::Counter};
 
     /// These should all be very small, simple types. We have nothing fancy: no
     /// generics, just a few numeric types, and so on.
@@ -541,6 +542,227 @@ mod typecheck {
         assert_eq!(v1, expect);
     }
 
+    index_type! { TyVarId }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct TyVar {
+        /// Is this type constrained to be linear or not?
+        lin: Option<bool>,
+        kind: TyVarKind,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum TyVarKind {
+        /// An unrestricted type variable
+        Var(TyVarId),
+        /// A type variable that must be an integer type (e.g. `u8`, `?u8`, ...)
+        // I guess we'll give this class of type variables the option of being
+        // linear or nonlinear. We can then assert equality of a linear one with
+        // a nonlinear one. These can be appropriately unified, since they
+        // always come in pairs.
+        Int(TyVarId),
+        /// A `bool` or `?bool`
+        Boolean(TyVarId),
+    }
+
+    /// An inference type: either a concrete type or a type variable.
+    #[derive(Debug, Clone, Copy)]
+    pub enum InfTy {
+        TyId(TyId),
+        TyVar(TyVar),
+    }
+
+    /// A type constraint, or type equation, in which the left- and right- hand
+    /// inference types are asserted equal.
+    #[derive(Debug)]
+    pub struct TyConstr(InfTy, InfTy);
+
+    /// An inference context in which to solve types.
+    struct InfCtx<'a, 'ctx> {
+        /// The *single expression* whose type we're trying to solve
+        root: &'a Expr,
+        /// The items table from the AST
+        tab: &'a ast::Table,
+        /// The calling graph builder
+        builder: &'a GraphBuilder<'a, 'ctx>,
+        /// A counter for type variables
+        ctr: Counter<TyVarId>,
+        /// A typing context mapping expressions to the inference type currently
+        /// held for them.
+        gamma: HashMap<NodeId, InfTy>,
+        /// The currently-active type constraints
+        constrs: Vec<TyConstr>,
+    }
+
+    impl<'a, 'ctx> InfCtx<'a, 'ctx> {
+        fn new(expr: &'a Expr, tab: &'a Table, builder: &'a GraphBuilder<'a, 'ctx>) -> Self {
+            InfCtx {
+                root: expr,
+                tab,
+                builder,
+                ctr: Counter::new(),
+                gamma: HashMap::new(),
+                constrs: Vec::new(),
+            }
+        }
+
+        // fn unify_constr(&mut self, constr: &TyConstr) {
+        //     let TyConstr(left, right) = constr;
+        //     match (left, right) {
+        //         (InfTy::TyId(idl), InfTy::TyId(idr)) => {}
+        //         (InfTy::TyId(id), InfTy::TyVar(var)) | (InfTy::TyVar(var), InfTy::TyId(id)) => {}
+        //         (InfTy::TyVar(varl), InfTy::TyVar(varr)) => {}
+        //     }
+        // }
+
+        /// Assert a known type for the top-level expression
+        fn as_type(mut self, ty: TyId) -> Self {
+            self.gamma.insert(self.root.node, InfTy::TyId(ty));
+            self
+        }
+
+        /// Produce an assignment of all subexpressions
+        fn infer(mut self) -> Option<HashMap<&'a Expr, TyId>> {
+            self.walk();
+            None
+            //
+        }
+
+        /// Walk the tree, inserting type variables and constraints for each
+        /// subexpression. This should probably never fail; we're just naming things.
+        fn walk(&mut self) {
+            // If we didn't call `as_type`, insert an unconditional type variable at the root.
+            // FIXME this is currently incorrect: it will be overwritten.
+            if let None = self.gamma.get(&self.root.node) {
+                self.gamma.insert(
+                    self.root.node,
+                    InfTy::TyVar(TyVar {
+                        lin: None,
+                        kind: TyVarKind::Var(self.ctr.new_index()),
+                    }),
+                );
+            }
+            self.walk_inner(self.root);
+        }
+
+        #[allow(unused_variables)]
+        fn walk_inner(&mut self, expr: &Expr) -> InfTy {
+            let node = expr.node;
+            match &expr.data {
+                ExprKind::BinOp { left, op, right } => self.walk_binop(node, left, op, right),
+                ExprKind::UnOp { op, right } => self.walk_unop(node, op, right),
+                ExprKind::Literal(lit) => match &lit.data {
+                    LiteralKind::True => self.new_boolean(node),
+                    LiteralKind::False => self.new_boolean(node),
+                    LiteralKind::Nat(_, _) => self.new_int(node, None),
+                },
+                ExprKind::Ident(ident) => {
+                    // NOTE we're not yet inferencing over the whole procedure;
+                    // if we see an index, all there is to do is look it up in
+                    // the graph.
+                    //
+                    // This unwrap should be replaced with... something else.
+                    let local = self.builder.st.get(&ident.data).unwrap();
+                    let local = &self.builder.gr.locals[*local];
+                    let ty = InfTy::TyId(local.ty);
+                    self.gamma.insert(node, ty);
+                    ty
+                }
+                ExprKind::Tuple(_) => todo!(),
+                ExprKind::IntArr { item, reps } => todo!(),
+                ExprKind::ExtArr(_) => todo!(),
+                ExprKind::Block(_) => todo!(),
+                ExprKind::If { cond, dir, ind } => todo!(),
+                ExprKind::For { bind, iter, body } => todo!(),
+                ExprKind::Call { callee, args } => todo!(),
+                ExprKind::Index { head, index } => todo!(),
+            }
+        }
+
+        #[allow(unused_variables)]
+        fn walk_binop(
+            &mut self,
+            node: NodeId,
+            left: &Expr,
+            op: &ast::BinOp,
+            right: &Expr,
+        ) -> InfTy {
+            match &op.data {
+                BinOpKind::Nequal | BinOpKind::Equal => {
+                    let ty = self.new_boolean(node);
+                    let left = self.walk_inner(left);
+                    let right = self.walk_inner(right);
+                    self.new_const(ty, left);
+                    self.new_const(ty, right);
+                    ty
+                }
+                BinOpKind::DotDot => todo!(),
+                BinOpKind::Plus | BinOpKind::Minus | BinOpKind::Times => {
+                    let ty = self.new_int(node, None);
+                    let left = self.walk_inner(left);
+                    let right = self.walk_inner(right);
+                    self.new_const(ty, left);
+                    self.new_const(ty, right);
+                    ty
+                }
+                BinOpKind::Mod => todo!(),
+                BinOpKind::Less => todo!(),
+                BinOpKind::Greater => todo!(),
+            }
+        }
+
+        #[allow(unused_variables)]
+        fn walk_unop(&mut self, node: NodeId, op: &ast::UnOp, right: &Expr) -> InfTy {
+            match &op.data {
+                UnOpKind::Minus => {
+                    let ty = self.new_int(node, None);
+                    let right = self.walk_inner(right);
+                    self.new_const(ty, right);
+                    ty
+                }
+                UnOpKind::Not => {
+                    let ty = self.new_boolean(node);
+                    let right = self.walk_inner(right);
+                    self.new_const(ty, right);
+                    ty
+                }
+                UnOpKind::Linear => todo!(),
+                UnOpKind::Delin => todo!(),
+            }
+        }
+
+        fn new_const(&mut self, left: InfTy, right: InfTy) {
+            self.constrs.push(TyConstr(left, right));
+        }
+
+        fn new_boolean(&mut self, node: NodeId) -> InfTy {
+            let ty = InfTy::TyVar(TyVar {
+                lin: None,
+                kind: TyVarKind::Boolean(self.ctr.new_index()),
+            });
+            self.gamma.insert(node, ty);
+            ty
+        }
+
+        fn new_var(&mut self, node: NodeId) -> InfTy {
+            let ty = InfTy::TyVar(TyVar {
+                lin: None,
+                kind: TyVarKind::Var(self.ctr.new_index()),
+            });
+            self.gamma.insert(node, ty);
+            ty
+        }
+
+        fn new_int(&mut self, node: NodeId, lin: Option<bool>) -> InfTy {
+            let ty = InfTy::TyVar(TyVar {
+                lin,
+                kind: TyVarKind::Int(self.ctr.new_index()),
+            });
+            self.gamma.insert(node, ty);
+            ty
+        }
+    }
+
     /// We're not doing full type inference, but we do need to know what to do
     /// when we call a function and ignore its return value. Or, when we move a
     /// variable into a new binding that doesn't have an annotation. These
@@ -550,142 +772,137 @@ mod typecheck {
     ///
     /// Also note that all this is a horribly inefficient stopgap.
     impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
-        pub fn infer_type<'a>(&self, expr: &Expr) -> Option<TyId> {
-            let tys = self.infer_type_inner(expr);
-            // This is very naive and silly, but I just want to get *some* element,
-            // if there is one.
-            tys.last().map(|t| *t)
+        pub fn type_expr<'a>(&mut self, expr: &Expr) -> Maybe<TyId> {
+            if let Some(ty) = self.gamma.get(&expr.node) {
+                return Ok(*ty);
+            }
+            self.type_inner(expr)
         }
 
         #[allow(unused_variables)]
-        pub fn infer_type_inner(&self, expr: &Expr) -> TySet {
-            match &expr.data {
-                ExprKind::BinOp { left, op, right } => self.infer_binop(left, op, right),
-                ExprKind::UnOp { op, right } => self.infer_unop(op, right),
-                ExprKind::Literal(lit) => self.infer_literal(lit),
-                ExprKind::Ident(ident) => self.infer_ident(ident),
+        pub fn type_inner(&mut self, expr: &Expr) -> Maybe<TyId> {
+            let ty = match &expr.data {
+                ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
+                ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
+                ExprKind::Literal(lit) => self.type_literal(lit)?,
+                ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Tuple(_) => todo!(),
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
-                ExprKind::Block(block) => self.infer_block(block),
-                ExprKind::If { cond, dir, ind } => {
-                    let mut dir = self.infer_block(dir);
-                    let ind = ind
-                        .as_ref()
-                        .map_or(vec![self.ctx.common.unit], |b| self.infer_block(&b));
-                    intersect(&mut dir, &ind);
-                    dir
-                }
+                ExprKind::Block(block) => self.type_block(block)?,
+                ExprKind::If { cond, dir, ind } => todo!(),
                 ExprKind::For { bind, iter, body } => {
                     // should be the unit type
-                    vec![self.ctx.common.unit]
+                    self.ctx.common.unit
                 }
                 ExprKind::Call { callee, args } => todo!(),
                 ExprKind::Index { head, index } => todo!(),
-            }
+            };
+            self.gamma.insert(expr.node, ty);
+            Ok(ty)
         }
 
-        fn infer_binop(&self, left: &Expr, op: &ast::BinOp, right: &Expr) -> TySet {
+        fn type_binop(&mut self, left: &Expr, op: &ast::BinOp, right: &Expr) -> Maybe<TyId> {
             // let set = TySet::new();
             // set
 
-            let mut left = self.infer_type_inner(left);
-            let right = self.infer_type_inner(right);
+            let left = self.type_inner(left)?;
+            let right = self.type_inner(right)?;
 
             match &op.data {
-                BinOpKind::Equal => vec![self.ctx.common.bool, self.ctx.common.q_bool],
-                BinOpKind::Nequal => vec![self.ctx.common.bool, self.ctx.common.q_bool],
+                BinOpKind::Equal | BinOpKind::Nequal => {
+                    if left == right {
+                        Ok(left)
+                    } else {
+                        Err(self.errors.push(errors::BinOpTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            left,
+                            right,
+                        }))
+                    }
+                }
                 BinOpKind::DotDot => todo!(),
-                BinOpKind::Plus => {
-                    intersect(&mut left, &right);
-                    left
+                BinOpKind::Plus | BinOpKind::Times => {
+                    if (left == right) & left.is_uint(&self.ctx) {
+                        Ok(left)
+                    } else {
+                        Err(self.errors.push(errors::BinOpTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            left,
+                            right,
+                        }))
+                    }
                 }
                 BinOpKind::Minus => todo!(),
-                BinOpKind::Times => {
-                    intersect(&mut left, &right);
-                    left
-                }
                 BinOpKind::Mod => todo!(),
                 BinOpKind::Less => todo!(),
                 BinOpKind::Greater => todo!(),
             }
         }
 
-        fn infer_unop(&self, op: &ast::UnOp, right: &Expr) -> TySet {
-            let right = self.infer_type_inner(right);
+        fn type_unop(&mut self, op: &ast::UnOp, right: &Expr) -> Maybe<TyId> {
+            let right = self.type_inner(right)?;
             match &op.data {
                 UnOpKind::Minus => todo!(),
-                UnOpKind::Not => right,
+                UnOpKind::Not => Ok(right),
                 UnOpKind::Linear => {
-                    let mut tys = TySet::new();
-                    for ty in right {
-                        if ty == self.ctx.common.bool {
-                            tys.push(self.ctx.common.q_bool)
-                        } else if ty == self.ctx.common.u4 {
-                            tys.push(self.ctx.common.q_u4)
-                        } else if ty == self.ctx.common.u8 {
-                            tys.push(self.ctx.common.q_u8)
-                        } else if ty == self.ctx.common.u16 {
-                            tys.push(self.ctx.common.q_u16)
-                        } else if ty == self.ctx.common.u32 {
-                            tys.push(self.ctx.common.q_u32)
-                        }
+                    if right == self.ctx.common.bool {
+                        Ok(self.ctx.common.q_bool)
+                    } else if right == self.ctx.common.u4 {
+                        Ok(self.ctx.common.q_u4)
+                    } else if right == self.ctx.common.u8 {
+                        Ok(self.ctx.common.q_u8)
+                    } else if right == self.ctx.common.u16 {
+                        Ok(self.ctx.common.q_u16)
+                    } else if right == self.ctx.common.u32 {
+                        Ok(self.ctx.common.q_u32)
+                    } else {
+                        Err(self.errors.push(errors::UnOpOutTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            ty: right,
+                        }))
                     }
-                    tys.sort();
-                    tys
                 }
-                UnOpKind::Delin => {
-                    let mut tys = TySet::new();
-                    for ty in right {
-                        if ty == self.ctx.common.q_bool {
-                            tys.push(self.ctx.common.bool)
-                        } else if ty == self.ctx.common.q_u4 {
-                            tys.push(self.ctx.common.u4)
-                        } else if ty == self.ctx.common.q_u8 {
-                            tys.push(self.ctx.common.u8)
-                        } else if ty == self.ctx.common.q_u16 {
-                            tys.push(self.ctx.common.u16)
-                        } else if ty == self.ctx.common.q_u32 {
-                            tys.push(self.ctx.common.u32)
-                        }
-                    }
-                    tys.sort();
-                    tys
-                }
+                UnOpKind::Delin => todo!(),
             }
         }
 
-        fn infer_literal(&self, lit: &Literal) -> TySet {
-            let mut tys = match &lit.data {
-                LiteralKind::True => vec![self.ctx.common.bool],
-                LiteralKind::False => vec![self.ctx.common.bool],
-                LiteralKind::Nat(_) => {
-                    vec![
-                        self.ctx.common.u4,
-                        self.ctx.common.u8,
-                        self.ctx.common.u16,
-                        self.ctx.common.u32,
-                    ]
+        fn type_literal(&mut self, lit: &Literal) -> Maybe<TyId> {
+            let ty = match &lit.data {
+                LiteralKind::True => self.ctx.common.bool,
+                LiteralKind::False => self.ctx.common.bool,
+                LiteralKind::Nat(_, Some(Uint::U2)) => todo!(),
+                LiteralKind::Nat(_, Some(Uint::U4)) => self.ctx.common.u4,
+                LiteralKind::Nat(_, Some(Uint::U8)) => self.ctx.common.u8,
+                LiteralKind::Nat(_, Some(Uint::U16)) => self.ctx.common.u16,
+                LiteralKind::Nat(_, Some(Uint::U32)) => self.ctx.common.u32,
+                LiteralKind::Nat(_, None) => self.ctx.common.u32,
+            };
+            Ok(ty)
+        }
+
+        fn type_block(&mut self, block: &Block) -> Maybe<TyId> {
+            match &block.expr {
+                Some(expr) => self.type_inner(expr),
+                None => Ok(self.ctx.common.unit),
+            }
+        }
+
+        fn type_ident(&mut self, ident: &Ident) -> Maybe<TyId> {
+            let local = match self.st.get(&ident.data) {
+                Some(local) => local,
+                None => {
+                    return Err(self.errors.push(errors::UnboundName {
+                        span: ident.span,
+                        name: ident.data,
+                    }));
                 }
             };
-            tys.sort();
-            tys
-        }
-
-        fn infer_block(&self, block: &Block) -> TySet {
-            match &block.expr {
-                Some(expr) => self.infer_type_inner(expr),
-                None => vec![self.ctx.common.unit],
-            }
-        }
-
-        fn infer_ident(&self, ident: &Ident) -> TySet {
-            let mut set = TySet::new();
-            if let Some(local) = self.st.get(&ident.data) {
-                set.push(self.gr.locals[*local].ty)
-            }
-
-            set
+            let local = &self.gr.locals[*local];
+            Ok(local.ty)
         }
     }
 
@@ -795,7 +1012,7 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    pub struct UnOpTypeError {
+    pub struct UnOpArgTypeError {
         #[msg = "operator `{kind}` doesn't support argument type `{right}`"]
         pub span: Span,
         /// The operator
@@ -803,6 +1020,17 @@ mod errors {
         /// The actual right operand type
         #[ctx]
         pub right: TyId,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct UnOpOutTypeError {
+        #[msg = "operator `{kind}` doesn't support output type `{ty}`"]
+        pub span: Span,
+        /// The operator
+        pub kind: UnOpKind,
+        /// The actual output type
+        #[ctx]
+        pub ty: TyId,
     }
 
     #[derive(Diagnostic)]

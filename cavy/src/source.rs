@@ -46,15 +46,14 @@ impl SrcObject {
         // otherwise (to exclude newline character)
         let ln_start = match n {
             0 => 0,
-            n => self.newlines[n - 1],
+            n => self.newlines[n - 1] + 1,
         };
 
         // line end
         let ln_end = if n == self.newlines.len() {
             self.code.len()
         } else {
-            // don’t include the newline itself
-            self.newlines[n] - 1
+            self.newlines[n]
         };
 
         &self.code[ln_start..ln_end]
