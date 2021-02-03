@@ -32,16 +32,6 @@ args:
         - "2"
         - "3"
       required: false
-  - qbcount:
-      short: q
-      long: qbcount
-      value_name: QBCOUNT
-      about: The number of qubits of your architecture
-      required: false
-  - qram_size:
-      long: qram_size
-      value_name: QRAM_SIZE
-      about: The number of addressable random access qubits of your architecture
   - debug:
       short: d
       long: debug
@@ -59,3 +49,26 @@ args:
   - typecheck:
       long: typecheck
       about: Run the static type-checking pass
+
+  # Architectural options
+  - qbcount:
+      short: q
+      long: qbcount
+      value_name: QBCOUNT
+      about: <QBCOUNT> is the number of physical qubits
+      required: false
+  - qram_size:
+      long: qram-size
+      value_name: QRAM_SIZE
+      about: <QRAM_SIZE> is the number of addressable random access qubits
+  - feedback:
+      long: feedback
+      about: Enables classical feedback
+  - meas_mode:
+      short: m
+      long: meas-mode
+      value_name: MODE
+      about: <MODE> determines the state of a hardware qubit after a projective measurement
+      possible_values:
+        - "demolition"
+        - "nondemolition"

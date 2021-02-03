@@ -59,6 +59,7 @@
 //!   difficult if iteration is necessary.
 
 pub mod common;
+pub mod feedback;
 pub mod linearity;
 
 use crate::{cavy_errors::ErrorBuf, context::Context, mir::Mir};
@@ -68,13 +69,21 @@ use self::common::{Analysis, Runner};
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
     for (_, gr) in mir.graphs.iter() {
-        let linearity = linearity::LinearityAnalysis {}.into_runner(ctx, gr);
-        let lin_results = linearity.run();
+        let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
         // Really expensive, lots of extra work. Maybe we should have a unique
         // `End` block, and just have to check at that one block whether
         // anything has ever been moved twice.
-        for (_doub, snd_span) in lin_results.exit_state.double_moved.into_iter() {
+        for &snd_span in linearity_res.exit_state.double_moved.values() {
             errs.push(errors::DoubleMove { span: snd_span });
+        }
+
+        if !ctx.conf.arch.feedback {
+            let feedback_res = feedback::FeedbackAnalysis {}.into_runner(ctx, gr).run();
+            for (local, snd_span) in feedback_res.exit_state.lin.into_iter() {
+                if let Some(_fst_span) = feedback_res.exit_state.delin.get(&local) {
+                    errs.push(errors::ClassicalFeedback { span: snd_span });
+                }
+            }
         }
     }
 
@@ -93,6 +102,13 @@ mod errors {
     #[derive(Diagnostic)]
     pub struct DoubleMove {
         #[msg = "linear value moved twice"]
+        /// The second use site
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct ClassicalFeedback {
+        #[msg = "detected classical feedback"]
         /// The second use site
         pub span: Span,
     }

@@ -58,4 +58,6 @@ pub struct Arch {
     pub qb_count: QbCount,
     pub qram_size: usize,
     pub meas_mode: MeasurementMode,
+    /// Whether classical feedback is enabled for this architecture
+    pub feedback: bool,
 }

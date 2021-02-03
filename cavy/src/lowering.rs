@@ -896,7 +896,25 @@ mod typing {
                         }))
                     }
                 }
-                UnOpKind::Delin => todo!(),
+                UnOpKind::Delin => {
+                    if right == self.ctx.common.q_bool {
+                        Ok(self.ctx.common.bool)
+                    } else if right == self.ctx.common.q_u4 {
+                        Ok(self.ctx.common.u4)
+                    } else if right == self.ctx.common.q_u8 {
+                        Ok(self.ctx.common.u8)
+                    } else if right == self.ctx.common.q_u16 {
+                        Ok(self.ctx.common.u16)
+                    } else if right == self.ctx.common.q_u32 {
+                        Ok(self.ctx.common.u32)
+                    } else {
+                        Err(self.errors.push(errors::UnOpOutTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            ty: right,
+                        }))
+                    }
+                }
             }
         }
 

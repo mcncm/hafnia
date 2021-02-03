@@ -60,8 +60,8 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
     use arch::{Arch, QbCount};
 
     let qb_count = match argmatches.value_of("qbcount") {
-        Some(qb_count) => Some(QbCount::Finite(qb_count.parse::<usize>()?)),
-        None => None,
+        Some(qb_count) => QbCount::Finite(qb_count.parse::<usize>()?),
+        None => QbCount::Infinite,
     };
 
     // Is there any way to make clap parse integer arguments for you?
@@ -74,16 +74,20 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
             process::exit(1);
         });
 
-    let arch = match qb_count {
-        Some(qb_count) => Arch {
-            qb_count,
-            qram_size,
-            meas_mode: arch::MeasurementMode::Demolition,
-        },
-        None => Arch::default(),
+    let feedback = argmatches.is_present("feedback");
+
+    let meas_mode = match argmatches.value_of("meas_mode") {
+        Some("demolition") => arch::MeasurementMode::Demolition,
+        Some("nondemolition") => arch::MeasurementMode::Nondemolition,
+        _ => arch::MeasurementMode::Demolition,
     };
 
-    Ok(arch)
+    Ok(Arch {
+        qb_count,
+        qram_size,
+        feedback,
+        meas_mode,
+    })
 }
 
 fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
