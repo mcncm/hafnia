@@ -113,7 +113,7 @@ impl Circuit {
         Self::default()
     }
 
-    pub fn push_back(&mut self, gate: Gate) {
+    pub fn push(&mut self, gate: Gate) {
         use std::cmp;
         // This unwrap is safe as long as all gates act on *some* qubit.
         let max_in_gate = *gate.qubits().iter().max().unwrap();
@@ -125,11 +125,11 @@ impl Circuit {
     }
 }
 
-impl fmt::Display for Circuit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::target::{qasm::Qasm, IntoTarget};
-        let backend = Qasm {};
-        let repr: String = self.into_target(&backend);
-        write!(f, "{}", repr)
-    }
-}
+// impl fmt::Display for Circuit {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         use crate::target::{qasm::Qasm, IntoTarget};
+//         let backend = Qasm {};
+//         let repr: String = self.into_target(&backend);
+//         write!(f, "{}", repr)
+//     }
+// }

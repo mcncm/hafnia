@@ -4,7 +4,7 @@
 use crate::arch::Arch;
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use crate::source::SrcStore;
-// use crate::target::Target;
+use crate::target::Target;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -43,7 +43,7 @@ pub struct Config {
     /// Architecture data
     pub arch: Arch,
     /// Compile target data
-    // pub target: Box<dyn Target>,
+    pub target: Box<dyn Target>,
     /// Optimization level.
     pub opt: u8,
     /// Which compilation phases to run

@@ -1,2 +1,5 @@
 /target
+/examples
+/std
+/cavy/target
 *.qasm

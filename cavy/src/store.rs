@@ -8,12 +8,15 @@
 //! `HashMap<V, Idx>`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{
-    hash_map::{Entry, Iter},
-    HashMap,
-};
 use std::marker::PhantomData;
 use std::{borrow::Borrow, hash::Hash, rc::Rc};
+use std::{
+    collections::{
+        hash_map::{Entry, Iter},
+        HashMap,
+    },
+    iter::FromIterator,
+};
 
 /// A trait automatically implemented by index types
 pub trait Index: Default + Clone + Copy + Eq {
@@ -147,6 +150,16 @@ where
 
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
         self.backing_store.iter()
+    }
+}
+
+impl<Idx, V> FromIterator<V> for Store<Idx, V> {
+    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
+        let backing_store = iter.into_iter().collect();
+        Self {
+            backing_store,
+            phantom: PhantomData,
+        }
     }
 }
 

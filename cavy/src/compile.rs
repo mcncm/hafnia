@@ -2,18 +2,17 @@ use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
     context::{Context, CtxFmt},
-    // target::{ObjectCode, Target},
-    lowering,
-    // circuit::Circuit,
-    // interpreter::Interpreter,
-    parser,
-    scanner,
+    lowering, parser, scanner,
     session::Phase,
     source::SrcObject,
+    target::ObjectCode,
 };
 use std::path::PathBuf;
 
-pub fn compile<'a, 'ctx>(entry_point: PathBuf, ctx: &'a mut Context<'ctx>) -> Result<(), ErrorBuf> {
+pub fn compile<'a, 'ctx>(
+    entry_point: PathBuf,
+    ctx: &'a mut Context<'ctx>,
+) -> Result<Option<ObjectCode>, ErrorBuf> {
     // There shouldn't be any validation happening here... Should be back up in
     // main(). Or maybe not--this might be the one kind of input validation that
     // can wait. After all, we won't know every file we need to read until we've
@@ -26,20 +25,22 @@ pub fn compile<'a, 'ctx>(entry_point: PathBuf, ctx: &'a mut Context<'ctx>) -> Re
     let ast = parser::parse(tokens, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Parse {
         println!("{:#?}", ast);
-        return Ok(());
+        return Ok(None);
     }
 
     let mir = lowering::lower(ast, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
         println!("{}", mir.fmt_with(&ctx));
-        return Ok(());
+        return Ok(None);
     }
 
-    crate::analysis::check(&mir)?;
+    crate::analysis::check(&mir, ctx)?;
+
+    let circ = crate::codegen::codegen(&mir, ctx);
+    Ok(Some(ctx.conf.target.from(&circ)))
 
     // typecheck(&ctx, sess)?;
     //
-    Ok(())
     // if sess.config.phase_config.typecheck {
     //     let _ = typecheck(&mut stmts, &sess);
     // }

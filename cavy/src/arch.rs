@@ -33,6 +33,22 @@ impl Default for QbCount {
     }
 }
 
+/// This enum describes the possible ways that measurement might act on a qubit.
+#[derive(Debug, Clone, Copy)]
+pub enum MeasurementMode {
+    /// In this mode, a measured qubit is assumed to be in the |0> state.
+    Demolition,
+    /// In this mode, a measured qubit is in the same state as its measured
+    /// value.
+    Nondemolition,
+}
+
+impl Default for MeasurementMode {
+    fn default() -> Self {
+        Self::Demolition
+    }
+}
+
 /// This is the main device architecture struct that describes the qubit
 /// layout, native gates, and related constraints.
 ///
@@ -41,4 +57,5 @@ impl Default for QbCount {
 pub struct Arch {
     pub qb_count: QbCount,
     pub qram_size: usize,
+    pub meas_mode: MeasurementMode,
 }

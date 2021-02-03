@@ -329,13 +329,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             return Err(e);
         }
 
-        let l_op = Operand::Place(l_place);
-        let r_op = Operand::Place(r_place);
         let stmt = mir::Stmt {
             place,
             rhs: Rvalue {
                 span: *span,
-                data: RvalueKind::BinOp(op.data, l_op, r_op),
+                data: RvalueKind::BinOp(op.data, l_place, r_place),
             },
         };
         self.push_stmt(stmt);
@@ -354,10 +352,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let r_place = self.gr.auto_local(*arg_ty);
         self.lower_into(r_place, right)?;
 
-        let r_op = Operand::Place(r_place);
         let rhs = Rvalue {
             span: *span,
-            data: RvalueKind::UnOp(op.data, r_op),
+            data: RvalueKind::UnOp(op.data, r_place),
         };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())

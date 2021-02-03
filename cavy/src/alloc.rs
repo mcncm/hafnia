@@ -59,8 +59,8 @@ impl QubitAllocator {
         }
     }
 
-    pub fn alloc_q_bool(&mut self) -> Result<Value, ErrorBuf> {
-        Ok(Value::Q_Bool(self.alloc(1)?[0]))
+    pub fn q_bool(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+        Ok(self.alloc(1)?)
     }
 
     pub fn free_q_bool(&mut self, val: Value) {
@@ -74,15 +74,15 @@ impl QubitAllocator {
         }
     }
 
-    pub fn alloc_q_u8(&mut self) -> Result<Value, ErrorBuf> {
-        Ok(Value::Q_U8(self.alloc(8)?.try_into().unwrap()))
+    pub fn q_u8(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+        Ok(self.alloc(8)?.try_into().unwrap())
     }
 
-    pub fn alloc_q_u16(&mut self) -> Result<Value, ErrorBuf> {
-        Ok(Value::Q_U16(self.alloc(16)?.try_into().unwrap()))
+    pub fn alloc_q_u16(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+        Ok(self.alloc(16)?.try_into().unwrap())
     }
 
-    pub fn alloc_q_u32(&mut self) -> Result<Value, ErrorBuf> {
-        Ok(Value::Q_U32(self.alloc(32)?.try_into().unwrap()))
+    pub fn alloc_q_u32(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+        Ok(self.alloc(32)?.try_into().unwrap())
     }
 }

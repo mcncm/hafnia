@@ -2,14 +2,14 @@
 //! This is all pretty unstable for the time being, so don’t rely on it too much
 //! externally.
 
-use crate::interpreter::Interpreter;
+use crate::circuit::Circuit;
 
 /// This type alias replaces the associated type previously attached to `Target`
 pub type ObjectCode = String;
 
 /// This is a marker trait for compile targets
 pub trait Target: std::fmt::Debug {
-    fn from<'a>(&self, interp: &Interpreter) -> ObjectCode;
+    fn from<'a>(&self, circ: &Circuit) -> ObjectCode;
 }
 
 impl Default for Box<dyn Target> {
@@ -36,7 +36,7 @@ pub mod null {
     #[derive(Debug)]
     pub struct NullTarget();
     impl Target for NullTarget {
-        fn from(&self, _interp: &Interpreter) -> ObjectCode {
+        fn from(&self, _circ: &Circuit) -> ObjectCode {
             String::new()
         }
     }
@@ -56,10 +56,6 @@ pub mod qasm {
     pub struct Qasm;
 
     impl Qasm {
-        fn bindings(&self, env: &crate::environment::Environment) -> String {
-            format!("// {}", env.into_target(self))
-        }
-
         fn headers(&self) -> String {
             format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
         }
@@ -70,13 +66,8 @@ pub mod qasm {
     }
 
     impl Target for Qasm {
-        fn from(&self, interp: &Interpreter) -> String {
-            format!(
-                "{}\n{}\n{}",
-                self.bindings(&interp.env),
-                self.headers(),
-                self.circuit(&interp.circuit)
-            )
+        fn from(&self, circ: &Circuit) -> String {
+            format!("{}\n{}", self.headers(), self.circuit(circ))
         }
     }
 
@@ -97,14 +88,6 @@ pub mod qasm {
                 .collect::<Vec<String>>()
                 .join("\n");
             format!("{}\n{}\n", declaration, gates)
-        }
-    }
-
-    impl IntoTarget<Qasm> for crate::interpreter::Interpreter {
-        fn into_target(&self, target: &Qasm) -> String {
-            let bindings_asm = self.env.into_target(target);
-            let circuit_asm = self.circuit.into_target(target);
-            format!("//{}\n{}", bindings_asm, circuit_asm)
         }
     }
 }
@@ -344,13 +327,13 @@ pub mod latex {
 
     impl Target for Latex {
         #[rustfmt::skip]
-        fn from(&self, interp: &Interpreter) -> ObjectCode {
+        fn from(&self, circ: &Circuit) -> ObjectCode {
             let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
             let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
             format!(
                 r"{}{}{}",
                 header,
-                self.diagram(&interp.circuit),
+                self.diagram(circ),
                 footer
             )
         }

@@ -193,8 +193,8 @@ pub struct Rvalue {
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
 pub enum RvalueKind {
-    BinOp(BinOp, Operand, Operand),
-    UnOp(UnOp, Operand),
+    BinOp(BinOp, LocalId, LocalId),
+    UnOp(UnOp, LocalId),
     Const(Const),
     Copy(LocalId),
     Move(LocalId),
@@ -205,13 +205,6 @@ pub enum RvalueKind {
 pub type BinOp = ast::BinOpKind;
 
 pub type UnOp = ast::UnOpKind;
-
-/// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
-#[derive(Debug)]
-pub enum Operand {
-    Const(Const),
-    Place(LocalId),
-}
 
 // This type is currently a *duplicate* of ast::LiteralKind.
 #[derive(Debug)]
@@ -341,15 +334,6 @@ impl fmt::Display for RvalueKind {
 impl fmt::Display for Rvalue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.data)
-    }
-}
-
-impl fmt::Display for Operand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Const(val) => write!(f, "const {}", val),
-            Self::Place(local) => write!(f, "{}", local),
-        }
     }
 }
 
