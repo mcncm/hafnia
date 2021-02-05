@@ -27,6 +27,15 @@ impl From<usize> for QbCount {
     }
 }
 
+impl From<Option<usize>> for QbCount {
+    fn from(num: Option<usize>) -> Self {
+        match num {
+            Some(num) => Self::Finite(num),
+            None => Self::Infinite,
+        }
+    }
+}
+
 impl Default for QbCount {
     fn default() -> Self {
         Self::Infinite

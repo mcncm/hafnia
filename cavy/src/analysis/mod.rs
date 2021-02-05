@@ -101,7 +101,7 @@ mod errors {
 
     #[derive(Diagnostic)]
     pub struct DoubleMove {
-        #[msg = "linear value moved twice"]
+        #[msg = "linear variable moved twice"]
         /// The second use site
         pub span: Span,
     }

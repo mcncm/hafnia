@@ -165,8 +165,9 @@ fn main() {
 
     match get_entry_point(&argmatches) {
         Some(path) => {
+            let id = ctx.srcs.insert_path(path).unwrap();
             let object_path = get_object_path(&argmatches);
-            let object_code = compile::compile(path, &mut ctx).unwrap_or_else(|errs| {
+            let object_code = compile::compile_target(id, &mut ctx).unwrap_or_else(|errs| {
                 eprintln!("{}", errs.fmt_with(&ctx));
                 sys::exit(1);
             });
