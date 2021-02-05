@@ -24,12 +24,13 @@ pub enum Uint {
 
 impl Uint {
     pub fn from_lexeme(lexeme: Lexeme) -> Result<Self, ()> {
+        #![allow(clippy::result_unit_err)]
         let u = match lexeme {
             Lexeme::U4 => Self::U4,
             Lexeme::U8 => Self::U8,
             Lexeme::U16 => Self::U16,
             Lexeme::U32 => Self::U32,
-            _ => Err(())?,
+            _ => return Err(()),
         };
         Ok(u)
     }

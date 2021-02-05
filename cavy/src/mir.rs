@@ -238,7 +238,7 @@ pub struct MirFmt<'t> {
 
 impl<'t> fmt::Display for MirFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (_fn_id, gr) in &self.mir.graphs {
+        for gr in self.mir.graphs.values() {
             let _ = write!(f, "{}", gr.fmt_with(&self.ctx));
         }
         f.write_str("")
@@ -271,7 +271,7 @@ impl<'t> fmt::Display for GraphFmt<'t> {
             for stmt in &block.stmts {
                 let _ = writeln!(f, "\t\t{}", stmt);
             }
-            let _ = write!(f, "\t\t{}\n", block.kind);
+            let _ = writeln!(f, "\t\t{}", block.kind);
             let _ = f.write_str("\t}\n");
         }
         f.write_str("}\n")

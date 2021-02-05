@@ -10,10 +10,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-pub fn compile_circuit<'a, 'ctx>(
-    entry_point: SrcId,
-    ctx: &'a mut Context<'ctx>,
-) -> Result<Option<Circuit>, ErrorBuf> {
+pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Circuit>, ErrorBuf> {
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
     let ast = parser::parse(tokens, ctx)?;
@@ -34,9 +31,9 @@ pub fn compile_circuit<'a, 'ctx>(
     Ok(Some(circ))
 }
 
-pub fn compile_target<'a, 'ctx>(
+pub fn compile_target(
     entry_point: SrcId,
-    ctx: &'a mut Context<'ctx>,
+    ctx: &mut Context,
 ) -> Result<Option<ObjectCode>, ErrorBuf> {
     compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| ctx.conf.target.from(&circ)))
 }

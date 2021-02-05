@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
-pub fn lower<'ctx>(ast: Ast, ctx: &mut Context<'ctx>) -> Result<Mir, ErrorBuf> {
+pub fn lower(ast: Ast, ctx: &mut Context) -> Result<Mir, ErrorBuf> {
     MirBuilder::new(&ast, ctx).lower()
 }
 
@@ -141,12 +141,10 @@ impl SymbolTable {
         loop {
             if let local @ Some(_) = self.tables[cursor].get(&item) {
                 return local;
+            } else if cursor > 0 {
+                cursor -= 1;
             } else {
-                if cursor > 0 {
-                    cursor -= 1;
-                } else {
-                    return None;
-                }
+                return None;
             }
         }
     }
@@ -254,9 +252,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     {
         let old_block = self.cursor;
         self.cursor = self.gr.goto_block(block);
-        f(self).and_then(|v| {
+        f(self).map(|v| {
             self.cursor = old_block;
-            Ok(v)
+            v
         })
     }
 
@@ -535,264 +533,6 @@ mod typing {
     use super::*;
     use crate::{index_type, store::Counter};
 
-    /// These should all be very small, simple types. We have nothing fancy: no
-    /// generics, just a few numeric types, and so on.
-    pub type TySet = Vec<TyId>;
-
-    fn intersect(fst: &mut TySet, snd: &TySet) {
-        let mut snd = snd.iter();
-        let r = snd.next();
-        fst.retain(|l| match r {
-            None => false,
-            Some(r) => match l.cmp(r) {
-                std::cmp::Ordering::Greater => {
-                    while let Some(r) = snd.next() {
-                        if r == l {
-                            return true;
-                        }
-                        if r > l {
-                            break;
-                        }
-                    }
-                    r == l
-                }
-                std::cmp::Ordering::Equal => true,
-                std::cmp::Ordering::Less => false,
-            },
-        })
-    }
-
-    #[cfg(test)]
-    #[test]
-    fn intersect_simple() {
-        let mut v1 = vec![TyId::new(1), TyId::new(2), TyId::new(3)];
-        let v2 = vec![TyId::new(2), TyId::new(3), TyId::new(4)];
-        let expect = vec![TyId::new(2), TyId::new(3)];
-        intersect(&mut v1, &v2);
-        assert_eq!(v1, expect);
-    }
-
-    index_type! { TyVarId }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct TyVar {
-        /// Is this type constrained to be linear or not?
-        lin: Option<bool>,
-        kind: TyVarKind,
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub enum TyVarKind {
-        /// An unrestricted type variable
-        Var(TyVarId),
-        /// A type variable that must be an integer type (e.g. `u8`, `?u8`, ...)
-        // I guess we'll give this class of type variables the option of being
-        // linear or nonlinear. We can then assert equality of a linear one with
-        // a nonlinear one. These can be appropriately unified, since they
-        // always come in pairs.
-        Int(TyVarId),
-        /// A `bool` or `?bool`
-        Boolean(TyVarId),
-    }
-
-    /// An inference type: either a concrete type or a type variable.
-    #[derive(Debug, Clone, Copy)]
-    pub enum InfTy {
-        TyId(TyId),
-        TyVar(TyVar),
-    }
-
-    /// A type constraint, or type equation, in which the left- and right- hand
-    /// inference types are asserted equal.
-    #[derive(Debug)]
-    pub struct TyConstr(InfTy, InfTy);
-
-    /// An inference context in which to solve types.
-    struct InfCtx<'a, 'ctx> {
-        /// The *single expression* whose type we're trying to solve
-        root: &'a Expr,
-        /// The items table from the AST
-        tab: &'a ast::Table,
-        /// The calling graph builder
-        builder: &'a GraphBuilder<'a, 'ctx>,
-        /// A counter for type variables
-        ctr: Counter<TyVarId>,
-        /// A typing context mapping expressions to the inference type currently
-        /// held for them.
-        gamma: HashMap<NodeId, InfTy>,
-        /// The currently-active type constraints
-        constrs: Vec<TyConstr>,
-    }
-
-    impl<'a, 'ctx> InfCtx<'a, 'ctx> {
-        fn new(expr: &'a Expr, tab: &'a Table, builder: &'a GraphBuilder<'a, 'ctx>) -> Self {
-            InfCtx {
-                root: expr,
-                tab,
-                builder,
-                ctr: Counter::new(),
-                gamma: HashMap::new(),
-                constrs: Vec::new(),
-            }
-        }
-
-        // fn unify_constr(&mut self, constr: &TyConstr) {
-        //     let TyConstr(left, right) = constr;
-        //     match (left, right) {
-        //         (InfTy::TyId(idl), InfTy::TyId(idr)) => {}
-        //         (InfTy::TyId(id), InfTy::TyVar(var)) | (InfTy::TyVar(var), InfTy::TyId(id)) => {}
-        //         (InfTy::TyVar(varl), InfTy::TyVar(varr)) => {}
-        //     }
-        // }
-
-        /// Assert a known type for the top-level expression
-        fn as_type(mut self, ty: TyId) -> Self {
-            self.gamma.insert(self.root.node, InfTy::TyId(ty));
-            self
-        }
-
-        /// Produce an assignment of all subexpressions
-        fn infer(mut self) -> Option<HashMap<&'a Expr, TyId>> {
-            self.walk();
-            None
-            //
-        }
-
-        /// Walk the tree, inserting type variables and constraints for each
-        /// subexpression. This should probably never fail; we're just naming things.
-        fn walk(&mut self) {
-            // If we didn't call `as_type`, insert an unconditional type variable at the root.
-            // FIXME this is currently incorrect: it will be overwritten.
-            if let None = self.gamma.get(&self.root.node) {
-                self.gamma.insert(
-                    self.root.node,
-                    InfTy::TyVar(TyVar {
-                        lin: None,
-                        kind: TyVarKind::Var(self.ctr.new_index()),
-                    }),
-                );
-            }
-            self.walk_inner(self.root);
-        }
-
-        #[allow(unused_variables)]
-        fn walk_inner(&mut self, expr: &Expr) -> InfTy {
-            let node = expr.node;
-            match &expr.data {
-                ExprKind::BinOp { left, op, right } => self.walk_binop(node, left, op, right),
-                ExprKind::UnOp { op, right } => self.walk_unop(node, op, right),
-                ExprKind::Literal(lit) => match &lit.data {
-                    LiteralKind::True => self.new_boolean(node),
-                    LiteralKind::False => self.new_boolean(node),
-                    LiteralKind::Nat(_, _) => self.new_int(node, None),
-                },
-                ExprKind::Ident(ident) => {
-                    // NOTE we're not yet inferencing over the whole procedure;
-                    // if we see an index, all there is to do is look it up in
-                    // the graph.
-                    //
-                    // This unwrap should be replaced with... something else.
-                    let local = self.builder.st.get(&ident.data).unwrap();
-                    let local = &self.builder.gr.locals[*local];
-                    let ty = InfTy::TyId(local.ty);
-                    self.gamma.insert(node, ty);
-                    ty
-                }
-                ExprKind::Tuple(_) => todo!(),
-                ExprKind::IntArr { item, reps } => todo!(),
-                ExprKind::ExtArr(_) => todo!(),
-                ExprKind::Block(_) => todo!(),
-                ExprKind::If { cond, dir, ind } => todo!(),
-                ExprKind::For { bind, iter, body } => todo!(),
-                ExprKind::Call { callee, args } => todo!(),
-                ExprKind::Index { head, index } => todo!(),
-            }
-        }
-
-        #[allow(unused_variables)]
-        fn walk_binop(
-            &mut self,
-            node: NodeId,
-            left: &Expr,
-            op: &ast::BinOp,
-            right: &Expr,
-        ) -> InfTy {
-            match &op.data {
-                BinOpKind::Nequal | BinOpKind::Equal => {
-                    let ty = self.new_boolean(node);
-                    let left = self.walk_inner(left);
-                    let right = self.walk_inner(right);
-                    self.new_const(ty, left);
-                    self.new_const(ty, right);
-                    ty
-                }
-                BinOpKind::DotDot => todo!(),
-                BinOpKind::Plus | BinOpKind::Minus | BinOpKind::Times => {
-                    let ty = self.new_int(node, None);
-                    let left = self.walk_inner(left);
-                    let right = self.walk_inner(right);
-                    self.new_const(ty, left);
-                    self.new_const(ty, right);
-                    ty
-                }
-                BinOpKind::Mod => todo!(),
-                BinOpKind::Less => todo!(),
-                BinOpKind::Greater => todo!(),
-            }
-        }
-
-        #[allow(unused_variables)]
-        fn walk_unop(&mut self, node: NodeId, op: &ast::UnOp, right: &Expr) -> InfTy {
-            match &op.data {
-                UnOpKind::Minus => {
-                    let ty = self.new_int(node, None);
-                    let right = self.walk_inner(right);
-                    self.new_const(ty, right);
-                    ty
-                }
-                UnOpKind::Not => {
-                    let ty = self.new_boolean(node);
-                    let right = self.walk_inner(right);
-                    self.new_const(ty, right);
-                    ty
-                }
-                UnOpKind::Linear => todo!(),
-                UnOpKind::Delin => todo!(),
-            }
-        }
-
-        fn new_const(&mut self, left: InfTy, right: InfTy) {
-            self.constrs.push(TyConstr(left, right));
-        }
-
-        fn new_boolean(&mut self, node: NodeId) -> InfTy {
-            let ty = InfTy::TyVar(TyVar {
-                lin: None,
-                kind: TyVarKind::Boolean(self.ctr.new_index()),
-            });
-            self.gamma.insert(node, ty);
-            ty
-        }
-
-        fn new_var(&mut self, node: NodeId) -> InfTy {
-            let ty = InfTy::TyVar(TyVar {
-                lin: None,
-                kind: TyVarKind::Var(self.ctr.new_index()),
-            });
-            self.gamma.insert(node, ty);
-            ty
-        }
-
-        fn new_int(&mut self, node: NodeId, lin: Option<bool>) -> InfTy {
-            let ty = InfTy::TyVar(TyVar {
-                lin,
-                kind: TyVarKind::Int(self.ctr.new_index()),
-            });
-            self.gamma.insert(node, ty);
-            ty
-        }
-    }
-
     /// We're not doing full type inference, but we do need to know what to do
     /// when we call a function and ignore its return value. Or, when we move a
     /// variable into a new binding that doesn't have an annotation. These
@@ -802,7 +542,7 @@ mod typing {
     ///
     /// Also note that all this is a horribly inefficient stopgap.
     impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
-        pub fn type_expr<'a>(&mut self, expr: &Expr) -> Maybe<TyId> {
+        pub fn type_expr(&mut self, expr: &Expr) -> Maybe<TyId> {
             if let Some(ty) = self.gamma.get(&expr.node) {
                 return Ok(*ty);
             }
@@ -994,7 +734,7 @@ mod typing {
         Ok(ty)
     }
 
-    fn resolve_annot_question<'a>(ctx: &mut Context<'a>, inner: TyId) -> Maybe<TyId> {
+    fn resolve_annot_question(ctx: &mut Context, inner: TyId) -> Maybe<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {

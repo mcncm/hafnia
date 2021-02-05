@@ -142,6 +142,11 @@ where
         self.backing_store.len()
     }
 
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.backing_store.is_empty()
+    }
+
     pub fn insert(&mut self, item: V) -> Idx {
         let idx = Idx::new(self.len() as u32);
         self.backing_store.push(item);

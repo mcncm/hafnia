@@ -199,10 +199,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Consumes the parser
     pub fn parse(mut self) -> Result<Ast, ErrorBuf> {
-        let mut items = vec![];
-        while let Some(_) = self.tokens.peek() {
+        while self.tokens.peek().is_some() {
             match self.item() {
-                Ok(item) => items.push(item),
+                Ok(_) => {}
                 Err(_) => {
                     return Err(self.errors);
                 }
@@ -221,7 +220,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             lexeme => Err(self.errors.push(ExpectedItem {
                 span,
                 actual: lexeme,
-            }))?,
+            })),
         }
     }
 
@@ -235,7 +234,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             span: token.span,
             expected: lexeme,
             actual: token.lexeme,
-        }))?
+        }))
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
@@ -247,7 +246,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             lexeme => Err(self.errors.push(ExpectedIdentifier {
                 span: token.span,
                 actual: lexeme,
-            }))?,
+            })),
         }
     }
 
@@ -320,12 +319,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // Make sure there are no other entry points
         if self.ast.entry_point.is_some() {
             let span = func.span;
-            Err(self.errors.push(errors::MultipleEntryPoints { span }))?;
+            return Err(self.errors.push(errors::MultipleEntryPoints { span }));
         }
         // Check the signature
         if !func.sig.params.is_empty() || func.sig.output.is_some() {
             let span = func.sig.span;
-            Err(self.errors.push(errors::InvalidMainSignature { span }))?;
+            return Err(self.errors.push(errors::InvalidMainSignature { span }));
         }
         Ok(())
     }
@@ -581,7 +580,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)
             }
-            None => Err(self.errors.push(UnexpectedEof { span: self.loc }))?,
+            None => Err(self.errors.push(UnexpectedEof { span: self.loc })),
         }
     }
 
@@ -666,7 +665,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
             }
             // A non-annotation lexeme
-            x => Err(self.errors.push(ExpectedTypeAnnot { span, actual: x }))?,
+            x => return Err(self.errors.push(ExpectedTypeAnnot { span, actual: x })),
         };
 
         Ok(ty)

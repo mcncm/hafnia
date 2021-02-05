@@ -155,7 +155,7 @@ where
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
-            span: self.span.clone(),
+            span: self.span,
         }
     }
 }
@@ -163,6 +163,7 @@ where
 /// Interface for ast nodes that can be made from a single token. Returns
 /// Err(()) when the received token can't be transformed as the requested node.
 pub trait FromToken {
+    #![allow(clippy::result_unit_err)]
     fn from_token(token: Token, ctx: &mut Context) -> Result<Self, ()>
     where
         Self: Sized;

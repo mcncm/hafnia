@@ -126,10 +126,12 @@ impl<'t> CtxFmt<'t, DiagnosticFmt<'t>> for Box<dyn Diagnostic> {
     }
 }
 
+#[allow(clippy::borrowed_box)]
 pub struct DiagnosticFmt<'d> {
-    // Ok, it isn't really any loss to have a `Box` here, since we'll only ever
+    // FIXME Ok, it isn't really any loss to have a `Box` here, since we'll only ever
     // use this through a `Box`. But it does annoy me that I can't figure out
-    // how to accomplish this with just a `&'d dyn Diagnostic`.
+    // how to accomplish this with just a `&'d dyn Diagnostic`. This is also a
+    // clippy lint.
     err: &'d Box<dyn Diagnostic>,
     ctx: &'d Context<'d>,
 }

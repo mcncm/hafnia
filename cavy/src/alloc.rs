@@ -75,14 +75,14 @@ impl QubitAllocator {
     }
 
     pub fn q_u8(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
-        Ok(self.alloc(8)?.try_into().unwrap())
+        self.alloc(8)
     }
 
     pub fn alloc_q_u16(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
-        Ok(self.alloc(16)?.try_into().unwrap())
+        self.alloc(16)
     }
 
     pub fn alloc_q_u32(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
-        Ok(self.alloc(32)?.try_into().unwrap())
+        self.alloc(32)
     }
 }

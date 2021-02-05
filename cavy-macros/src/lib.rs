@@ -102,20 +102,17 @@ impl<'ast> DiagnosticData<'ast> {
                 let meta = attr
                     .parse_meta()
                     .expect("malformed attribute in diagnostic");
-                match meta {
-                    syn::Meta::NameValue(nv) => {
-                        let ident = &nv.path.segments[0].ident;
-                        if nv.path.segments.len() == 1 && ident == "msg" {
-                            if let None = main_span {
-                                msg = Some(nv.lit);
-                                // Should we check that the type is Span?
-                                main_span = Some(field.ident.as_ref().unwrap());
-                            } else {
-                                panic!("two main spans in diagnostic");
-                            }
+                if let syn::Meta::NameValue(nv) = meta {
+                    let ident = &nv.path.segments[0].ident;
+                    if nv.path.segments.len() == 1 && ident == "msg" {
+                        if main_span.is_none() {
+                            msg = Some(nv.lit);
+                            // Should we check that the type is Span?
+                            main_span = Some(field.ident.as_ref().unwrap());
+                        } else {
+                            panic!("two main spans in diagnostic");
                         }
                     }
-                    _ => {} // panic!("unexpected attribute in diagnostic"),
                 };
             }
         }
