@@ -23,11 +23,15 @@ pub trait Analysis<'mir, 'ctx> {
 
     // FIXME Instead of making a new runner for each analysis, consider
     // registering all analyses with a single runner.
-    fn into_runner(self, ctx: &'mir Context<'ctx>, gr: &'mir Graph) -> Runner<'mir, 'ctx, Self>
+    fn into_runner(
+        self,
+        ctx: &'mir Context<'ctx>,
+        gr: &'mir Graph,
+    ) -> DataflowRunner<'mir, 'ctx, Self>
     where
         Self: Sized,
     {
-        Runner::new(self, gr, ctx)
+        DataflowRunner::new(self, gr, ctx)
     }
 }
 
@@ -49,12 +53,12 @@ pub struct AnalysisStates<L: Lattice> {
     pub exit_state: L,
 }
 
-/// An execution environment for an analysis
+/// An execution environment for a dataflow analysis, using the Killdall method.
 ///
 /// NOTE Can we do this with a *single* pass per direction? Can we do it without
 /// generics? Probably only if we store the results in the analysis types
 /// themselves.
-pub struct Runner<'mir, 'ctx, A>
+pub struct DataflowRunner<'mir, 'ctx, A>
 where
     A: Analysis<'mir, 'ctx>,
 {
@@ -66,7 +70,7 @@ where
     working_set: HashSet<BlockId>,
 }
 
-impl<'mir, 'ctx, A> Runner<'mir, 'ctx, A>
+impl<'mir, 'ctx, A> DataflowRunner<'mir, 'ctx, A>
 where
     A: Analysis<'mir, 'ctx>,
 {
@@ -111,16 +115,16 @@ where
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
     fn run_inner(&mut self, block: BlockId) {
-        let state = self.results.entry_states[block].clone();
+        let mut state = self.results.entry_states[block].clone();
         let block = &self.gr.blocks[block];
-        let result = self.trans_block(state, &block);
+        self.trans_block(&mut state, &block);
 
         // Compute the successor blocks and do any extra block-kind-dependent work.
         let successors = match &block.kind {
             BlockKind::Goto(blk) => std::slice::from_ref(blk),
             BlockKind::Switch { cond: _, blks } => blks,
             BlockKind::Ret => {
-                self.results.exit_state = self.results.exit_state.join(&result);
+                self.results.exit_state = self.results.exit_state.join(&state);
                 &[]
             }
             BlockKind::Call {
@@ -134,7 +138,7 @@ where
         // into the working set.
         for succ in successors {
             let prev_succ_state = &mut self.results.entry_states[*succ];
-            let succ_state = prev_succ_state.join(&result);
+            let succ_state = prev_succ_state.join(&state);
             if &succ_state != prev_succ_state {
                 *prev_succ_state = succ_state;
                 self.working_set.insert(*succ);
@@ -145,10 +149,48 @@ where
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
-    fn trans_block(&mut self, mut state: A::Domain, block: &BasicBlock) -> A::Domain {
+    fn trans_block(&mut self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
-            self.analysis.trans_stmt(&mut state, stmt);
+            self.analysis.trans_stmt(state, stmt);
+        }
+    }
+}
+
+/// An execution environment for a simple analysis that makes only a single pass
+/// over all blocks, regardless of the graph topology, and that only needs to
+/// track a single (therefore non-block-local) instance of the analysis state.
+/// The motivating example is the generation of a call graph.
+pub struct SummaryRunner<'mir, 'ctx, A>
+where
+    A: Analysis<'mir, 'ctx>,
+{
+    analysis: A,
+    gr: &'mir mir::Graph,
+    ctx: &'mir Context<'ctx>,
+}
+
+// NOTE that we might eventually want `SummaryRunner` and `DataflowRunner` to
+// implement some common trait.
+impl<'mir, 'ctx, A> SummaryRunner<'mir, 'ctx, A>
+where
+    A: Analysis<'mir, 'ctx>,
+{
+    fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
+        Self { analysis, gr, ctx }
+    }
+
+    fn run(self) -> A::Domain {
+        let mut state = A::Domain::bottom(self.gr, self.ctx);
+        for block in self.gr.blocks.iter() {
+            self.trans_block(&mut state, block);
         }
         state
+    }
+
+    // NOTE this is identical to the method of `DataflowRunner` of the same name
+    fn trans_block(&self, state: &mut A::Domain, block: &BasicBlock) {
+        for stmt in block.stmts.iter() {
+            self.analysis.trans_stmt(state, stmt);
+        }
     }
 }

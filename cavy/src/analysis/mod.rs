@@ -64,7 +64,7 @@ pub mod linearity;
 
 use crate::{cavy_errors::ErrorBuf, context::Context, mir::Mir};
 
-use self::common::{Analysis, Runner};
+use self::common::{Analysis, DataflowRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
