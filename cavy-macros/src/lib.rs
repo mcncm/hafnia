@@ -51,8 +51,8 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
                 "error [E000]"
             }
         }
-
     };
+
     expanded.into()
 }
 

@@ -6,8 +6,10 @@ use crate::{
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
     num::Uint,
 };
-// use crate::functions::{Func, UserFunc};
-use crate::context::{Context, SymbolId};
+use crate::{
+    context::{Context, SymbolId},
+    store::Store,
+};
 use crate::{
     mir::{self, *},
     store::Index,
@@ -29,35 +31,43 @@ pub struct MirBuilder<'mir, 'ctx> {
     /// longer be necessary.
     ctx: &'mir mut Context<'ctx>,
     mir: Mir,
+    /// The fully typed signatures of all the functions that will be lowered
+    /// into the MIR. Should these be in the MIR itself?
+    sigs: Store<FnId, TypedSig>,
     pub errors: ErrorBuf,
 }
 
 impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     pub fn new(ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
         let mir = Mir::new(&ast);
+        let sigs = Store::with_capacity(ast.funcs.len());
         Self {
             ast,
             ctx,
             mir,
+            sigs,
             errors: ErrorBuf::new(),
         }
     }
 
     /// Typecheck all functions in the AST, enter the lowered functions in the cfg
     pub fn lower(mut self) -> Result<Mir, ErrorBuf> {
-        for (id, func) in self.ast.funcs.iter().enumerate() {
-            // TODO a better way to do this
-            let fn_id = FnId::new(id as u32);
+        // First compute all of the function signatures...
+        for func in self.ast.funcs.iter() {
+            if let Ok(sig) = self.type_sig(&func.sig, &func.table) {
+                self.sigs.insert(sig);
+            }
+        }
 
-            let body = &self.ast.bodies[func.body];
-            let sig = match self.type_sig(&func.sig, &func.table) {
-                Ok(sig) => sig,
-                _ => {
-                    continue;
-                }
-            };
+        if !self.errors.is_empty() {
+            return Err(self.errors);
+        }
+
+        // ...Then lower the functions. This separation is necessary because
+        // signatures of called functions must be available during lowering.
+        for (fn_id, func) in self.ast.funcs.idx_enumerate() {
             // The table argument serves to pass in the function's environment.
-            let builder = GraphBuilder::new(self.ctx, body, &sig, func.table);
+            let builder = GraphBuilder::new(self.ctx, &self.sigs, &self.ast, fn_id, func);
             let graph = match builder.lower() {
                 Ok(gr) => gr,
                 Err(mut errs) => {
@@ -168,23 +178,30 @@ pub struct GraphBuilder<'mir, 'ctx> {
     st: SymbolTable,
     /// The currently active items table
     table: TableId,
+    /// The AST tables
+    tables: &'mir TableStore,
     /// A "typing context" of types assigned to each expression node
     gamma: HashMap<NodeId, TyId>,
     /// The currently active basic block
     cursor: BlockId,
-    /// This function's signature
-    sig: &'mir TypedSig,
+    /// The type signatures of all functions in the MIR
+    sigs: &'mir Store<FnId, TypedSig>,
     pub errors: ErrorBuf,
 }
 
 impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     pub fn new(
         ctx: &'mir mut Context<'ctx>,
-        body: &'mir Expr,
-        sig: &'mir TypedSig,
-        table: TableId,
+        sigs: &'mir Store<FnId, TypedSig>,
+        ast: &'mir Ast,
+        id: FnId,
+        func: &'mir Func,
     ) -> Self {
-        let TypedSig { params, output, .. } = sig;
+        let TypedSig { params, output, .. } = &sigs[id];
+
+        let tables = &ast.tables;
+        let table = func.table;
+        let body = &ast.bodies[func.body];
 
         let mut gr = Graph::new();
         let mut st = SymbolTable::new();
@@ -209,8 +226,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             gr,
             st,
             table,
+            tables,
             cursor,
-            sig,
+            sigs,
             gamma: HashMap::new(),
             errors: ErrorBuf::new(),
         }
@@ -271,6 +289,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
+    // TODO the expression match here and in `type_expr` can, and maybe should,
+    // be combined into a single match. This would simplify some things: for
+    // example, we wouldn't need to resolve functions twice. But mabe we can't
+    // do that, since some types cannot not known without walking the tree at
+    // least once.
     #[allow(unused_variables)]
     pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
         let ty = self.type_expr(expr)?;
@@ -297,9 +320,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
-            ExprKind::Call { callee, args } => {
-                todo!()
-            }
+            ExprKind::Call { callee, args } => self.lower_into_call(callee, args),
             ExprKind::Index { head, index } => {
                 todo!()
             }
@@ -490,6 +511,38 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    // We need to be a little careful about how we treat the arguments here. In
+    // particular, there should probably be a distinction between passing by
+    // value and passing by reference, which for the time being isn't respected.
+    //
+    // Also, we probably want the callee to be an expression rather than a function name.
+    fn lower_into_call(&mut self, callee: &Ident, args: &Vec<Expr>) -> Maybe<()> {
+        // FIXME Note that we're resolving every function twice, which suggests
+        // that this could be pulled up to an earlier stage, and that it's a
+        // potential source of errors.
+        let func = self.resolve_function(&callee.data);
+        let func_sig = &self.sigs[func];
+        let arg_locals: Vec<_> = func_sig
+            .params
+            .iter()
+            .map(|(_symb, ty)| self.gr.auto_local(*ty))
+            .collect();
+
+        for (arg, ty) in args.into_iter().zip(arg_locals.iter()) {
+            self.lower_into(*ty, arg)?;
+        }
+
+        let tail_block = self.new_block();
+        let call = BlockKind::Call {
+            callee: func,
+            args: arg_locals,
+            blk: tail_block,
+        };
+        self.set_terminator(call);
+        self.cursor = tail_block;
+        Ok(())
+    }
+
     #[allow(unused_variables)]
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
@@ -520,6 +573,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 Ok(())
             }
         }
+    }
+
+    fn resolve_function(&self, func: &SymbolId) -> FnId {
+        let tab = &self.tables[self.table];
+        *tab.funcs.get(func).expect("Missing function in this scope")
     }
 }
 
@@ -565,7 +623,17 @@ mod typing {
                     // should be the unit type
                     self.ctx.common.unit
                 }
-                ExprKind::Call { callee, args } => todo!(),
+                // FIXME note that here weare resolving this function a *second*
+                // time (the other is in the lowering method). This suggests
+                // that we should factor out function resolution to some earlier
+                // step. It might even be a good idea to use an HIR or
+                // something, which is typed and fully-resolved, but not yet
+                // lowered to a control-flow graph.
+                ExprKind::Call { callee, args } => {
+                    let func = self.resolve_function(&callee.data);
+                    let sig = &self.sigs[func];
+                    sig.output
+                }
                 ExprKind::Index { head, index } => todo!(),
             };
             self.gamma.insert(expr.node, ty);

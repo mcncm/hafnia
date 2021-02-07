@@ -32,10 +32,7 @@ pub struct Counter<I: Index> {
     phantom: PhantomData<I>,
 }
 
-impl<I> Counter<I>
-where
-    I: Index,
-{
+impl<I: Index> Counter<I> {
     pub fn new() -> Self {
         Self {
             inner: 0,
@@ -122,10 +119,7 @@ pub struct Store<Idx, V> {
     phantom: PhantomData<Idx>,
 }
 
-impl<Idx, V> Store<Idx, V>
-where
-    Idx: Index,
-{
+impl<Idx: Index, V> Store<Idx, V> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -156,6 +150,39 @@ where
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
         self.backing_store.iter()
     }
+
+    // This isn't really the conventional Rust API: `enumerate` is something that takes
+    // an _iterator_. I _could_ define this on the thing that *iter* returns, but
+    // I'd need two new iterable types.
+    pub fn idx_enumerate(&self) -> StoreEnumerate<'_, Idx, V> {
+        StoreEnumerate::new(self)
+    }
+}
+
+pub struct StoreEnumerate<'i, Idx, V> {
+    iter: std::iter::Enumerate<std::slice::Iter<'i, V>>,
+    phantom: PhantomData<Idx>,
+}
+
+impl<'i, Idx: Index, V> StoreEnumerate<'i, Idx, V> {
+    fn new(store: &'i Store<Idx, V>) -> Self {
+        Self {
+            iter: store.iter().enumerate(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'i, Idx: Index, V> Iterator for StoreEnumerate<'i, Idx, V> {
+    type Item = (Idx, &'i V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(idx, v)| {
+            // NOTE is this always safe?
+            let idx = Idx::new(idx as u32);
+            (idx, v)
+        })
+    }
 }
 
 impl<Idx, V> FromIterator<V> for Store<Idx, V> {
@@ -177,10 +204,7 @@ impl<Idx, V> Default for Store<Idx, V> {
     }
 }
 
-impl<Idx, V> std::ops::Index<Idx> for Store<Idx, V>
-where
-    Idx: Index,
-{
+impl<Idx: Index, V> std::ops::Index<Idx> for Store<Idx, V> {
     type Output = V;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -188,10 +212,7 @@ where
     }
 }
 
-impl<Idx, V> std::ops::IndexMut<Idx> for Store<Idx, V>
-where
-    Idx: Index,
-{
+impl<Idx: Index, V> std::ops::IndexMut<Idx> for Store<Idx, V> {
     fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
         &mut self.backing_store[index.into_usize()]
     }

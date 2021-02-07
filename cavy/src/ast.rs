@@ -71,7 +71,8 @@ impl Ast {
     }
 }
 
-/// A scoped symbol table. This may correspond to a lexical block, module, or
+/// A scoped symbol table containing descriptor references for items (functions,
+/// types, and modules). This may correspond to a lexical block, module, or
 /// function parameters. We should, however, consider splitting those up,
 /// possibly using a separate type for function parameters.
 #[derive(Debug, Default)]
@@ -82,7 +83,7 @@ pub struct Table {
     /// functions, and it will one day be possible to define lambda expressions,
     /// this table contains those functions defined with the `fn` keyword. They
     /// must be unique.
-    funcs: HashMap<SymbolId, FnId>,
+    pub funcs: HashMap<SymbolId, FnId>,
 }
 
 impl Table {
@@ -98,13 +99,17 @@ impl Table {
     }
 
     /// Look up the data associated with a symbol, recursively
-    fn get<'ctx>(&'ctx self, symb: &SymbolId, ctx: &'ctx Ast) -> Option<&'ctx TableEntry> {
+    fn get<'ast>(
+        &'ast self,
+        symb: &SymbolId,
+        tables: &'ast TableStore,
+    ) -> Option<&'ast TableEntry> {
         match self.get_inner(symb) {
             v @ Some(_) => v,
             None => match self.parent {
                 Some(id) => {
-                    let parent = &ctx.tables[id];
-                    parent.get(symb, ctx)
+                    let parent = &tables[id];
+                    parent.get(symb, tables)
                 }
                 None => None,
             },
@@ -522,12 +527,13 @@ pub struct Func {
     /// The id of the function body which, like in rustc, points not to a `Block`, but an `Expr`.
     pub body: BodyId,
     /// The table where the function is defined: we must track this in order to
-    /// resolve types in its signature.
+    /// resolve types in its signature, and to determine what is visible from
+    /// inside it.
     pub table: TableId,
     pub span: Span,
 }
 
-/// A function signature
+/// A literal function signature, whose types are not fully resolved
 #[derive(Debug)]
 pub struct Sig {
     /// Input parameters

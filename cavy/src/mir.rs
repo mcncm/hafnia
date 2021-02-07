@@ -145,6 +145,15 @@ pub enum BlockKind {
     /// NOTE: this vec will *almost always* have only two elements. Is there a
     /// lighter-weight alternative that could be used here?
     Switch { cond: LocalId, blks: Vec<BlockId> },
+    /// A block ending in a function call
+    Call {
+        /// The function being called. This might not be the right type, in
+        /// particular if we introduce closures or other "callables".
+        callee: FnId,
+        args: Vec<LocalId>,
+        /// The block to which the function returns
+        blk: BlockId,
+    },
     /// A return
     Ret,
 }
@@ -286,8 +295,10 @@ impl fmt::Display for BlockId {
 
 impl fmt::Display for BlockKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // These comma-separated lists are getting redundant. Consider how best
+        // to abstract this pattern.
         match self {
-            BlockKind::Goto(block) => write!(f, "goto [{}];", block),
+            BlockKind::Goto(block) => write!(f, "goto [() => {}];", block),
             BlockKind::Switch { cond, blks } => {
                 let _ = write!(f, "switch({}) [", cond);
                 blks.iter().enumerate().fold(true, |first, (n, blk)| {
@@ -298,6 +309,17 @@ impl fmt::Display for BlockKind {
                     false
                 });
                 f.write_str("];")
+            }
+            BlockKind::Call { callee, args, blk } => {
+                let _ = write!(f, "call {:?}(", callee);
+                args.iter().fold(true, |first, arg| {
+                    if !first {
+                        let _ = f.write_str(", ");
+                    }
+                    let _ = write!(f, "{}", arg);
+                    false
+                });
+                write!(f, ") => {}", blk)
             }
             BlockKind::Ret => f.write_str("return;"),
         }

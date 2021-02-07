@@ -114,6 +114,7 @@ where
             BlockKind::Ret => {
                 self.results.exit_state = self.results.exit_state.join(&result);
             }
+            BlockKind::Call { callee, args, blk } => todo!(),
         };
     }
 
