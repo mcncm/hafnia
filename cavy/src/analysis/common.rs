@@ -21,6 +21,8 @@ pub trait Analysis<'mir, 'ctx> {
     /// Apply the transfer function for a single statement
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt);
 
+    // FIXME Instead of making a new runner for each analysis, consider
+    // registering all analyses with a single runner.
     fn into_runner(self, ctx: &'mir Context<'ctx>, gr: &'mir Graph) -> Runner<'mir, 'ctx, Self>
     where
         Self: Sized,
@@ -60,6 +62,8 @@ where
     results: AnalysisStates<A::Domain>,
     gr: &'mir mir::Graph,
     ctx: &'mir Context<'ctx>,
+    /// The next set of blocks to be analyzed
+    working_set: HashSet<BlockId>,
 }
 
 impl<'mir, 'ctx, A> Runner<'mir, 'ctx, A>
@@ -80,42 +84,62 @@ where
             entry_states,
             exit_state,
         };
+        let mut working_set = HashSet::new();
+        working_set.insert(gr.entry_block);
         Self {
             analysis,
             results,
             gr,
             ctx,
+            working_set,
         }
     }
 
     pub fn run(mut self) -> AnalysisStates<A::Domain> {
-        let state = A::Domain::bottom(self.gr, self.ctx);
-        self.run_inner(state, &self.gr.entry_block);
+        while !self.working_set.is_empty() {
+            let working_set: Vec<_> = self.working_set.drain().collect();
+            for block in working_set {
+                self.run_inner(block);
+            }
+        }
         self.results
     }
 
-    fn run_inner(&mut self, state: A::Domain, block: &BlockId) {
-        let block = &self.gr.blocks[*block];
+    /// Update the state associated with a single block. We'll take the previous
+    /// entry state, propagate it, and compare the exit state to the entry
+    /// states of any successor block. If they differ, they are updated and
+    /// these blocks are entered into the working set. We'll also take any
+    /// action associated with the block kind.
+    fn run_inner(&mut self, block: BlockId) {
+        let state = self.results.entry_states[block].clone();
+        let block = &self.gr.blocks[block];
         let result = self.trans_block(state, &block);
 
-        // FIXME this implementation is totally broken, of course: it will never
-        // terminate if there are loops!
-        match &block.kind {
-            BlockKind::Goto(blk) => {
-                self.results.entry_states[*blk] = result.clone();
-                self.run_inner(result, blk);
-            }
-            BlockKind::Switch { .. } => {
-                // for blk in blks.iter() {
-                //     self.results.entry_states[*blk] = result.clone();
-                //     self.run_inner(result, blk);
-                // }
-            }
+        // Compute the successor blocks and do any extra block-kind-dependent work.
+        let successors = match &block.kind {
+            BlockKind::Goto(blk) => std::slice::from_ref(blk),
+            BlockKind::Switch { cond: _, blks } => blks,
             BlockKind::Ret => {
                 self.results.exit_state = self.results.exit_state.join(&result);
+                &[]
             }
-            BlockKind::Call { callee, args, blk } => todo!(),
+            BlockKind::Call {
+                callee: _,
+                args: _,
+                blk,
+            } => std::slice::from_ref(blk),
         };
+
+        // If the propagated state differs from that of any successor, enter it
+        // into the working set.
+        for succ in successors {
+            let prev_succ_state = &mut self.results.entry_states[*succ];
+            let succ_state = prev_succ_state.join(&result);
+            if &succ_state != prev_succ_state {
+                *prev_succ_state = succ_state;
+                self.working_set.insert(*succ);
+            }
+        }
     }
 
     /// Apply the transfer function of a block, which is just the composition of
