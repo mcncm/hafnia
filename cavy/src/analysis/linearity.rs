@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
-    mir::{LocalId, RvalueKind},
+    mir::{BlockKind, LocalId, RvalueKind},
     source::Span,
 };
 
@@ -68,5 +68,9 @@ impl Analysis<'_, '_> for LinearityAnalysis {
                 }
             },
         }
+    }
+
+    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {
+        // TODO
     }
 }

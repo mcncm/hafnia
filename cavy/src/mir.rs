@@ -5,6 +5,7 @@
 use crate::{
     ast::{self, Ast, FnId},
     source::Span,
+    store::Store,
 };
 // use crate::functions::{Func, UserFunc};
 use crate::store_type;
@@ -21,14 +22,14 @@ store_type! { LocalStore : LocalId -> Local }
 /// The whole-program middle intermediate representation.
 #[derive(Debug)]
 pub struct Mir {
-    pub graphs: HashMap<FnId, Graph>,
+    pub graphs: Store<FnId, Graph>,
     pub entry_point: Option<FnId>,
 }
 
 impl Mir {
     pub fn new(ast: &Ast) -> Self {
         Self {
-            graphs: HashMap::with_capacity(ast.funcs.len()),
+            graphs: Store::with_capacity(ast.funcs.len()),
             entry_point: ast.entry_point,
         }
     }
@@ -150,6 +151,8 @@ pub enum BlockKind {
         /// The function being called. This might not be the right type, in
         /// particular if we introduce closures or other "callables".
         callee: FnId,
+        /// The span of the function call
+        span: Span,
         args: Vec<LocalId>,
         /// The block to which the function returns
         blk: BlockId,
@@ -247,7 +250,7 @@ pub struct MirFmt<'t> {
 
 impl<'t> fmt::Display for MirFmt<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for gr in self.mir.graphs.values() {
+        for gr in self.mir.graphs.iter() {
             let _ = write!(f, "{}", gr.fmt_with(&self.ctx));
         }
         f.write_str("")
@@ -310,7 +313,12 @@ impl fmt::Display for BlockKind {
                 });
                 f.write_str("];")
             }
-            BlockKind::Call { callee, args, blk } => {
+            BlockKind::Call {
+                callee,
+                args,
+                blk,
+                span: _,
+            } => {
                 let _ = write!(f, "call {:?}(", callee);
                 args.iter().fold(true, |first, arg| {
                     if !first {

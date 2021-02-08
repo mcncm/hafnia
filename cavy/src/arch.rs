@@ -69,4 +69,7 @@ pub struct Arch {
     pub meas_mode: MeasurementMode,
     /// Whether classical feedback is enabled for this architecture
     pub feedback: bool,
+    /// Whether arbitrary recursion (or, equivalently, diverging loops) are
+    /// enabled for this architecture
+    pub recursion: bool,
 }

@@ -1,18 +1,12 @@
 use crate::{
     ast::{self, *},
-    source::Span,
-};
-use crate::{
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
-    num::Uint,
-};
-use crate::{
     context::{Context, SymbolId},
-    store::Store,
-};
-use crate::{
     mir::{self, *},
+    num::Uint,
+    source::Span,
     store::Index,
+    store::Store,
     types::{TyId, Type},
 };
 use std::collections::HashMap;
@@ -76,7 +70,8 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
                 }
             };
 
-            self.mir.graphs.insert(fn_id, graph);
+            let idx = self.mir.graphs.insert(graph);
+            assert_eq!(idx, fn_id);
         }
 
         if !self.errors.is_empty() {
@@ -301,9 +296,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.expect_type(self.gr.locals[place].ty, ty, expr.span)?;
         match &expr.data {
             ExprKind::BinOp { left, op, right } => {
-                self.lower_into_binop(place, left, op, right, &expr.span)
+                self.lower_into_binop(place, left, op, right, expr.span)
             }
-            ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right, &expr.span),
+            ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right, expr.span),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Tuple(_) => {
@@ -320,7 +315,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
-            ExprKind::Call { callee, args } => self.lower_into_call(callee, args),
+            ExprKind::Call { callee, args } => self.lower_into_call(callee, args, expr.span),
             ExprKind::Index { head, index } => {
                 todo!()
             }
@@ -333,7 +328,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         left: &Expr,
         op: &ast::BinOp,
         right: &Expr,
-        span: &Span,
+        span: Span,
     ) -> Maybe<()> {
         let ty = self.gr.locals[place].ty;
         // Let's assume for now that all the binops take the same two types, in
@@ -351,7 +346,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let stmt = mir::Stmt {
             place,
             rhs: Rvalue {
-                span: *span,
+                span,
                 data: RvalueKind::BinOp(op.data, l_place, r_place),
             },
         };
@@ -364,7 +359,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         place: LocalId,
         op: &ast::UnOp,
         right: &Expr,
-        span: &Span,
+        span: Span,
     ) -> Maybe<()> {
         // Should not be here, of course
         let arg_ty = self.gamma.get(&right.node).unwrap();
@@ -372,7 +367,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.lower_into(r_place, right)?;
 
         let rhs = Rvalue {
-            span: *span,
+            span,
             data: RvalueKind::UnOp(op.data, r_place),
         };
         self.push_stmt(mir::Stmt { place, rhs });
@@ -516,7 +511,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // value and passing by reference, which for the time being isn't respected.
     //
     // Also, we probably want the callee to be an expression rather than a function name.
-    fn lower_into_call(&mut self, callee: &Ident, args: &Vec<Expr>) -> Maybe<()> {
+    fn lower_into_call(&mut self, callee: &Ident, args: &Vec<Expr>, span: Span) -> Maybe<()> {
         // FIXME Note that we're resolving every function twice, which suggests
         // that this could be pulled up to an earlier stage, and that it's a
         // potential source of errors.
@@ -537,6 +532,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             callee: func,
             args: arg_locals,
             blk: tail_block,
+            span,
         };
         self.set_terminator(call);
         self.cursor = tail_block;

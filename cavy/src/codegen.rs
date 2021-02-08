@@ -49,7 +49,7 @@ impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
     fn gen_function(&mut self, fn_id: FnId) {
         use RvalueKind::*;
 
-        let gr = &self.mir.graphs[&fn_id];
+        let gr = &self.mir.graphs[fn_id];
         for stmt in gr.blocks[gr.entry_block].stmts.iter() {
             let Stmt { place, rhs } = stmt;
             match rhs.data {

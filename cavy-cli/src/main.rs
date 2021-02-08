@@ -87,6 +87,8 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
         qram_size,
         feedback,
         meas_mode,
+        // Disable for now; no need to open this infinite can of worms
+        recursion: false,
     })
 }
 

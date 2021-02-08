@@ -58,21 +58,24 @@
 //!   rather than copying them on each block. Again, this could become much more
 //!   difficult if iteration is necessary.
 
-pub mod common;
-pub mod feedback;
-pub mod linearity;
+mod call_graph;
+mod common;
+mod feedback;
+mod linearity;
 
-use crate::{cavy_errors::ErrorBuf, context::Context, mir::Mir};
+use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::common::{Analysis, DataflowRunner};
+use self::common::{Analysis, DataflowRunner, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
-    for (_, gr) in mir.graphs.iter() {
+
+    // Maybe I should consider making analyses operate on the whole MIR so as
+    // not to pollute the top level like this
+    let mut call_graph: Store<FnId, call_graph::CallSites> = Store::new();
+
+    for (fn_id, gr) in mir.graphs.idx_enumerate() {
         let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
-        // Really expensive, lots of extra work. Maybe we should have a unique
-        // `End` block, and just have to check at that one block whether
-        // anything has ever been moved twice.
         for &snd_span in linearity_res.exit_state.double_moved.values() {
             errs.push(errors::DoubleMove { span: snd_span });
         }
@@ -85,7 +88,16 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
                 }
             }
         }
+
+        // Awkward; figure out equivlent of `into_runner` for summary analyses
+        let call_sites = SummaryRunner::new(call_graph::CallGraphAnalysis {}, gr, ctx).run();
+        let idx = call_graph.insert(call_sites);
+        assert_eq!(fn_id, idx);
+        if !ctx.conf.arch.recursion {
+            // emit some errors if you found recursion above
+        }
     }
+    println!("{:?}", call_graph);
 
     if errs.is_empty() {
         Ok(())
@@ -96,6 +108,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
 mod errors {
     use crate::cavy_errors::Diagnostic;
+    use crate::context::SymbolId;
     use crate::source::Span;
     use cavy_macros::Diagnostic;
 
@@ -111,5 +124,14 @@ mod errors {
         #[msg = "detected classical feedback"]
         /// The second use site
         pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    pub struct Recursion {
+        #[msg = "recursion in function `{name}`"]
+        /// The location of the function call
+        pub span: Span,
+        #[ctx]
+        pub name: SymbolId,
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
 use crate::{context::Context, mir::*};
@@ -7,10 +8,41 @@ use crate::{context::Context, mir::*};
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
 
+/// The main trait for analysis data, representing a join-semilattice.
 pub trait Lattice: Clone + PartialEq + Eq {
     fn join(&self, other: &Self) -> Self;
 
     fn bottom(gr: &Graph, ctx: &Context) -> Self;
+}
+
+/// Any set forms a join-semilattice under unions.
+impl<T> Lattice for HashSet<T>
+where
+    T: Clone + Eq + Hash,
+{
+    fn join(&self, other: &Self) -> Self {
+        self.union(other).cloned().collect()
+    }
+
+    fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> Lattice for HashMap<K, V>
+where
+    K: Clone + Eq + Hash,
+    V: Clone + Eq,
+{
+    fn join(&self, other: &Self) -> Self {
+        let mut new = self.clone();
+        new.extend(other.clone());
+        new
+    }
+
+    fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
+        Self::new()
+    }
 }
 
 /// Trait for a general dataflow analysis
@@ -20,6 +52,9 @@ pub trait Analysis<'mir, 'ctx> {
 
     /// Apply the transfer function for a single statement
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt);
+
+    /// Apply the transfer function for the end of a basic block
+    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind);
 
     // FIXME Instead of making a new runner for each analysis, consider
     // registering all analyses with a single runner.
@@ -117,7 +152,7 @@ where
     fn run_inner(&mut self, block: BlockId) {
         let mut state = self.results.entry_states[block].clone();
         let block = &self.gr.blocks[block];
-        self.trans_block(&mut state, &block);
+        self.propagate(&mut state, &block);
 
         // Compute the successor blocks and do any extra block-kind-dependent work.
         let successors = match &block.kind {
@@ -128,6 +163,7 @@ where
                 &[]
             }
             BlockKind::Call {
+                span: _,
                 callee: _,
                 args: _,
                 blk,
@@ -149,10 +185,11 @@ where
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
-    fn trans_block(&mut self, state: &mut A::Domain, block: &BasicBlock) {
+    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
             self.analysis.trans_stmt(state, stmt);
         }
+        self.analysis.trans_block(state, &block.kind);
     }
 }
 
@@ -175,22 +212,25 @@ impl<'mir, 'ctx, A> SummaryRunner<'mir, 'ctx, A>
 where
     A: Analysis<'mir, 'ctx>,
 {
-    fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
+    pub fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
         Self { analysis, gr, ctx }
     }
 
-    fn run(self) -> A::Domain {
+    pub fn run(self) -> A::Domain {
         let mut state = A::Domain::bottom(self.gr, self.ctx);
         for block in self.gr.blocks.iter() {
-            self.trans_block(&mut state, block);
+            self.propagate(&mut state, block);
         }
         state
     }
 
-    // NOTE this is identical to the method of `DataflowRunner` of the same name
-    fn trans_block(&self, state: &mut A::Domain, block: &BasicBlock) {
+    // FIXME this is (or should be) identical to the method of `DataflowRunner`
+    // of the same name. Until this is abstracted by some common trait, this is
+    // a possible point of failure if they get out of sync.
+    fn propagate(&self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
             self.analysis.trans_stmt(state, stmt);
         }
+        self.analysis.trans_block(state, &block.kind);
     }
 }

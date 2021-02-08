@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
-    mir::{LocalId, RvalueKind},
+    mir::{BlockKind, LocalId, RvalueKind},
     source::Span,
 };
 
@@ -83,4 +83,7 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
             }
         }
     }
+
+    // TODO
+    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {}
 }
