@@ -71,7 +71,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             };
 
             let idx = self.mir.graphs.insert(graph);
-            assert_eq!(idx, fn_id);
+            debug_assert!(idx == fn_id);
         }
 
         if !self.errors.is_empty() {

@@ -72,7 +72,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
     // Maybe I should consider making analyses operate on the whole MIR so as
     // not to pollute the top level like this
-    let mut call_graph: Store<FnId, call_graph::CallSites> = Store::new();
+    let mut call_sites: Store<FnId, call_graph::CallSites> = Store::new();
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
         let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
@@ -90,14 +90,16 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         }
 
         // Awkward; figure out equivlent of `into_runner` for summary analyses
-        let call_sites = SummaryRunner::new(call_graph::CallGraphAnalysis {}, gr, ctx).run();
-        let idx = call_graph.insert(call_sites);
-        assert_eq!(fn_id, idx);
-        if !ctx.conf.arch.recursion {
-            // emit some errors if you found recursion above
-        }
+        let calls = SummaryRunner::new(call_graph::CallGraphAnalysis {}, gr, ctx).run();
+        let idx = call_sites.insert(calls);
+        // Make sure that there is no accidental reordering. This caught a bug
+        // before! Consider moving into a test.
+        debug_assert!(idx == fn_id);
     }
-    println!("{:?}", call_graph);
+
+    if !ctx.conf.arch.recursion {
+        call_graph::check_recursion(&mut errs, &call_sites);
+    }
 
     if errs.is_empty() {
         Ok(())
@@ -124,14 +126,5 @@ mod errors {
         #[msg = "detected classical feedback"]
         /// The second use site
         pub span: Span,
-    }
-
-    #[derive(Diagnostic)]
-    pub struct Recursion {
-        #[msg = "recursion in function `{name}`"]
-        /// The location of the function call
-        pub span: Span,
-        #[ctx]
-        pub name: SymbolId,
     }
 }

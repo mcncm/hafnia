@@ -3,6 +3,15 @@ name = "cavy-cli"
 version = "0.1.0"
 authors = ["mcncm <33966432+mcncm@users.noreply.github.com>"]
 edition = "2018"
+repository = "https://github.com/mcncm/cavy-lang"
+keywords = ["language"]
+description = """
+A compiler for Cavy, an imperative quantum programming language.
+"""
+
+[[bin]]
+name = "cavyc"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
