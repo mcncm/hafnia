@@ -2,7 +2,7 @@ use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
     circuit::Circuit,
-    context::{Context, CtxFmt},
+    context::{Context, CtxDisplay, CtxFmt},
     lowering, parser, scanner,
     session::Phase,
     source::{SrcId, SrcObject},
@@ -10,6 +10,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
+/// Compile a program to a quantum(-classical) circuit representation.
 pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Circuit>, ErrorBuf> {
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
@@ -31,6 +32,10 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<C
     Ok(Some(circ))
 }
 
+/// Compile a program to object code by serializing a circuit representation.
+/// Note that this might not be the right approach in the long run if
+/// recursion/infinite loops are enabled as there will be programs with
+/// finite-sized object code representations, but infinite circuits.
 pub fn compile_target(
     entry_point: SrcId,
     ctx: &mut Context,

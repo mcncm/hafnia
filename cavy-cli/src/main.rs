@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process;
 
 use cavy::arch;
-use cavy::context::{Context, CtxFmt};
+use cavy::context::{Context, CtxDisplay};
 use cavy::session::{Config, Phase, PhaseConfig};
 use cavy::target;
 use cavy::{compile, sys};

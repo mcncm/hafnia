@@ -854,7 +854,6 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
 mod errors {
     use super::Lexeme;
-    use crate::cavy_errors::Diagnostic;
     use crate::source::Span;
     use cavy_macros::Diagnostic;
 

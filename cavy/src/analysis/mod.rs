@@ -28,36 +28,6 @@
 //!   rather than copying them on each block. Again, this could become much more
 //!   difficult if iteration is necessary.
 
-//! This module contains the types and traits used for dataflow analyses. Here
-//! are some of the analyses we would like to perform:
-//! + linear (affine) values are used (at most) once
-//! - linear values aren't used while "borrowed" (although this is still
-//!   a hazy and ill-defined concept)
-//! - ordered values are used in order
-//! - switch blocks consume the same linear (affine) values in each arm
-//! - checking for classical feedback
-//!
-//! As in a few other modules in this project, the architecture is roughly like
-//! that of rustc's. The `Analysis` trait is completely analogous to
-//! `rustc_mir::dataflow::Analysis`, and `AnalysisRunner` to
-//! `rustc_mir::dataflow::Engine`.
-//!
-//! NOTE There are several improvements that could be made to this module.
-//!
-//! * One would be to walk each graph only once, notifying *every* registered
-//!   analysis at each step. It's not quite that simple, of course, because you
-//!   can only do a single traversal if the graph is acyclic. In the case where
-//!   you must iterate to find a fixed point, this picture gets a little more
-//!   complicated.
-//!   
-//! * Another improvement would be to parallellize all non-interprocedural
-//!   analyses. But without profiling (or even running into performance issues),
-//!   this would be a foolish optimization.
-//!
-//! * Analysis states could be represented with persistent data structures,
-//!   rather than copying them on each block. Again, this could become much more
-//!   difficult if iteration is necessary.
-
 mod call_graph;
 mod common;
 mod feedback;

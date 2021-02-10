@@ -4,6 +4,7 @@
 
 use crate::{
     ast::{self, Ast, FnId},
+    context::CtxDisplay,
     source::Span,
     store::Store,
 };
@@ -234,24 +235,10 @@ impl fmt::Display for LocalId {
     }
 }
 
-/// We need context data to format a `Mir` struct, at least to resolve the types
-/// and symbols.
-impl<'t> CtxFmt<'t, MirFmt<'t>> for Mir {
-    fn fmt_with(&'t self, ctx: &'t Context) -> MirFmt<'t> {
-        MirFmt { mir: self, ctx }
-    }
-}
-
-/// A wrapper type for formatting Mir with a context.
-pub struct MirFmt<'t> {
-    mir: &'t Mir,
-    ctx: &'t Context<'t>,
-}
-
-impl<'t> fmt::Display for MirFmt<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for gr in self.mir.graphs.iter() {
-            let _ = write!(f, "{}", gr.fmt_with(&self.ctx));
+impl CtxDisplay for Mir {
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for gr in self.graphs.iter() {
+            write!(f, "{}", gr.fmt_with(ctx))?;
         }
         f.write_str("")
     }
@@ -259,32 +246,20 @@ impl<'t> fmt::Display for MirFmt<'t> {
 
 /// We need context data to format a `Graph` struct, at least to resolve the
 /// types and symbols.
-impl<'t> CtxFmt<'t, GraphFmt<'t>> for Graph {
-    fn fmt_with(&'t self, ctx: &'t Context) -> GraphFmt<'t> {
-        GraphFmt { gr: self, ctx }
-    }
-}
-
-/// A wrapper type for formatting Mir with a context.
-pub struct GraphFmt<'t> {
-    pub gr: &'t Graph,
-    pub ctx: &'t Context<'t>,
-}
-
-impl<'t> fmt::Display for GraphFmt<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl CtxDisplay for Graph {
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let _ = f.write_str("function {\n");
-        for (n, local) in self.gr.locals.iter().enumerate() {
-            let _ = writeln!(f, "\t_{}: {}", n, local.ty.fmt_with(self.ctx));
+        for (n, local) in self.locals.iter().enumerate() {
+            writeln!(f, "\t_{}: {}", n, local.ty.fmt_with(ctx))?;
         }
 
-        for (n, block) in self.gr.blocks.iter().enumerate() {
-            let _ = writeln!(f, "\tbb{} {{", n);
+        for (n, block) in self.blocks.iter().enumerate() {
+            writeln!(f, "\tbb{} {{", n)?;
             for stmt in &block.stmts {
-                let _ = writeln!(f, "\t\t{}", stmt);
+                writeln!(f, "\t\t{}", stmt)?;
             }
-            let _ = writeln!(f, "\t\t{}", block.kind);
-            let _ = f.write_str("\t}\n");
+            writeln!(f, "\t\t{}", block.kind)?;
+            f.write_str("\t}\n")?;
         }
         f.write_str("}\n")
     }
@@ -303,7 +278,7 @@ impl fmt::Display for BlockKind {
         match self {
             BlockKind::Goto(block) => write!(f, "goto [() => {}];", block),
             BlockKind::Switch { cond, blks } => {
-                let _ = write!(f, "switch({}) [", cond);
+                write!(f, "switch({}) [", cond)?;
                 blks.iter().enumerate().fold(true, |first, (n, blk)| {
                     if !first {
                         let _ = f.write_str(", ");
@@ -319,7 +294,7 @@ impl fmt::Display for BlockKind {
                 blk,
                 span: _,
             } => {
-                let _ = write!(f, "call {:?}(", callee);
+                write!(f, "call {:?}(", callee)?;
                 args.iter().fold(true, |first, arg| {
                     if !first {
                         let _ = f.write_str(", ");

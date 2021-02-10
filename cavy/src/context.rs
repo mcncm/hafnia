@@ -72,28 +72,33 @@ impl<'ctx> Context<'ctx> {
 }
 
 /// A trait for formatting things with with the help of a `Context`
-pub trait CtxFmt<'t, Fmt>
-where
-    Fmt: fmt::Display,
-{
-    fn fmt_with(&'t self, ctx: &'t Context) -> Fmt;
+pub trait CtxDisplay {
+    fn fmt_with<'t>(&'t self, ctx: &'t Context) -> CtxFmt<'t, Self>
+    where
+        Self: Sized,
+    {
+        CtxFmt { self_: self, ctx }
+    }
+
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result;
+}
+
+/// This struct is an implementation detail of the `CtxDisplay` trait
+pub struct CtxFmt<'t, T: CtxDisplay> {
+    self_: &'t T,
+    ctx: &'t Context<'t>,
+}
+
+impl<'t, T: CtxDisplay> fmt::Display for CtxFmt<'t, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.self_.fmt(self.ctx, f)
+    }
 }
 
 /// ====== Display and formatting ======
 
-impl<'t> CtxFmt<'t, SymbolFmt<'t>> for SymbolId {
-    fn fmt_with(&'t self, ctx: &'t Context) -> SymbolFmt<'t> {
-        SymbolFmt { symb: self, ctx }
-    }
-}
-
-pub struct SymbolFmt<'t> {
-    pub symb: &'t SymbolId,
-    pub ctx: &'t Context<'t>,
-}
-
-impl<'t> fmt::Display for SymbolFmt<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.ctx.symbols[*self.symb])
+impl CtxDisplay for SymbolId {
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", ctx.symbols[*self])
     }
 }

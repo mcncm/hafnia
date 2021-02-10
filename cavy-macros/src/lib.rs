@@ -33,13 +33,13 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
             }
         }
 
-        impl Diagnostic for #name {
+        impl crate::cavy_errors::Diagnostic for #name {
             /// Can I do this without making an owned string?
             fn message(&self, ctx: &crate::context::Context) -> String {
                 format!(
                     #msg,
                     #(#dis_fields = self.#dis_fields,)*
-                    #(#ctx_fields = crate::context::CtxFmt::fmt_with(&self.#ctx_fields, &ctx),)*
+                    #(#ctx_fields = crate::context::CtxDisplay::fmt_with(&self.#ctx_fields, &ctx),)*
                 )
             }
 

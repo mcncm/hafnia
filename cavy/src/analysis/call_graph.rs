@@ -1,4 +1,5 @@
 //! An analysis pass to compute the functions called by a single function. This
+//!
 //! is used mostly for two purposes: to prune disconnected functions from the
 //! codegen phase, and to detect (mutual) recursion, which may be illegal,
 //! depending on an architecture flag.
@@ -209,8 +210,8 @@ impl<'cg> SCCFinder<'cg> {
 }
 
 mod errors {
-    use crate::context::SymbolId;
-    use crate::{cavy_errors::Diagnostic, source::Span};
+    use crate::context::{Context, CtxDisplay, SymbolId};
+    use crate::source::Span;
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]

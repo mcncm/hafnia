@@ -1,4 +1,4 @@
-use crate::interner_type;
+use crate::{context::CtxDisplay, interner_type};
 use crate::{
     context::{Context, CtxFmt},
     num::Uint,
@@ -75,23 +75,9 @@ impl Type {
     }
 }
 
-/// We need context data to format a `Graph` struct, at least to resolve the
-/// types and symbols.
-impl<'t> CtxFmt<'t, TypeFmt<'t>> for TyId {
-    fn fmt_with(&'t self, ctx: &'t Context) -> TypeFmt<'t> {
-        TypeFmt { ty: self, ctx }
-    }
-}
-
-/// A wrapper type for formatting Mir with a context.
-pub struct TypeFmt<'t> {
-    pub ty: &'t TyId,
-    pub ctx: &'t Context<'t>,
-}
-
-impl<'t> fmt::Display for TypeFmt<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.ctx.types[*self.ty] {
+impl CtxDisplay for TyId {
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &ctx.types[*self] {
             Type::Bool => f.write_str("bool"),
             Type::Uint(u) => write!(f, "{}", u),
             Type::Q_Bool => f.write_str("?bool"),
@@ -100,15 +86,15 @@ impl<'t> fmt::Display for TypeFmt<'t> {
                 let _ = f.write_str("(");
                 for (n, ty) in tys.iter().enumerate() {
                     if n == tys.len() - 1 {
-                        let _ = write!(f, "{}", ty.fmt_with(self.ctx));
+                        let _ = write!(f, "{}", ty.fmt_with(ctx));
                     } else {
-                        let _ = write!(f, "{}, ", ty.fmt_with(self.ctx));
+                        let _ = write!(f, "{}, ", ty.fmt_with(ctx));
                     }
                 }
                 f.write_str(")")
             }
-            Type::Array(ty) => write!(f, "[{}]", &self.ctx.types[*ty]),
-            Type::Measured(ty) => write!(f, "!{}", &self.ctx.types[*ty]),
+            Type::Array(ty) => write!(f, "[{}]", ctx.types[*ty]),
+            Type::Measured(ty) => write!(f, "!{}", ctx.types[*ty]),
         }
     }
 }
