@@ -16,8 +16,14 @@ pub trait Diagnostic: std::fmt::Debug {
     /// Formats the leading line of the error, warning, or lint message.
     fn message(&self, ctx: &Context) -> String;
 
-    /// Retrieves the main Span corresponding to the error
-    fn main_span(&self) -> &Span;
+    /// Retrieves the main Span corresponding to the error, and an optional help
+    /// message
+    fn main_span(&self) -> RegionReport;
+
+    /// Retrieves secondary messages, if there are any.
+    fn secondaries(&self) -> Vec<RegionReport> {
+        Vec::new()
+    }
 
     /// Returns the error code
     fn code(&self) -> &str;
@@ -37,6 +43,52 @@ pub enum DiagnosticLevel {
     Error,
     /// Considered a warning or lint; will not end compilation.
     Warn,
+}
+
+/// A message about a region of code. This can be used to present the results of
+pub struct RegionReport {
+    pub span: Span,
+    /// This should be replaced with a &str somehow, if possible.
+    pub help: Option<&'static str>,
+}
+
+impl CtxDisplay for RegionReport {
+    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let src = &ctx.srcs[self.span.src_id];
+        let line = src.get_line(self.span.start);
+        // FIXME assume for now that spans don't cross lines
+        if src.get_line(self.span.end) != line {
+            return f.write_str("Multiline span");
+        }
+        // Columns to annotate: remember that columns are 1-indexed.
+        let start = self.span.start.col;
+        let end = self.span.end.col;
+        // Carets
+        let mut annot = "^".repeat(end - start + 1);
+        if let Some(help) = &self.help {
+            annot.push_str(" ");
+            annot.push_str(&help);
+        }
+        // How long should line numbers be?
+        let digits = util::count_digits(self.span.start.line);
+        // Reported code with annotations. This is a little ad-hoc, and should
+        // really be some kind of "join" over reported lines.
+        write!(
+            f,
+            "\
+{s:digits$} |
+{linum:digits$} | {}
+{s:digits$} | {s:start$}{}\
+",
+            line,
+            annot,
+            linum = self.span.start.line,
+            s = "",
+            digits = digits,
+            // start of annotation
+            start = start - 1
+        )
+    }
 }
 
 /// It's sometimes convenient to have a placeholder Error type to propagate
@@ -111,48 +163,14 @@ impl CtxDisplay for ErrorBuf {
 
 impl CtxDisplay for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}\n", self.code(), self.message(ctx))?;
-        format_span(self.main_span(), ctx, f)?;
-        f.write_str("\n")
+        writeln!(f, "{}: {}", self.code(), self.message(ctx))?;
+        let main_span = self.main_span();
+        writeln!(f, "{}\n{}", main_span.span, main_span.fmt_with(ctx))?;
+        for span_report in self.secondaries() {
+            writeln!(f, "{}\n{}", span_report.span, span_report.fmt_with(ctx))?;
+        }
+        Ok(())
     }
-}
-
-/// Format the main span of a diagnostic. This could be achieved by implementing
-/// `CtxDisplay` for `Span`, but there may be multiple ways we'll want to
-/// display a `Span` in the future.
-///
-/// TODO clean up the extra, unneeded allocations in here
-fn format_span(span: &Span, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let src = &ctx.srcs[span.src_id];
-    let line = src.get_line(span.start);
-    // FIXME assume for now that spans don't cross lines
-    if src.get_line(span.end) != line {
-        return f.write_str("Multiline span");
-    }
-    // Columns to annotate: remember that columns are 1-indexed.
-    let start = span.start.col;
-    let end = span.end.col;
-    // Carets
-    let annot = "^".repeat(end - start + 1);
-    // How long should line numbers be?
-    let digits = util::count_digits(span.start.line);
-    // Reported code with annotations. This is a little ad-hoc, and should
-    // really be some kind of "join" over reported lines.
-    write!(
-        f,
-        "\
-{s:digits$} |
-{linum:digits$} | {}
-{s:digits$} | {s:start$}{}\
-",
-        line,
-        annot,
-        linum = span.start.line,
-        s = "",
-        digits = digits,
-        // start of annotation
-        start = start - 1
-    )
 }
 
 /// Internal helper functions

@@ -351,6 +351,12 @@ pub enum ExprKind {
         op: UnOp,
         right: Box<Expr>,
     },
+    /// Assignment, as `x = y;`
+    Assn {
+        /// Should be a pattern rather than a mere identifier
+        lhs: Box<Ident>,
+        rhs: Box<Expr>,
+    },
     Literal(Literal),
     /// Identifiers
     Ident(Ident),
@@ -394,6 +400,7 @@ impl ExprKind {
         match self {
             BinOp { .. } => true,
             UnOp { .. } => true,
+            Assn { .. } => true,
             Literal(_) => true,
             Ident(_) => true,
             Tuple { .. } => true,

@@ -46,8 +46,12 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
         let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
-        for &snd_span in linearity_res.exit_state.double_moved.values() {
-            errs.push(errors::DoubleMove { span: snd_span });
+        for (local, &snd_move) in linearity_res.exit_state.double_moved.iter() {
+            let fst_move = linearity_res.exit_state.moved[local];
+            errs.push(errors::DoubleMove {
+                span: fst_move,
+                snd_move,
+            });
         }
 
         if !ctx.conf.arch.feedback {
@@ -87,8 +91,11 @@ mod errors {
     #[derive(Diagnostic)]
     pub struct DoubleMove {
         #[msg = "linear variable moved twice"]
-        /// The second use site
+        /// The first use site
         pub span: Span,
+        #[help = "used again here"]
+        /// The second use site
+        pub snd_move: Span,
     }
 
     #[derive(Diagnostic)]

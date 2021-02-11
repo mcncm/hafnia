@@ -1,3 +1,9 @@
+//! This is the main library crate for the Cavy language compiler. It's used by
+//! all drivers of the compiler, including the `cavyc` command-line interface
+//! and the `pycavy` Python package. You can also use it as an ordinary Rust
+//! crate, to include Cavy as a domain-specific language within your Rust
+//! programs.
+
 #![allow(clippy::new_without_default)]
 #![allow(unused_imports)]
 #![allow(dead_code)]

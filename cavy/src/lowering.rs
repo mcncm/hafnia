@@ -160,6 +160,7 @@ impl SymbolTable {
     }
 }
 
+/// This type is used to lower a single Ast function to a Mir control-flow graph.
 pub struct GraphBuilder<'mir, 'ctx> {
     /// The context must be mutable to add types to its interner. If type
     /// checking and inference becomes a separate, earlier phase, this will no
@@ -299,6 +300,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.lower_into_binop(place, left, op, right, expr.span)
             }
             ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right, expr.span),
+            ExprKind::Assn { lhs, rhs } => self.lower_into_assn(place, lhs, rhs),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Tuple(_) => {
@@ -372,6 +374,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
+    }
+
+    fn lower_into_assn(&mut self, place: LocalId, lhs: &Ident, rhs: &Expr) -> Maybe<()> {
+        // We can't *ignore* `place`, since it could be used if e.g. an assignment
+        // without a terminator appears at the end of a block.
+        self.push_stmt(mir::Stmt {
+            place,
+            rhs: Rvalue {
+                span: Span::default(),
+                data: RvalueKind::Const(Const::Unit),
+            },
+        });
+
+        let lhs_local = match self.st.get(&lhs.data) {
+            Some(local) => *local,
+            None => {
+                return Err(self.errors.push(errors::UnboundName {
+                    span: lhs.span,
+                    name: lhs.data,
+                }))
+            }
+        };
+
+        self.lower_into(lhs_local, rhs)
     }
 
     fn lower_into_literal(&mut self, place: LocalId, lit: &Literal) -> Maybe<()> {
@@ -548,8 +574,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
-                let ty = self.ctx.types.intern(Type::unit());
-                let place = self.gr.auto_local(ty);
+                let place = self.gr.auto_local(self.ctx.common.unit);
                 self.lower_into(place, expr)
             }
             StmtKind::Local { lhs, ty, rhs } => {
@@ -608,17 +633,20 @@ mod typing {
             let ty = match &expr.data {
                 ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
                 ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
+                ExprKind::Assn { .. } => self.ctx.common.unit,
                 ExprKind::Literal(lit) => self.type_literal(lit)?,
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Tuple(_) => todo!(),
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
-                ExprKind::If { cond, dir, ind } => todo!(),
-                ExprKind::For { bind, iter, body } => {
-                    // should be the unit type
+                ExprKind::If { cond, dir, ind } => {
+                    // This is a stopgap. Until there is proper type inference
+                    // in this language, we will have to disable `if`
+                    // expressions altogether, and allow only `if` statements.
                     self.ctx.common.unit
                 }
+                ExprKind::For { bind, iter, body } => self.ctx.common.unit,
                 // FIXME note that here weare resolving this function a *second*
                 // time (the other is in the lowering method). This suggests
                 // that we should factor out function resolution to some earlier
@@ -637,9 +665,6 @@ mod typing {
         }
 
         fn type_binop(&mut self, left: &Expr, op: &ast::BinOp, right: &Expr) -> Maybe<TyId> {
-            // let set = TySet::new();
-            // set
-
             let left = self.type_inner(left)?;
             let right = self.type_inner(right)?;
 
@@ -737,6 +762,7 @@ mod typing {
         }
 
         fn type_block(&mut self, block: &Block) -> Maybe<TyId> {
+            // This is manifestly incorrect.
             match &block.expr {
                 Some(expr) => self.type_inner(expr),
                 None => Ok(self.ctx.common.unit),

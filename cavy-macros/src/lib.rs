@@ -11,7 +11,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 /// Builds a Cavy error struct implementing Diagnostic. This is supposed to
 /// resemble rustc's `SessionDiagnostic` in both form and function.
-#[proc_macro_derive(Diagnostic, attributes(msg, ctx))]
+#[proc_macro_derive(Diagnostic, attributes(msg, ctx, secondary, help))]
 pub fn diagnostic(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     impl_cavy_error_macro(input)
@@ -21,10 +21,52 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     let name = &ast.ident;
     let DiagnosticData {
         main_span,
+        secondaries,
         msg,
         ctx_fields,
         dis_fields,
     } = DiagnosticData::new(&ast);
+
+    // FIXME ignore the optional message
+    let main_span = main_span.0.ident.as_ref().unwrap();
+
+    // A list of code snippets for inserting the secondary spans. If they are
+    // simple spans, they’re just pushed into the waiting vector of secondaries;
+    // if single `Span`s, they're just pushed in, otherwise, that vector is
+    // extended.
+    //
+    // NOTE this won't work if a `Span` is written as *anything other* than
+    // literally `Span`. Let's see if that turns out to be a problem.
+    let secondaries_flat = secondaries.iter().map(|(field, help)| {
+        let ident = field.ident.as_ref().unwrap();
+        let help = match help {
+            Some(help) => quote! { Some(#help) },
+            None => quote! { None },
+        };
+
+        match &field.ty {
+            syn::Type::Path(p) if p.path.is_ident("Span") => {
+                // NOTE this `secondaries` won't have the same type as the one
+                // being iterated over in the enclosing loop.
+                quote! {
+                    secondaries.push(crate::cavy_errors::RegionReport {
+                        span: self.#ident,
+                        help: #help,
+                    });
+                }
+            }
+            _ => {
+                quote! {
+                    secondaries.extend(self.#ident.iter().map(|span| {
+                        crate::cavy_errors::RegionReport {
+                            span: *span,
+                            help: #help,
+                        }
+                    }));
+                }
+            }
+        }
+    });
 
     let expanded = quote! {
         impl std::fmt::Debug for #name {
@@ -34,7 +76,7 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
         }
 
         impl crate::cavy_errors::Diagnostic for #name {
-            /// Can I do this without making an owned string?
+            // Can I do this without making an owned string?
             fn message(&self, ctx: &crate::context::Context) -> String {
                 format!(
                     #msg,
@@ -43,8 +85,23 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
                 )
             }
 
-            fn main_span(&self) -> &crate::source::Span {
-                &self.#main_span
+            fn main_span(&self) -> crate::cavy_errors::RegionReport {
+                crate::cavy_errors::RegionReport {
+                    span: self.#main_span,
+                    help: None,
+                }
+            }
+
+            fn secondaries(&self) -> Vec<crate::cavy_errors::RegionReport> {
+                // Here we've been given a bunch of fields, each of which might
+                // be a single `Span` or a `Vec` of them. We'll have to look at
+                // the type of the field to decide how to flatten the regions
+                // list.
+                let mut secondaries = Vec::new();
+                #(
+                    #secondaries_flat
+                )*
+                secondaries
             }
 
             fn code(&self) -> &str {
@@ -63,7 +120,10 @@ struct DiagnosticData<'ast> {
     msg: syn::Lit,
     /// The main span that should be reported with the error
     #[allow(unused)]
-    main_span: &'ast syn::Ident,
+    main_span: (&'ast syn::Field, Option<syn::Lit>),
+    /// Secondary spans to be reported. They come as a pair of a field with,
+    /// optionally, a help message.
+    secondaries: Vec<(&'ast syn::Field, Option<syn::Lit>)>,
     /// Fields that are referenced in the format string and must be formatted with a context
     ctx_fields: Vec<&'ast syn::Ident>,
     /// Fields that are referenced in the format string and can be formatted with `fmt::Display`
@@ -80,6 +140,7 @@ impl<'ast> DiagnosticData<'ast> {
         // Like in rustc, any error should come with a span that is indicated
         // in the error report.
         let mut main_span = None;
+        let mut secondaries = Vec::new();
         let mut msg = None;
 
         let fields = if let syn::Data::Struct(syn::DataStruct {
@@ -102,18 +163,35 @@ impl<'ast> DiagnosticData<'ast> {
                 let meta = attr
                     .parse_meta()
                     .expect("malformed attribute in diagnostic");
-                if let syn::Meta::NameValue(nv) = meta {
-                    let ident = &nv.path.segments[0].ident;
-                    if nv.path.segments.len() == 1 && ident == "msg" {
-                        if main_span.is_none() {
-                            msg = Some(nv.lit);
-                            // Should we check that the type is Span?
-                            main_span = Some(field.ident.as_ref().unwrap());
-                        } else {
-                            panic!("two main spans in diagnostic");
+                match meta {
+                    syn::Meta::NameValue(nv) => {
+                        let ident = &nv.path.segments[0].ident;
+                        if nv.path.segments.len() == 1 && ident == "msg" {
+                            if main_span.is_none() {
+                                msg = Some(nv.lit);
+                                // Should we check that the type is Span?
+                                main_span = Some((field, None));
+                            } else {
+                                panic!("two main spans in diagnostic");
+                            }
+                        // This is a stopgap. It might be best to make no
+                        // special distinction between primary and secondary
+                        // spans, and have a separate attribute for the main
+                        // message.
+                        } else if nv.path.segments.len() == 1 && ident == "help" {
+                            secondaries.push((field, Some(nv.lit)));
                         }
                     }
-                };
+                    syn::Meta::Path(path) => {
+                        let ident = &path.segments[0].ident;
+                        if path.segments.len() == 1 && ident == "secondary" {
+                            secondaries.push((field, None));
+                        }
+                    }
+                    syn::Meta::List(_) => {
+                        panic!("not sure what to do in this case")
+                    }
+                }
             }
         }
 
@@ -149,6 +227,7 @@ impl<'ast> DiagnosticData<'ast> {
 
         Self {
             main_span,
+            secondaries,
             msg,
             ctx_fields,
             dis_fields,

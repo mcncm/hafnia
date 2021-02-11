@@ -53,17 +53,11 @@ type CallGraph = Store<FnId, CallSites>;
 /// of recursion.
 pub fn check_recursion(errs: &mut ErrorBuf, call_sites: &CallGraph) {
     let components = SCCFinder::new(call_sites).components();
-    for component in components {
-        if component.len() == 1 {
-            errs.push(errors::SimpleRecursion {
-                span: component[0].1,
-            });
+    for cycle in components {
+        if cycle.len() == 1 {
+            errs.push(errors::SimpleRecursion { span: cycle[0].1 });
         } else {
-            // FIXME We should say something more interesting in these errors,
-            // and be able to show the whole cycle.
-            errs.push(errors::MutualRecursion {
-                span: component[0].1,
-            });
+            errs.push(errors::MutualRecursion::new(cycle));
         }
     }
 }
@@ -210,6 +204,7 @@ impl<'cg> SCCFinder<'cg> {
 }
 
 mod errors {
+    use crate::ast::FnId;
     use crate::context::{Context, CtxDisplay, SymbolId};
     use crate::source::Span;
     use cavy_macros::Diagnostic;
@@ -224,8 +219,21 @@ mod errors {
     // TODO This error message should be able to report the whole cycle.
     #[derive(Diagnostic)]
     pub struct MutualRecursion {
-        #[msg = "detected a mutually-recursive cycle"]
+        #[msg = "detected a mutually-recursive cycle:"]
         /// The location of the function call
         pub span: Span,
+        #[help = "...whch calls a function here"]
+        secondaries: Vec<Span>,
+    }
+
+    impl MutualRecursion {
+        pub fn new(mut calls: Vec<(FnId, Span)>) -> Self {
+            let last = calls.pop().unwrap();
+            let rest = calls.iter().map(|(_func, span)| *span).collect();
+            Self {
+                span: last.1,
+                secondaries: rest,
+            }
+        }
     }
 }
