@@ -210,26 +210,28 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
+    #[msg = "function is recursive"]
     pub struct SimpleRecursion {
-        #[msg = "function is recursive"]
+        #[span]
         /// The location of the function call
         pub span: Span,
     }
 
     // TODO This error message should be able to report the whole cycle.
     #[derive(Diagnostic)]
+    #[msg = "detected a mutually-recursive cycle:"]
     pub struct MutualRecursion {
-        #[msg = "detected a mutually-recursive cycle:"]
+        #[span(msg = "a function was called here...")]
         /// The location of the function call
         pub span: Span,
-        #[help = "...whch calls a function here"]
+        #[span(msg = "...that calls a function here")]
         secondaries: Vec<Span>,
     }
 
     impl MutualRecursion {
         pub fn new(mut calls: Vec<(FnId, Span)>) -> Self {
             let last = calls.pop().unwrap();
-            let rest = calls.iter().map(|(_func, span)| *span).collect();
+            let rest = calls.iter().rev().map(|(_func, span)| *span).collect();
             Self {
                 span: last.1,
                 secondaries: rest,

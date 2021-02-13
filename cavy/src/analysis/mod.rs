@@ -89,19 +89,21 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
+    #[msg = "linear variable moved twice"]
     pub struct DoubleMove {
-        #[msg = "linear variable moved twice"]
+        #[span(msg = "the variable was first used here...")]
         /// The first use site
         pub span: Span,
-        #[help = "used again here"]
+        #[span(msg = "...and then used again here")]
         /// The second use site
         pub snd_move: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "detected classical feedback"]
     pub struct ClassicalFeedback {
-        #[msg = "detected classical feedback"]
         /// The second use site
+        #[span]
         pub span: Span,
     }
 }

@@ -16,12 +16,8 @@ pub trait Diagnostic: std::fmt::Debug {
     /// Formats the leading line of the error, warning, or lint message.
     fn message(&self, ctx: &Context) -> String;
 
-    /// Retrieves the main Span corresponding to the error, and an optional help
-    /// message
-    fn main_span(&self) -> RegionReport;
-
     /// Retrieves secondary messages, if there are any.
-    fn secondaries(&self) -> Vec<RegionReport> {
+    fn spans(&self) -> Vec<SpanReport> {
         Vec::new()
     }
 
@@ -46,18 +42,17 @@ pub enum DiagnosticLevel {
 }
 
 /// A message about a region of code. This can be used to present the results of
-pub struct RegionReport {
+pub struct SpanReport {
     pub span: Span,
-    /// This should be replaced with a &str somehow, if possible.
-    pub help: Option<&'static str>,
+    pub msg: Option<&'static str>,
 }
 
-impl CtxDisplay for RegionReport {
+impl CtxDisplay for SpanReport {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let src = &ctx.srcs[self.span.src_id];
         let line = src.get_line(self.span.start);
-        // FIXME assume for now that spans don't cross lines
         if src.get_line(self.span.end) != line {
+            // FIXME assume for now that spans don't cross lines
             return f.write_str("Multiline span");
         }
         // Columns to annotate: remember that columns are 1-indexed.
@@ -65,9 +60,9 @@ impl CtxDisplay for RegionReport {
         let end = self.span.end.col;
         // Carets
         let mut annot = "^".repeat(end - start + 1);
-        if let Some(help) = &self.help {
+        if let Some(msg) = &self.msg {
             annot.push_str(" ");
-            annot.push_str(&help);
+            annot.push_str(&msg);
         }
         // How long should line numbers be?
         let digits = util::count_digits(self.span.start.line);
@@ -164,10 +159,10 @@ impl CtxDisplay for ErrorBuf {
 impl CtxDisplay for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}: {}", self.code(), self.message(ctx))?;
-        let main_span = self.main_span();
-        writeln!(f, "{}\n{}", main_span.span, main_span.fmt_with(ctx))?;
-        for span_report in self.secondaries() {
-            writeln!(f, "{}\n{}", span_report.span, span_report.fmt_with(ctx))?;
+        for span_report in self.spans() {
+            let span = span_report.span;
+            let origin = &ctx.srcs[span.src_id];
+            writeln!(f, "{} {}\n{}", origin, span, span_report.fmt_with(ctx))?;
         }
         Ok(())
     }

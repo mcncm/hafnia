@@ -182,19 +182,25 @@ impl Span {
     }
 }
 
+impl fmt::Display for SrcObject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.origin)
+    }
+}
+
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.start.line == self.end.line {
             write!(
                 f,
                 "[{}:{}-{}]",
-                self.start.line, self.start.pos, self.end.pos
+                self.start.line, self.start.col, self.end.col
             )
         } else {
             write!(
                 f,
                 "[{}:{}]-[{}:{}]",
-                self.start.line, self.start.pos, self.end.line, self.end.pos
+                self.start.line, self.start.col, self.end.line, self.end.col
             )
         }
     }

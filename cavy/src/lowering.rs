@@ -858,8 +858,9 @@ mod errors {
     // This will be a stand-in catch-all error for when a specific type is
     // expected and not found.
     #[derive(Diagnostic)]
+    #[msg = "expected type `{expected}`, found `{actual}`"]
     pub struct ExpectedType {
-        #[msg = "expected type `{expected}`, found `{actual}`"]
+        #[span]
         pub span: Span,
         #[ctx]
         pub expected: TyId,
@@ -870,14 +871,16 @@ mod errors {
     /// TODO This error should go in a type inference model when the day comes
     /// that we add HM type inference to the language.
     #[derive(Diagnostic)]
+    #[msg = "could not infer a type for expression"]
     pub struct InferenceFailure {
-        #[msg = "could not infer a type for expression"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "operator `{kind}` doesn't support argument types `{left}` and `{right}`"]
     pub struct BinOpTypeError {
-        #[msg = "operator `{kind}` doesn't support argument types `{left}` and `{right}`"]
+        #[span]
         pub span: Span,
         /// The operator
         pub kind: BinOpKind,
@@ -890,8 +893,9 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "operator `{kind}` doesn't support argument type `{right}`"]
     pub struct UnOpArgTypeError {
-        #[msg = "operator `{kind}` doesn't support argument type `{right}`"]
+        #[span]
         pub span: Span,
         /// The operator
         pub kind: UnOpKind,
@@ -901,8 +905,9 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "operator `{kind}` doesn't support output type `{ty}`"]
     pub struct UnOpOutTypeError {
-        #[msg = "operator `{kind}` doesn't support output type `{ty}`"]
+        #[span]
         pub span: Span,
         /// The operator
         pub kind: UnOpKind,
@@ -912,8 +917,9 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "pattern fails to match type `{actual}`"]
     pub struct DestructuringError {
-        #[msg = "pattern fails to match type `{actual}`"]
+        #[span]
         pub span: Span,
         /// The type
         #[ctx]
@@ -921,24 +927,27 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "element's type differs from `{ty}`"]
     pub struct HeterogeneousArray {
-        #[msg = "element's type differs from `{ty}`"]
+        #[span]
         pub span: Span,
         #[ctx]
         pub ty: TyId,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "expected size type, found `{ty}`"]
     pub struct ExpectedSizeType {
-        #[msg = "expected size type, found `{ty}`"]
+        #[span]
         pub span: Span,
         #[ctx]
         pub ty: TyId,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "name `{name}` is not bound"]
     pub struct UnboundName {
-        #[msg = "name `{name}` is not bound"]
+        #[span]
         pub span: Span,
         #[ctx]
         pub name: SymbolId,

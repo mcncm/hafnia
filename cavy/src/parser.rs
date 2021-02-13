@@ -858,8 +858,9 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
+    #[msg = "expected `{expected}`, found `{actual}`"]
     pub struct ExpectedToken {
-        #[msg = "expected `{expected}`, found `{actual}`"]
+        #[span]
         pub span: Span,
         /// The expected lexeme
         pub expected: Lexeme,
@@ -868,64 +869,73 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "expected identifier, found `{actual}`"]
     pub struct ExpectedIdentifier {
-        #[msg = "expected identifier, found `{actual}`"]
+        #[span]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "expected item, found token `{actual}`"]
     pub struct ExpectedItem {
-        #[msg = "expected item, found token `{actual}`"]
+        #[span]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "unexpected end of file"]
     pub struct UnexpectedEof {
-        #[msg = "unexpected end of file"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "expected primary token, found `{actual}`"]
     pub struct ExpectedPrimaryToken {
-        #[msg = "expected primary token, found `{actual}`"]
+        #[span]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "expected type annotation, found `{actual}`"]
     pub struct ExpectedTypeAnnot {
-        #[msg = "expected type annotation, found `{actual}`"]
+        #[span]
         pub span: Span,
         /// The lexeme actually found
         pub actual: Lexeme,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "multiple functions named `main`"]
     pub struct MultipleEntryPoints {
-        #[msg = "multiple functions named `main`"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "multiple definitions of function in this scope"]
     pub struct MultipleDefinitions {
-        #[msg = "multiple definitions of function in this scope"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "entry point `main` must not take parameters or return"]
     pub struct InvalidMainSignature {
-        #[msg = "entry point `main` must not take parameters or return"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "shadowed locals are currently not allowed"]
     pub struct ShadowedLocal {
-        #[msg = "shadowed locals are currently not allowed"]
+        #[span]
         pub span: Span,
     }
 }

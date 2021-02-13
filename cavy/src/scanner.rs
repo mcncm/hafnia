@@ -440,14 +440,16 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
+    #[msg = "numeric literals may only contain digits"]
     pub struct NonDigitInNumber {
-        #[msg = "numeric literals may only contain digits"]
+        #[span]
         pub span: Span,
     }
 
     #[derive(Diagnostic)]
+    #[msg = "unparsable number"]
     pub struct UnparsableNumber {
-        #[msg = "unparsable number"]
+        #[span]
         pub span: Span,
     }
 }
