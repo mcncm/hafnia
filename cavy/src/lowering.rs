@@ -236,8 +236,12 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Err(self.errors.push(err))
     }
 
-    fn expect_type(&mut self, expected: TyId, actual: TyId, span: Span) -> Maybe<()> {
-        if actual != expected {
+    /// Error if a type is not found in a list of expected types.
+    fn expect_type(&mut self, expected: &[TyId], actual: TyId, span: Span) -> Maybe<()> {
+        if !expected.contains(&actual) {
+            // TODO Improve the error message by reporting /all/ of the expected
+            // types, rather than just the first.
+            let expected = expected[0];
             self.error(errors::ExpectedType {
                 span,
                 expected,
@@ -294,9 +298,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // least once.
     #[allow(unused_variables)]
     pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
-        let ty = self.type_expr(expr)?;
-        // This is now the center of all type-checking
-        self.expect_type(self.gr.locals[place].ty, ty, expr.span)?;
+        // We can (and must) defer type-checking of a block, since we'd
+        // otherwise need to do some relatively complicated type inference.
+        if !matches!(expr.data, ExprKind::Block(_)) {
+            let ty = self.type_expr(expr)?;
+            // This is now the center of all type-checking
+            self.expect_type(&[self.gr.locals[place].ty], ty, expr.span)?;
+        }
+
         match &expr.data {
             ExprKind::BinOp { left, op, right } => {
                 self.lower_into_binop(place, left, op, right, expr.span)
@@ -406,11 +415,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let ty = self.gr.locals[place].ty;
         let constant = match &lit.data {
             LiteralKind::True => {
-                self.expect_type(ty, self.ctx.common.bool, lit.span)?;
+                self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
                 Const::True
             }
             LiteralKind::False => {
-                self.expect_type(ty, self.ctx.common.bool, lit.span)?;
+                self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
                 Const::False
             }
             LiteralKind::Nat(n, sz) => {
@@ -422,7 +431,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     Some(Uint::U32) => self.ctx.common.u32,
                     None => self.ctx.common.u32,
                 };
-                self.expect_type(ty, lit_ty, lit.span)?;
+                self.expect_type(&[ty], lit_ty, lit.span)?;
                 Const::Nat(*n)
             }
         };
@@ -464,7 +473,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Maybe<()> {
         #![allow(unused_variables)]
-        println!("{:?}", self.st.tables);
         let Block {
             stmts,
             expr,
@@ -502,6 +510,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // TODO: Again, I'm cheating by trying to fit this into a
         // `bool`, when it could also be a `?bool`.
         let cond_ty = self.type_expr(cond)?;
+        self.expect_type(
+            &[self.ctx.common.bool, self.ctx.common.q_bool],
+            cond_ty,
+            cond.span,
+        )?;
         let cond_place = self.gr.auto_local(cond_ty);
         let cond = self.lower_into(cond_place, cond);
         let tail_block = self.new_block();
@@ -583,9 +596,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             StmtKind::Local { lhs, ty, rhs } => {
                 // Is this annotated, or must we infer the type?
                 let ty = match (ty, rhs) {
-                    // This should work if we ever have proper type inferece; in
-                    // the *near* future it should emit an error message, but for now let's just fail.
-                    (None, None) => unimplemented!(),
+                    // This should work, rather than emit an error, if we ever
+                    // have proper type inferece!
+                    (None, None) => {
+                        return Err(self.errors.push(errors::InferenceFailure {
+                            span: lhs.span,
+                            name: lhs.data,
+                        }))
+                    }
                     (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
                     (_, Some(rhs)) => self.type_inner(rhs)?,
                 };
@@ -874,10 +892,12 @@ mod errors {
     /// TODO This error should go in a type inference model when the day comes
     /// that we add HM type inference to the language.
     #[derive(Diagnostic)]
-    #[msg = "could not infer a type for expression"]
+    #[msg = "could not infer a type for `{name}`"]
     pub struct InferenceFailure {
         #[span]
         pub span: Span,
+        #[ctx]
+        pub name: SymbolId,
     }
 
     #[derive(Diagnostic)]

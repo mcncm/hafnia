@@ -391,14 +391,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         } else {
             None
         };
-        self.consume(Lexeme::Equal)?;
-        let (rhs, semi) = match self.peek_lexeme() {
-            Some(Semicolon) => (None, self.token().unwrap().span),
-            _ => {
-                let rhs = Some(Box::new(self.expression()?));
-                (rhs, self.consume(Lexeme::Semicolon)?.span)
-            }
+
+        let rhs = if self.match_lexeme(Equal) {
+            Some(Box::new(self.expression()?))
+        } else {
+            None
         };
+
+        let semi = self.consume(Semicolon)?.span;
 
         let stmt = Stmt {
             data: StmtKind::Local { lhs, ty, rhs },

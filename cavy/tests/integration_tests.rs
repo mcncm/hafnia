@@ -48,6 +48,11 @@ test_compiles! {
         fn f() {}
     }
 
+    two_mains fail {
+        fn main() {}
+        fn main() {}
+    }
+
     function_call {
         fn f() { }
         fn main() { f() }
@@ -58,20 +63,32 @@ test_compiles! {
         fn main() { let x = f(); }
     }
 
-    // TODO fix this key test by typing blocks correctly!
-    // return_assigned {
-    //     fn main() { let x = f(); }
-    //     fn f() -> u32 {
-    //         let x = 12;
-    //         x
-    //     }
-    // }
+    return_wrong_type fail {
+        fn main() { }
+        fn f() -> u32 { true }
+    }
+
+    return_assigned {
+        fn main() { let x = f(); }
+        fn f() -> u32 {
+            let x = 12;
+            x
+        }
+    }
 
     double_move fail {
         fn main() {
             let x = ?false;
             let y = x;
             let z = x;
+        }
+    }
+
+    chained_move {
+        fn main() {
+            let x = ?false;
+            let y = x;
+            let z = y;
         }
     }
 
@@ -85,4 +102,32 @@ test_compiles! {
         fn g() { f() }
     }
 
+    classical_feedback fail {
+        fn main() {
+            let q = ?true;
+            let c = !q;
+            let r = ?c;
+        }
+    }
+
+    simple_conditional {
+        fn main() {
+            let x: u32;
+            if true { x = 3; } else { x = 4; }
+        }
+    }
+
+    linear_conditional {
+        fn main() {
+            let x: u32;
+            if ?true { x = 3; } else { x = 4; }
+        }
+    }
+
+    conditional_wrong_type fail {
+        fn main() {
+            let x: u32;
+            if 56 { x = 3; } else { x = 4; }
+        }
+    }
 }
