@@ -41,6 +41,7 @@ fn get_phase(argmatches: &ArgMatches) -> PhaseConfig {
         Some("tokenize") => Phase::Tokenize,
         Some("parse") => Phase::Parse,
         Some("typecheck") => Phase::Typecheck,
+        Some("analysis") => Phase::Analysis,
         Some("evaluate") => Phase::Evaluate,
         Some(_) => unreachable!(),
         None => Phase::Evaluate,

@@ -37,11 +37,6 @@ use std::{mem, vec::IntoIter};
 /// This api will almost certainly change when, some fine day, a program can
 /// have more than one module in it.
 pub fn parse(tokens: Vec<Token>, ctx: &mut Context) -> Result<Ast, ErrorBuf> {
-    use crate::session::Phase;
-    if ctx.last_phase() < &Phase::Parse {
-        crate::sys::exit(0);
-    }
-
     Parser::new(tokens, ctx).parse()
 }
 
@@ -56,15 +51,16 @@ lazy_static! {
     #[rustfmt::skip]
     static ref OPERATOR_TABLE: HashMap<Lexeme, Precedence> = {
         let mut m = HashMap::new();
-        m.insert(TildeEqual, Precedence(0, false));
-        m.insert(EqualEqual, Precedence(0, false));
-        m.insert(LAngle,     Precedence(1, false));
-        m.insert(RAngle,     Precedence(1, false));
-        m.insert(Plus,       Precedence(2, false));
-        m.insert(Minus,      Precedence(2, false));
-        m.insert(Star,       Precedence(3, false));
-        m.insert(Percent,    Precedence(3, false));
-        m.insert(DotDot,     Precedence(4, false));
+        m.insert(Equal,      Precedence(0, true));
+        m.insert(TildeEqual, Precedence(1, false));
+        m.insert(EqualEqual, Precedence(1, false));
+        m.insert(LAngle,     Precedence(2, false));
+        m.insert(RAngle,     Precedence(2, false));
+        m.insert(Plus,       Precedence(3, false));
+        m.insert(Minus,      Precedence(3, false));
+        m.insert(Star,       Precedence(4, false));
+        m.insert(Percent,    Precedence(4, false));
+        m.insert(DotDot,     Precedence(5, false));
         m
     };
 }
@@ -287,15 +283,15 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let func = Func {
             sig,
             body: self.ast.bodies.insert(body),
-            span,
             table: self.table_id,
+            span,
         };
 
         // Insert the function into the function table
         let func_id = self.ast.funcs.insert(func);
 
         // Validate the `main` function
-        if self.root_table() && self.ctx.symbols.contains("main") {
+        if self.root_table() && self.ctx.symbols[name.data] == "main" {
             self.validate_main(func_id)?;
             self.ast.entry_point = Some(func_id);
         }
@@ -357,8 +353,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let span = opening.join(&closing).unwrap();
 
         let sig = Sig {
-            output,
             params,
+            output,
             span,
         };
 
@@ -832,8 +828,21 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     }
                 }
 
-                let op = BinOp::from_token(outer, self.ctx).unwrap();
                 let rhs_span = rhs.span;
+                // Check for assignment expressions as a specal case
+                if let Lexeme::Equal = outer.lexeme {
+                    let lhs = self.node(lhs, span);
+                    return Ok(self.node(
+                        ExprKind::Assn {
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        span.join(&rhs_span).unwrap(),
+                    ));
+                }
+
+                // Handle all other cases, which are more ordinary "BinOp"s.
+                let op = BinOp::from_token(outer, self.ctx).unwrap();
                 lhs = ExprKind::BinOp {
                     op,
                     left: Box::new(self.node(lhs, span)),

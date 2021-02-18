@@ -45,6 +45,7 @@ args:
         - "tokenize"
         - "parse"
         - "typecheck"
+        - "analysis"
         - "evaluate"
   - typecheck:
       long: typecheck

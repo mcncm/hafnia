@@ -145,7 +145,8 @@ pub enum BlockKind {
     /// An n-way conditional jump.
     ///
     /// NOTE: this vec will *almost always* have only two elements. Is there a
-    /// lighter-weight alternative that could be used here?
+    /// lighter-weight alternative that could be used here? Smallvec might be an
+    /// option.
     Switch { cond: LocalId, blks: Vec<BlockId> },
     /// A block ending in a function call
     Call {

@@ -93,7 +93,7 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
                 spans
             }
 
-            fn code(&self) -> &str {
+            fn error_code(&self) -> &str {
                 "error [E000]"
             }
         }

@@ -13,6 +13,8 @@ pub enum Phase {
     Parse,
     /// Shorthand for all semantic-analysis passes
     Typecheck,
+    ///
+    Analysis,
     /// The tree-walk interpreter: this will be replaced with a `codegen` phase
     /// or something to that effect.
     Evaluate,

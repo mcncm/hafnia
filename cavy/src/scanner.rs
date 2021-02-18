@@ -17,11 +17,6 @@ use std::vec::Vec;
 
 /// Main entry point for scanning
 pub fn tokenize(src_id: SrcId, ctx: &mut Context) -> Result<Vec<Token>, ErrorBuf> {
-    use crate::session::Phase;
-    if ctx.last_phase() < &Phase::Tokenize {
-        crate::sys::exit(0);
-    }
-
     Scanner::new(src_id, &mut ctx.srcs).tokenize()
 }
 

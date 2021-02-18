@@ -1,7 +1,7 @@
 use crate::{
     ast::{self, *},
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
-    context::{Context, SymbolId},
+    context::{Context, CtxDisplay, SymbolId},
     mir::{self, *},
     num::Uint,
     source::Span,
@@ -69,8 +69,10 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
                     continue;
                 }
             };
-
             let idx = self.mir.graphs.insert(graph);
+            // We should check the invariant that function ids point to the same
+            // function in the Mir that they do in the Ast. Bugs have caused
+            // this to be violated before!
             debug_assert!(idx == fn_id);
         }
 
@@ -376,7 +378,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_assn(&mut self, place: LocalId, lhs: &Ident, rhs: &Expr) -> Maybe<()> {
+    fn lower_into_assn(&mut self, place: LocalId, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
         self.push_stmt(mir::Stmt {
@@ -387,14 +389,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             },
         });
 
+        let lhs = match &lhs.data {
+            ExprKind::Ident(name) => name,
+            _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
+        };
+
         let lhs_local = match self.st.get(&lhs.data) {
             Some(local) => *local,
-            None => {
-                return Err(self.errors.push(errors::UnboundName {
-                    span: lhs.span,
-                    name: lhs.data,
-                }))
-            }
+            None => return Err(self.errors.push(errors::UndeclaredLhs { span: lhs.span })),
         };
 
         self.lower_into(lhs_local, rhs)
@@ -462,6 +464,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Maybe<()> {
         #![allow(unused_variables)]
+        println!("{:?}", self.st.tables);
         let Block {
             stmts,
             expr,
@@ -951,5 +954,20 @@ mod errors {
         pub span: Span,
         #[ctx]
         pub name: SymbolId,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "cannot assign to nonexistent location"]
+    pub struct UndeclaredLhs {
+        #[span]
+        #[span(msg = "try declaring this first")]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "invalid left-hand side of assignment"]
+    pub struct InvalidLhsKind {
+        #[span(msg = "expected a variable here")]
+        pub span: Span,
     }
 }

@@ -353,8 +353,11 @@ pub enum ExprKind {
     },
     /// Assignment, as `x = y;`
     Assn {
-        /// Should be a pattern rather than a mere identifier
-        lhs: Box<Ident>,
+        /// Should *ideally* be a pattern rather than an expression, which would
+        /// remove the need to check later that this is the right kind of
+        /// expression. However, that would make parsing more difficult, so we
+        /// won't do it for now.
+        lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
     Literal(Literal),

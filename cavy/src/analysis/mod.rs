@@ -56,14 +56,17 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
         if !ctx.conf.arch.feedback {
             let feedback_res = feedback::FeedbackAnalysis {}.into_runner(ctx, gr).run();
-            for (local, snd_span) in feedback_res.exit_state.lin.into_iter() {
-                if let Some(_fst_span) = feedback_res.exit_state.delin.get(&local) {
-                    errs.push(errors::ClassicalFeedback { span: snd_span });
+            for (local, lin_site) in feedback_res.exit_state.lin.into_iter() {
+                if let Some(&delin_site) = feedback_res.exit_state.delin.get(&local) {
+                    errs.push(errors::ClassicalFeedback {
+                        delin_site,
+                        lin_site,
+                    });
                 }
             }
         }
 
-        // Awkward; figure out equivlent of `into_runner` for summary analyses
+        // Awkward; figure out equivalent of `into_runner` for summary analyses
         let calls = SummaryRunner::new(call_graph::CallGraphAnalysis {}, gr, ctx).run();
         let idx = call_sites.insert(calls);
         // Make sure that there is no accidental reordering. This caught a bug
@@ -83,8 +86,6 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 }
 
 mod errors {
-    use crate::cavy_errors::Diagnostic;
-    use crate::context::SymbolId;
     use crate::source::Span;
     use cavy_macros::Diagnostic;
 
@@ -102,8 +103,11 @@ mod errors {
     #[derive(Diagnostic)]
     #[msg = "detected classical feedback"]
     pub struct ClassicalFeedback {
-        /// The second use site
-        #[span]
-        pub span: Span,
+        /// The the delinearization site
+        #[span(msg = "this data was measured here...")]
+        pub delin_site: Span,
+        /// The linearization site
+        #[span(msg = "...and later linearized")]
+        pub lin_site: Span,
     }
 }

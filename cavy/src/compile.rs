@@ -27,6 +27,9 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<C
     }
 
     crate::analysis::check(&mir, ctx)?;
+    if ctx.conf.debug && ctx.last_phase() == &Phase::Analysis {
+        return Ok(None);
+    }
 
     let circ = crate::codegen::codegen(&mir, ctx);
     Ok(Some(circ))

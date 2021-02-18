@@ -16,13 +16,14 @@ pub trait Diagnostic: std::fmt::Debug {
     /// Formats the leading line of the error, warning, or lint message.
     fn message(&self, ctx: &Context) -> String;
 
-    /// Retrieves secondary messages, if there are any.
+    /// Retrieves messages referencing spans of source code, of which there must
+    /// be at least one.
     fn spans(&self) -> Vec<SpanReport> {
         Vec::new()
     }
 
     /// Returns the error code
-    fn code(&self) -> &str;
+    fn error_code(&self) -> &str;
 }
 
 /// Like `std::error::Error`, we would often like to enjoy automatic conversion
@@ -158,7 +159,7 @@ impl CtxDisplay for ErrorBuf {
 
 impl CtxDisplay for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}: {}", self.code(), self.message(ctx))?;
+        writeln!(f, "{}: {}", self.error_code(), self.message(ctx))?;
         for span_report in self.spans() {
             let span = span_report.span;
             let origin = &ctx.srcs[span.src_id];
@@ -170,7 +171,8 @@ impl CtxDisplay for Box<dyn Diagnostic> {
 
 /// Internal helper functions
 mod util {
-    /// Count the digits in a number; useful for formatting lines of source code.
+    /// Count the decimal digits in a number; useful for formatting lines of
+    /// source code.
     pub fn count_digits(n: usize) -> usize {
         match n {
             0 => 1,
@@ -193,8 +195,9 @@ mod tests {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
+    #[msg = "thing failed: {data}"]
     struct ExampleError {
-        #[msg = "thing failed: {data}"]
+        #[span]
         span: Span,
         data: u8,
     }
