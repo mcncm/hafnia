@@ -1,21 +1,18 @@
 [package]
 name = "cavy"
 version = "0.1.0"
-authors = ["mcncm <cavy-lang-support@mit.edu>"]
+authors = ["mcncm <33966432+mcncm@users.noreply.github.com>"]
 edition = "2018"
-build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0.113", features = ["derive"] }
-serde_json = "1.0"
-lazy_static = "1.0"
-dirs = "2.0.2"
-cavy-macros = { path = "../cavy-macros" }
+cavy-core = { path = "../cavy-core" }
 
-[lib]
-crate-type = ["dylib"]
+[dependencies.cavy-comptime]
+optional = true
+path = "../cavy-comptime"
 
-[dev-dependencies.cargo-husky]
-version = "1"
-default-features = false
-features = ["user-hooks"]
+[features]
+default = ["comptime"]
+comptime = ["cavy-comptime"]

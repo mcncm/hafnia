@@ -2,6 +2,8 @@
 //! Currently, all of these simply check whether correct (resp. incorrect) code
 //! compiles (resp. fails to compile).
 
+use cavy_core::{compile, context, session};
+
 /// This simple macro builds compilation tests. It's not very fine-grained, so
 /// you can't e.g. test the diagnostic.
 macro_rules! test_compiles {
@@ -14,12 +16,12 @@ macro_rules! test_compiles {
                 // cavy/lib.rs. We can't necessarily use that macro, though,
                 // because I want access to the config. Maybe it should *return*
                 // the config? Not clear. Good enough for now.
-                let conf = cavy::session::Config::default();
-                let mut ctx = cavy::context::Context::new(&conf);
+                let conf = session::Config::default();
+                let mut ctx = context::Context::new(&conf);
                 let id = ctx.srcs.insert_input(&stringify!($($src)*));
-                let circ = cavy::compile::compile_circuit(id, &mut ctx);
+                let circ = compile::compile_circuit(id, &mut ctx);
                 if let Err(errs) = circ {
-                    eprintln!("{}", cavy::context::CtxDisplay::fmt_with(&errs, &ctx));
+                    eprintln!("{}", context::CtxDisplay::fmt_with(&errs, &ctx));
                     panic!();
                 }
             }

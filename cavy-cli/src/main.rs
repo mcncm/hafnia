@@ -4,11 +4,11 @@ use std::panic;
 use std::path::PathBuf;
 use std::process;
 
-use cavy::arch;
-use cavy::context::{Context, CtxDisplay};
-use cavy::session::{Config, Phase, PhaseConfig};
-use cavy::target;
-use cavy::{compile, sys};
+use cavy_core::arch;
+use cavy_core::context::{Context, CtxDisplay};
+use cavy_core::session::{Config, Phase, PhaseConfig};
+use cavy_core::target;
+use cavy_core::{compile, sys};
 
 // use cavy_cli::repl::Repl;
 
