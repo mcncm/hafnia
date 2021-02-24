@@ -51,10 +51,10 @@ pub trait Analysis<'mir, 'ctx> {
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt);
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, data: &mir::BlockData);
 
     /// Apply the transfer function for the end of a basic block
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind);
+    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, data: &mir::BlockData);
 
     // FIXME Instead of making a new runner for each analysis, consider
     // registering all analyses with a single runner.
@@ -187,9 +187,9 @@ where
     /// set the result value to this state, and mutate the state through the block.
     fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
-            self.analysis.trans_stmt(state, stmt);
+            self.analysis.trans_stmt(state, stmt, &block.data);
         }
-        self.analysis.trans_block(state, &block.kind);
+        self.analysis.trans_block(state, &block.kind, &block.data);
     }
 }
 
@@ -229,8 +229,8 @@ where
     // a possible point of failure if they get out of sync.
     fn propagate(&self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
-            self.analysis.trans_stmt(state, stmt);
+            self.analysis.trans_stmt(state, stmt, &block.data);
         }
-        self.analysis.trans_block(state, &block.kind);
+        self.analysis.trans_block(state, &block.kind, &block.data);
     }
 }

@@ -116,8 +116,14 @@ impl Graph {
 
 #[derive(Debug)]
 pub struct BasicBlock {
+    /// The branch-free sequence of MIR statements within the basic block
     pub stmts: Vec<Stmt>,
+    /// The tail of the basic block, which may be of multiple kinds: a switch, a
+    /// function call, and so on
     pub kind: BlockKind,
+    /// Satellite data associated with this block, such as helpful precomputed
+    /// facts about its position in the graph
+    pub data: BlockData,
 }
 
 impl BasicBlock {
@@ -125,6 +131,7 @@ impl BasicBlock {
         Self {
             stmts: vec![],
             kind: BlockKind::Ret,
+            data: BlockData::default(),
         }
     }
 
@@ -132,8 +139,22 @@ impl BasicBlock {
         Self {
             stmts: vec![],
             kind: BlockKind::Goto(block),
+            data: BlockData::default(),
         }
     }
+}
+
+/// Satellite data associated with a basic block
+#[derive(Debug, Clone, Default)]
+pub struct BlockData {
+    /// This extra datum contains the nearest enclosing branch, which may or may
+    /// not be linear. It may not be strictly necessary to collect this data
+    /// during graph building and maintain it throughout the lifecycle of the
+    /// mir, but it will otherwise be computed during code generation and
+    /// possibly multiple analyses.
+    pub sup_branch: Option<BlockId>,
+    /// The nearest enclosing *linear* branch. This is used for some analyses.
+    pub sup_lin_branch: Option<BlockId>,
 }
 
 /// This specifies where the block points to next: either it

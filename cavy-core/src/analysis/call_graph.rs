@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::mir::Graph;
+use crate::mir::{BlockData, Graph};
 use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};
@@ -34,9 +34,9 @@ impl Analysis<'_, '_> for CallGraphAnalysis {
 
     /// Do absolutely nothing: calls appear in basic block tails, so these are
     /// all we care about.
-    fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &crate::mir::Stmt) {}
+    fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &crate::mir::Stmt, _data: &BlockData) {}
 
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind) {
+    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, _data: &BlockData) {
         match block {
             BlockKind::Call { callee, span, .. } => {
                 state.insert(*callee, *span);
@@ -47,7 +47,7 @@ impl Analysis<'_, '_> for CallGraphAnalysis {
 }
 
 /// A graph of call sites for the entire MIR
-type CallGraph = Store<FnId, CallSites>;
+pub type CallGraph = Store<FnId, CallSites>;
 
 /// A check on the results of the call graph analysis that verifies the absence
 /// of recursion.

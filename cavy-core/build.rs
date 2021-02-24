@@ -1,6 +1,7 @@
-/// This build script is used to generate a version string for error logging. It
-/// is copied (almost) verbatim from Christian Vallentin's helpful example at
-/// https://vallentin.dev/2019/06/06/versioning.
+//! This build script is used to generate a version string for error logging. It
+//! is copied (almost) verbatim from Christian Vallentin's helpful example at
+//! https://vallentin.dev/2019/06/06/versioning.
+
 use std::env::{
     self,
     consts::{ARCH, OS},
@@ -34,6 +35,9 @@ fn main() {
     fs::write(address_path, contact_address()).unwrap();
 }
 
+/// NOTE This requires git, as a hidden dependency, to build the library. It's
+/// overwhelmingly unlikely that anyone will ever run into trouble because of
+/// it, but worth noting.
 fn get_commit_hash() -> String {
     let output = Command::new("git")
         .arg("log")
@@ -42,9 +46,7 @@ fn get_commit_hash() -> String {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .unwrap();
-
     assert!(output.status.success());
-
     String::from_utf8_lossy(&output.stdout).to_string()
 }
 

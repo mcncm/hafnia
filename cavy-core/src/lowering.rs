@@ -253,25 +253,31 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     // === Block-manipulating methods ===
 
-    pub fn push_stmt(&mut self, stmt: mir::Stmt) {
+    fn push_stmt(&mut self, stmt: mir::Stmt) {
         self.gr.push_stmt(self.cursor, stmt);
     }
 
-    pub fn new_block(&mut self) -> BlockId {
-        self.gr.new_block()
+    /// Create a new block, inheriting the satellite data of the block currently
+    /// under the cursor.
+    fn new_block(&mut self) -> BlockId {
+        let mut block = BasicBlock::new();
+        block.data = self.gr.blocks[self.cursor].data.clone();
+        self.gr.blocks.insert(block)
     }
 
-    pub fn set_terminator(&mut self, kind: BlockKind) {
+    fn set_terminator(&mut self, kind: BlockKind) {
         self.gr.blocks[self.cursor].kind = kind;
     }
 
     /// Temporarily work within the environment of a new goto block
-    fn with_goto<T, F>(&mut self, block: BlockId, f: F) -> Maybe<T>
+    fn with_goto<T, F>(&mut self, goto: BlockId, f: F) -> Maybe<T>
     where
         F: FnOnce(&mut Self) -> Maybe<T>,
     {
         let old_block = self.cursor;
-        self.cursor = self.gr.goto_block(block);
+        self.cursor = self.gr.goto_block(goto);
+        // On success of the internal closure, restore the block cursor and
+        // return the inner value.
         f(self).map(|v| {
             self.cursor = old_block;
             v
@@ -297,7 +303,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // do that, since some types cannot not known without walking the tree at
     // least once.
     #[allow(unused_variables)]
-    pub fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
+    fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
         // We can (and must) defer type-checking of a block, since we'd
         // otherwise need to do some relatively complicated type inference.
         if !matches!(expr.data, ExprKind::Block(_)) {
@@ -519,21 +525,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond = self.lower_into(cond_place, cond);
         let tail_block = self.new_block();
 
-        // Direct branch
-        let dir = self.with_goto(tail_block, |this| {
-            this.lower_into_block(place, dir)?;
-            Ok(this.cursor)
-        });
+        let mut blk_data = self.gr.blocks[self.cursor].data.clone();
+        blk_data.sup_branch = Some(self.cursor);
+        if cond_ty.is_linear(self.ctx) {
+            blk_data.sup_lin_branch = Some(self.cursor);
+        }
 
         // Indirect branch
         let ind = match ind {
-            Some(ind) => self.with_goto(tail_block, |this| {
-                this.lower_into_block(place, ind)?;
-                Ok(this.cursor)
+            Some(ind) => self.with_goto(tail_block, |self_| {
+                self_.gr.blocks[self_.cursor].data = blk_data.clone();
+                self_.lower_into_block(place, ind)?;
+                Ok(self_.cursor)
             }),
             None => Ok(tail_block),
         };
 
+        // Direct branch
+        let dir = self.with_goto(tail_block, |self_| {
+            self_.gr.blocks[self_.cursor].data = blk_data;
+            self_.lower_into_block(place, dir)?;
+            Ok(self_.cursor)
+        });
+
+        // Propagate errors from branches
         let (dir, ind, _) = match (dir, ind, cond) {
             (Ok(dir), Ok(ind), Ok(cond)) => Ok((dir, ind, cond)),
             (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(err),

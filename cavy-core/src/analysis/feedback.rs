@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
-    mir::{BlockKind, LocalId, RvalueKind},
+    mir::{BlockData, BlockKind, LocalId, RvalueKind},
     source::Span,
 };
 
@@ -57,7 +57,7 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
     type Direction = Forward;
     type Domain = MeasState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt) {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
         match &stmt.rhs.data {
             RvalueKind::BinOp(_, left, right) => {
                 if let Some(&span) = state.delin.get(left).or_else(|| state.delin.get(right)) {
@@ -85,5 +85,5 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
     }
 
     // TODO
-    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {}
+    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {}
 }

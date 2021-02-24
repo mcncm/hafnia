@@ -132,4 +132,32 @@ test_compiles! {
             if 56 { x = 3; } else { x = 4; }
         }
     }
+
+    sub_lin_cond_meas fail {
+        fn main() {
+            let x = ?false;
+            let y = ?true;
+            if y {
+                let c = !x;
+            }
+        }
+    }
+
+    sub_lin_cond_meas_call fail {
+        fn main() {
+            let x = ?false;
+            let y = ?true;
+            if y {
+                let c = f(x);
+            }
+        }
+
+        fn f(x: ?bool) -> bool {
+            g(x)
+        }
+
+        fn g(x: ?bool) -> bool {
+            !x
+        }
+    }
 }

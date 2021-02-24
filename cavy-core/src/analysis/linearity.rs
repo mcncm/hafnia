@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
-    mir::{BlockKind, LocalId, RvalueKind},
+    mir::{BlockData, BlockKind, LocalId, RvalueKind},
     source::Span,
 };
 
@@ -53,7 +53,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
     type Direction = Forward;
     type Domain = MoveState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt) {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
         match &stmt.rhs.data {
             RvalueKind::BinOp(_, _, _) => {}
             RvalueKind::UnOp(_, _) => {}
@@ -70,7 +70,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
         }
     }
 
-    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {
+    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {
         // TODO
     }
 }

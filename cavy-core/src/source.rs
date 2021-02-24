@@ -126,7 +126,7 @@ impl SrcKind {
 /// three `usize`s make this struct occupy 24 bytes. This could be done a little
 /// more efficiently by having the parser cleverly mark newlines and so on in an
 /// auxiliary data structure associated with each source object.
-#[derive(Debug, Default, Eq, PartialEq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, Default, Eq, PartialEq, Hash, PartialOrd, Ord, Clone, Copy)]
 pub struct SrcPoint {
     /// Position in source file: because derived PartialOrd and Ord use
     /// lexicographical ordering based on the declaration order of the struct
@@ -146,7 +146,7 @@ impl SrcPoint {
 
 /// Span within a single source file. This plays basically the same role as a
 /// `Span` in rustc, but the data structure is much simpler.
-#[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Default, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct Span {
     /// First character point in the span
     pub start: SrcPoint,

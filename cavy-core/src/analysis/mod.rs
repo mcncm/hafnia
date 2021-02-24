@@ -32,6 +32,7 @@ mod call_graph;
 mod common;
 mod feedback;
 mod linearity;
+mod subconditional;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
@@ -43,6 +44,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     // Maybe I should consider making analyses operate on the whole MIR so as
     // not to pollute the top level like this
     let mut call_sites: Store<FnId, call_graph::CallSites> = Store::new();
+    let mut sub_cond_data: Store<FnId, subconditional::SubCondData> = Store::new();
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
         let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
@@ -72,11 +74,17 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         // Make sure that there is no accidental reordering. This caught a bug
         // before! Consider moving into a test.
         debug_assert!(idx == fn_id);
+
+        let sub_cond_gr = SummaryRunner::new(subconditional::SubCondAnalysis {}, gr, ctx).run();
+        let idx = sub_cond_data.insert(sub_cond_gr);
+        debug_assert!(idx == fn_id);
     }
 
     if !ctx.conf.arch.recursion {
         call_graph::check_recursion(&mut errs, &call_sites);
     }
+
+    subconditional::check(&mut errs, &sub_cond_data, &call_sites);
 
     if errs.is_empty() {
         Ok(())
