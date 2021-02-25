@@ -6,7 +6,6 @@ use crate::{
     cavy_errors::ErrorBuf,
     token::{Lexeme, Token, Unsigned},
 };
-use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -20,57 +19,63 @@ pub fn tokenize(src_id: SrcId, ctx: &mut Context) -> Result<Vec<Token>, ErrorBuf
     Scanner::new(src_id, &mut ctx.srcs).tokenize()
 }
 
-lazy_static! {
-    #[rustfmt::skip]
-    static ref KEYWORDS: HashMap<&'static str, Lexeme> = {
-        let mut m = HashMap::new();
-        m.insert("if",    Lexeme::If);
-        m.insert("else",  Lexeme::Else);
-        m.insert("for",   Lexeme::For);
-        m.insert("let",   Lexeme::Let);
-        m.insert("in",    Lexeme::In);
-        m.insert("fn",    Lexeme::Fn);
-        m.insert("print", Lexeme::Print);
-        m.insert("true",  Lexeme::True);
-        m.insert("false", Lexeme::False);
-        m.insert("bool",  Lexeme::Bool);
-        m.insert("u4",    Lexeme::U4);
-        m.insert("u8",    Lexeme::U8);
-        m.insert("u16",   Lexeme::U16);
-        m.insert("u32",   Lexeme::U32);
-        m
+fn keyword(kw: &str) -> Option<Lexeme> {
+    let lexeme = match kw {
+        "if" => Lexeme::If,
+        "else" => Lexeme::Else,
+        "for" => Lexeme::For,
+        "let" => Lexeme::Let,
+        "in" => Lexeme::In,
+        "fn" => Lexeme::Fn,
+        "type" => Lexeme::Type,
+        "print" => Lexeme::Print,
+        "true" => Lexeme::True,
+        "false" => Lexeme::False,
+        "bool" => Lexeme::Bool,
+        "u4" => Lexeme::U4,
+        "u8" => Lexeme::U8,
+        "u16" => Lexeme::U16,
+        "u32" => Lexeme::U32,
+        _ => return None,
     };
-    static ref SCTOKENS: HashMap<char, Lexeme> = {
-        let mut m = HashMap::new();
-        m.insert('+', Lexeme::Plus);
-        m.insert('-', Lexeme::Minus);
-        m.insert('*', Lexeme::Star);
-        m.insert('%', Lexeme::Percent);
-        m.insert('~', Lexeme::Tilde);
-        m.insert('=', Lexeme::Equal);
-        m.insert(',', Lexeme::Comma);
-        m.insert('!', Lexeme::Bang);
-        m.insert('?', Lexeme::Question);
-        m.insert(';', Lexeme::Semicolon);
-        m.insert(':', Lexeme::Colon);
-        m.insert('[', Lexeme::LBracket);
-        m.insert(']', Lexeme::RBracket);
-        m.insert('(', Lexeme::LParen);
-        m.insert(')', Lexeme::RParen);
-        m.insert('{', Lexeme::LBrace);
-        m.insert('}', Lexeme::RBrace);
-        m.insert('<', Lexeme::LAngle);
-        m.insert('>', Lexeme::RAngle);
-        m
+    Some(lexeme)
+}
+
+fn sctokens(ch: char) -> Option<Lexeme> {
+    let lexeme = match ch {
+        '+' => Lexeme::Plus,
+        '-' => Lexeme::Minus,
+        '*' => Lexeme::Star,
+        '%' => Lexeme::Percent,
+        '~' => Lexeme::Tilde,
+        '=' => Lexeme::Equal,
+        ',' => Lexeme::Comma,
+        '!' => Lexeme::Bang,
+        '?' => Lexeme::Question,
+        ';' => Lexeme::Semicolon,
+        ':' => Lexeme::Colon,
+        '[' => Lexeme::LBracket,
+        ']' => Lexeme::RBracket,
+        '(' => Lexeme::LParen,
+        ')' => Lexeme::RParen,
+        '{' => Lexeme::LBrace,
+        '}' => Lexeme::RBrace,
+        '<' => Lexeme::LAngle,
+        '>' => Lexeme::RAngle,
+        _ => return None,
     };
-    static ref TCTOKENS: HashMap<(char, char), Lexeme> = {
-        let mut m = HashMap::new();
-        m.insert(('.', '.'), Lexeme::DotDot);
-        m.insert(('=', '='), Lexeme::EqualEqual);
-        m.insert(('~', '='), Lexeme::TildeEqual);
-        m.insert(('-', '>'), Lexeme::MinusRAngle);
-        m
+    Some(lexeme)
+}
+
+fn tctokens(chars: (char, char)) -> Option<Lexeme> {
+    let lexeme = match chars {
+        ('.', '.') => Lexeme::DotDot,
+        ('=', '=') => Lexeme::EqualEqual,
+        ('~', '=') => Lexeme::TildeEqual,
+        ('-', '>') => Lexeme::MinusRAngle,
+        _ => return None,
     };
+    Some(lexeme)
 }
 
 /// Characters that are allowed in identifiers
@@ -318,7 +323,7 @@ impl<'s> Scanner<'s> {
 
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
-                if let Some(lexeme) = TCTOKENS.get(&(ch, following)) {
+                if let Some(lexeme) = tctokens((ch, following)) {
                     let lexeme = lexeme.clone();
                     push_token!(self, lexeme);
                     // Consume the second character and loop again.
@@ -332,7 +337,7 @@ impl<'s> Scanner<'s> {
                 }
             }
             // Single-character tokens
-            if let Some(lexeme) = SCTOKENS.get(&ch) {
+            if let Some(lexeme) = sctokens(ch) {
                 let lexeme = lexeme.clone();
                 push_token!(self, lexeme);
             }
@@ -420,9 +425,8 @@ impl<'s> Scanner<'s> {
         }
 
         let ident: String = self.token_buf.digest();
-        if let Some(keyword) = KEYWORDS.get(ident.as_str()) {
-            let keyword = keyword.clone();
-            push_token!(self, keyword);
+        if let Some(kw) = keyword(ident.as_str()) {
+            push_token!(self, kw);
         } else {
             push_token!(self, Ident(ident));
         }

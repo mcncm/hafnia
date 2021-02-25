@@ -26,7 +26,6 @@ use crate::{
 };
 use crate::{num::Uint, types::Type};
 use errors::*;
-use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -47,22 +46,21 @@ const MAX_ARGS: usize = 64;
 /// its right associativity.
 struct Precedence(u8, bool);
 
-lazy_static! {
-    #[rustfmt::skip]
-    static ref OPERATOR_TABLE: HashMap<Lexeme, Precedence> = {
-        let mut m = HashMap::new();
-        m.insert(Equal,      Precedence(0, true));
-        m.insert(TildeEqual, Precedence(1, false));
-        m.insert(EqualEqual, Precedence(1, false));
-        m.insert(LAngle,     Precedence(2, false));
-        m.insert(RAngle,     Precedence(2, false));
-        m.insert(Plus,       Precedence(3, false));
-        m.insert(Minus,      Precedence(3, false));
-        m.insert(Star,       Precedence(4, false));
-        m.insert(Percent,    Precedence(4, false));
-        m.insert(DotDot,     Precedence(5, false));
-        m
+fn operator(lexeme: &Lexeme) -> Option<Precedence> {
+    let prec = match lexeme {
+        Equal => Precedence(0, true),
+        TildeEqual => Precedence(1, false),
+        EqualEqual => Precedence(1, false),
+        LAngle => Precedence(2, false),
+        RAngle => Precedence(2, false),
+        Plus => Precedence(3, false),
+        Minus => Precedence(3, false),
+        Star => Precedence(4, false),
+        Percent => Precedence(4, false),
+        DotDot => Precedence(5, false),
+        _ => return None,
     };
+    Some(prec)
 }
 
 /// The main data structure used for parsing a stream of tokens
@@ -809,8 +807,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let mut op_prec;
         while let Some(outer) = self.peek_lexeme() {
             // Check the outer operator's precedence
-            if let Some(Precedence(outer_prec, _)) = OPERATOR_TABLE.get(outer) {
-                op_prec = *outer_prec;
+            if let Some(Precedence(outer_prec, _)) = operator(outer) {
+                op_prec = outer_prec;
                 if op_prec < min_precedence {
                     break;
                 }
@@ -818,11 +816,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 let mut rhs = self.unary()?;
                 while let Some(inner) = self.peek_lexeme() {
                     // Check the inner operator's precedence
-                    if let Some(Precedence(inner_prec, r_assoc)) = OPERATOR_TABLE.get(inner) {
-                        if inner_prec + (*r_assoc as u8) <= op_prec {
+                    if let Some(Precedence(inner_prec, r_assoc)) = operator(inner) {
+                        if inner_prec + (r_assoc as u8) <= op_prec {
                             break;
                         }
-                        rhs = self.precedence_climb(rhs, *inner_prec)?;
+                        rhs = self.precedence_climb(rhs, inner_prec)?;
                     } else {
                         break;
                     }

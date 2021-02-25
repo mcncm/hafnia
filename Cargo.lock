@@ -99,7 +99,6 @@ dependencies = [
  "cargo-husky",
  "cavy-macros",
  "dirs",
- "lazy_static",
  "serde",
  "serde_json",
 ]

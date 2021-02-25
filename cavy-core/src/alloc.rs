@@ -19,14 +19,14 @@ pub trait Allocator<T> {
 /// nothing about the reinitialization capability of the target hardware.
 ///
 /// # Examples
-/// ```
-/// # use cavy::values::Value;
-/// # use cavy::alloc::QubitAllocator;
-/// # use cavy::arch;
+/// ```ignore
+/// # use cavy_core::values::Value;
+/// # use cavy_core::alloc::QubitAllocator;
+/// # use cavy_core::arch;
 /// let arch = arch::Arch::default();
 /// let mut allocator = QubitAllocator::new(arch);
-/// let qb0 = allocator.alloc_q_bool().unwrap();
-/// let qb1 = allocator.alloc_q_bool().unwrap();
+/// let qb0 = allocator.q_bool().unwrap();
+/// let qb1 = allocator.q_bool().unwrap();
 /// assert_eq!(qb0, Value::Q_Bool(0));
 /// assert_eq!(qb1, Value::Q_Bool(1));
 /// ```

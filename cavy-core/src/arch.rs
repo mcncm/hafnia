@@ -8,7 +8,7 @@ use std::convert::From;
 ///
 /// # Examples
 /// ```
-/// # use cavy::arch::QbCount;
+/// # use cavy_core::arch::QbCount;
 /// let c1 = QbCount::Finite(0);
 /// let c2 = QbCount::Finite(1);
 /// let c3 = QbCount::Infinite;
