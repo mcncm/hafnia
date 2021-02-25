@@ -64,9 +64,9 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             let builder = GraphBuilder::new(self.ctx, &self.sigs, &self.ast, fn_id, func);
             let graph = match builder.lower() {
                 Ok(gr) => gr,
-                Err(mut errs) => {
+                Err((gr, mut errs)) => {
                     self.errors.append(&mut errs);
-                    continue;
+                    gr
                 }
             };
             let idx = self.mir.graphs.insert(graph);
@@ -286,12 +286,21 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     // === Lowering methods ===
 
-    pub fn lower(mut self) -> Result<Graph, ErrorBuf> {
+    // This method either produces a graph, or a graph with some errors on the
+    // side. This is a slightly awkward function signature. It doens't look like
+    // any of the others in this codebase. But it's important to get *some*
+    // graph out no matter what. These graphs will be stored in a linear array.
+    // If we don't get a graph, we'll violate sacred invariants of the program.
+    //
+    // Alternative solutions would be to create a dummy graph on failure, to
+    // store an `Option<Graph>` in each slot, or to keep a hash table of graphs
+    // in the `Mir` data structure.
+    fn lower(mut self) -> Result<Graph, (Graph, ErrorBuf)> {
         let place = self.gr.return_site();
         let _ = self.lower_into(place, self.body);
 
         if !self.errors.is_empty() {
-            Err(self.errors)
+            Err((self.gr, self.errors))
         } else {
             Ok(self.gr)
         }
@@ -572,7 +581,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // FIXME Note that we're resolving every function twice, which suggests
         // that this could be pulled up to an earlier stage, and that it's a
         // potential source of errors.
-        let func = self.resolve_function(&callee.data);
+        let func = self.resolve_function(&callee.data).unwrap();
         let func_sig = &self.sigs[func];
         let arg_locals: Vec<_> = func_sig
             .params
@@ -632,9 +641,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    fn resolve_function(&self, func: &SymbolId) -> FnId {
+    fn resolve_function(&self, func: &SymbolId) -> Option<FnId> {
         let tab = &self.tables[self.table];
-        *tab.funcs.get(func).expect("Missing function in this scope")
+        tab.funcs.get(func).copied()
     }
 }
 
@@ -690,7 +699,12 @@ mod typing {
                 // something, which is typed and fully-resolved, but not yet
                 // lowered to a control-flow graph.
                 ExprKind::Call { callee, args } => {
-                    let func = self.resolve_function(&callee.data);
+                    let func = self.resolve_function(&callee.data).ok_or_else(|| {
+                        self.errors.push(errors::UnboundName {
+                            span: callee.span,
+                            name: callee.data,
+                        })
+                    })?;
                     let sig = &self.sigs[func];
                     sig.output
                 }

@@ -12,9 +12,6 @@ lazy_static = "1.0"
 dirs = "2.0.2"
 cavy-macros = { path = "../cavy-macros" }
 
-[lib]
-crate-type = ["dylib"]
-
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false
