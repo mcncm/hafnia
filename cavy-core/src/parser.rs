@@ -13,8 +13,7 @@
 //! * Most kinds of name resolution: we can't resolve types, so in particular we
 //!   can't check that type annotations refer to something in-scope.
 
-use crate::cavy_errors::{self, ErrorBuf, Maybe};
-use crate::context::Context;
+use crate::context::{Context, SymbolId};
 use crate::source::Span;
 use crate::token::{
     Lexeme::{self, *},
@@ -23,6 +22,10 @@ use crate::token::{
 use crate::{
     ast::{self, *},
     store::Counter,
+};
+use crate::{
+    cavy_errors::{self, ErrorBuf, Maybe},
+    types,
 };
 use crate::{num::Uint, types::Type};
 use errors::*;
@@ -208,7 +211,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let Token { lexeme, span } = self.token()?;
         match lexeme {
             Lexeme::Fn => self.fn_item(span),
-
+            Lexeme::Struct => self.struct_item(),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
             lexeme => Err(self.errors.push(ExpectedItem {
@@ -264,6 +267,49 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             // called from within `declaration`.
             None => unreachable!(),
         }
+    }
+
+    /// Parse a struct item; intern the type and insert the name in a symbol table
+    fn struct_item(&mut self) -> Maybe<()> {
+        let name = self.consume_ident()?;
+        let fields = self.struct_fields()?;
+        let struct_ = ast::Struct {
+            name: name.clone(),
+            fields,
+        };
+
+        // Insert the struct into the AST's collection of user-defined types
+        let udt_id = self.ast.udts.insert(struct_.into());
+
+        // Finally, insert the user-defined type id into the local symbol table.
+        match self.ast.insert_udt(self.table_id, name.data, udt_id) {
+            None => Ok(()),
+            // A struct with this name was already in the local symbol table
+            Some(_) => Err(self
+                .errors
+                .push(errors::MultipleDefinitions { span: name.span })),
+        }
+    }
+
+    fn struct_fields(&mut self) -> Maybe<Vec<StructField>> {
+        self.consume(Lexeme::LBrace)?;
+        let mut fields = Vec::new();
+        while self.peek_lexeme() != Some(&RBrace) {
+            fields.push(self.struct_field()?);
+            if !self.match_lexeme(Comma) {
+                break;
+            }
+        }
+        self.consume(Lexeme::RBrace)?;
+        Ok(fields)
+    }
+
+    fn struct_field(&mut self) -> Maybe<StructField> {
+        let name = self.consume_ident()?;
+        self.consume(Lexeme::Colon)?;
+        let ty = self.type_annotation()?;
+        let field = StructField { name, ty };
+        Ok(field)
     }
 
     /// Parse a function item and insert it in the functions table

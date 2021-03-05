@@ -26,6 +26,7 @@ use std::fmt;
 // analysis pass.
 store_type! { FnStore : FnId -> Func }
 store_type! { BodyStore : BodyId -> Expr }
+store_type! { UdtStore : UdtId -> UserDefinedType }
 store_type! { TableStore : TableId -> Table }
 index_type! { NodeId }
 
@@ -39,6 +40,8 @@ pub struct Ast {
     pub funcs: FnStore,
     /// Function bodies
     pub bodies: BodyStore,
+    /// User-defined types
+    pub udts: UdtStore,
     /// Symbol tables associated with scoped environments
     pub tables: TableStore,
     /// Node Id counter. This might not be necessary if we choose to put each
@@ -60,6 +63,12 @@ impl Ast {
         self.tables[tab].funcs.insert(symb, func)
     }
 
+    /// Try to insert a user-defined type into a table.
+    /// TODO ibid
+    pub fn insert_udt(&mut self, tab: TableId, symb: SymbolId, udt: UdtId) -> Option<UdtId> {
+        self.tables[tab].udts.insert(symb, udt)
+    }
+
     /// Create a new table without parent
     pub fn new_table(&mut self) -> TableId {
         self.tables.insert(Table::new())
@@ -79,11 +88,13 @@ impl Ast {
 pub struct Table {
     /// The enclosing scope, if there is any
     pub parent: Option<TableId>,
-    /// Functions in this scope. While locals should also be able to "shadow"
-    /// functions, and it will one day be possible to define lambda expressions,
-    /// this table contains those functions defined with the `fn` keyword. They
-    /// must be unique.
+    /// Functions visible in this scope. While locals should also be able to
+    /// "shadow" functions, and it will one day be possible to define lambda
+    /// expressions, this table contains those functions defined with the `fn`
+    /// keyword. They must be unique.
     pub funcs: HashMap<SymbolId, FnId>,
+    /// User-defined types visible in this scope.
+    pub udts: HashMap<SymbolId, UdtId>,
 }
 
 impl Table {
@@ -95,6 +106,7 @@ impl Table {
         Table {
             parent: Some(table),
             funcs: HashMap::new(),
+            udts: HashMap::new(),
         }
     }
 
@@ -532,6 +544,29 @@ pub enum AnnotKind {
 
     ///Function types
     Func(Vec<Annot>, Box<Annot>),
+}
+
+#[derive(Debug)]
+pub enum UserDefinedType {
+    Struct(Struct),
+}
+
+impl From<Struct> for UserDefinedType {
+    fn from(s: Struct) -> Self {
+        Self::Struct(s)
+    }
+}
+
+#[derive(Debug)]
+pub struct Struct {
+    pub name: Ident,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug)]
+pub struct StructField {
+    pub name: Ident,
+    pub ty: Annot,
 }
 
 #[derive(Debug)]

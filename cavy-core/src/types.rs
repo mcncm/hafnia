@@ -1,7 +1,10 @@
-use crate::{context::CtxDisplay, interner_type};
 use crate::{
     context::{Context, CtxFmt},
     num::Uint,
+};
+use crate::{
+    context::{CtxDisplay, SymbolId},
+    interner_type,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,8 +29,26 @@ struct StructuralDiscipline {
     linear: bool,
 }
 
+/// A struct or enum
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UserType {
+    /// The name used at the struct's definition site
+    pub def_name: SymbolId,
+    /// The fields of the struct / alternatives of the enum, not including its
+    /// tag
+    pub fields: Vec<(SymbolId, TyId)>,
+    /// A (possible) enum tag type
+    pub tag: Option<TyId>,
+}
+
+impl UserType {
+    fn is_enum(&self) -> bool {
+        self.tag.is_some()
+    }
+}
+
 #[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// A non-linear (classical) boolean
     Bool,
@@ -52,6 +73,9 @@ pub enum Type {
 
     /// A function type
     Func(Vec<TyId>, TyId),
+
+    /// A struct or enum
+    UserType(UserType),
 }
 
 impl Type {
@@ -76,6 +100,10 @@ impl Type {
             Type::Measured(_) => false,
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
+            Type::UserType(ty) => {
+                let lin_tag = ty.tag.map_or(false, |ty| ty.is_linear(ctx));
+                lin_tag || ty.fields.iter().any(|field| field.1.is_linear(ctx))
+            }
         }
     }
 }
@@ -111,6 +139,7 @@ impl CtxDisplay for TyId {
                 }
                 write!(f, ") -> {}", ctx.types[*ret])
             }
+            Type::UserType(ty) => write!(f, "{}", ty.def_name.fmt_with(ctx)),
         }
     }
 }
