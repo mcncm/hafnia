@@ -1,10 +1,10 @@
 [workspace]
 members = [
-        "cavy",
-        "cavy-core",
-        "cavy-macros",
-        "cavy-cli",
-        "cavy-comptime",
+    "cavy",
+    "cavy-core",
+    "cavy-macros",
+    "cavy-cli",
+    "cavy-comptime",
 ]
 
 [profile.release]

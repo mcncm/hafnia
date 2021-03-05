@@ -46,6 +46,13 @@ pub struct TypedSig {
     pub span: Span,
 }
 
+/// A fully-resolved position within the MIR control-flow graph
+#[derive(Debug)]
+pub struct GraphPosition {
+    blk: BlockId,
+    stmt: usize,
+}
+
 /// The control-flow graph of a function
 #[derive(Debug)]
 pub struct Graph {

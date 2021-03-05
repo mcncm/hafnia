@@ -510,7 +510,8 @@ pub enum LValueKind {
 
 /// Type annotations. These are distinct from, and not convertible to types. The
 /// reason is that there may be identical type annotations that resolve to
-/// different types within different scopes.
+/// different types within different scopes because of user-defined structs and
+/// type aliases.
 pub type Annot = Spanned<AnnotKind>;
 
 #[derive(Debug, Clone)]
@@ -528,6 +529,9 @@ pub enum AnnotKind {
 
     /// User-defined types
     Ident(Ident),
+
+    ///Function types
+    Func(Vec<Annot>, Box<Annot>),
 }
 
 #[derive(Debug)]

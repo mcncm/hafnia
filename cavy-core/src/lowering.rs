@@ -869,6 +869,14 @@ mod typing {
             AnnotKind::Ident(_ident) => {
                 todo!()
             }
+            AnnotKind::Func(params, ret) => {
+                let param_tys = params
+                    .iter()
+                    .map(|ann| resolve_type(ann, tab, ctx))
+                    .collect::<Maybe<Vec<TyId>>>()?;
+                let ret_ty = resolve_type(ret, tab, ctx)?;
+                ctx.types.intern(Type::Func(param_tys, ret_ty))
+            }
         };
 
         Ok(ty)

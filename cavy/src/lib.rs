@@ -1,4 +1,4 @@
-pub use cavy_core::{arch, circuit, compile, context::Context};
+pub use cavy_core::{arch, circuit, compile, context, session};
 
 #[cfg(feature = "comptime")]
 pub use cavy_comptime::cavy_comptime;

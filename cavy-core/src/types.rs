@@ -49,6 +49,9 @@ pub enum Type {
 
     /// Wrapper type of measured value
     Measured(TyId),
+
+    /// A function type
+    Func(Vec<TyId>, TyId),
 }
 
 impl Type {
@@ -71,6 +74,8 @@ impl Type {
             Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear(ctx)),
             Type::Array(ty) => ty.is_linear(ctx),
             Type::Measured(_) => false,
+            // This will become more nuanced when closures are introduced
+            Type::Func(_, _) => false,
         }
     }
 }
@@ -83,18 +88,29 @@ impl CtxDisplay for TyId {
             Type::Q_Bool => f.write_str("?bool"),
             Type::Q_Uint(u) => write!(f, "?{}", u),
             Type::Tuple(tys) => {
-                let _ = f.write_str("(");
+                f.write_str("(")?;
                 for (n, ty) in tys.iter().enumerate() {
                     if n == tys.len() - 1 {
-                        let _ = write!(f, "{}", ty.fmt_with(ctx));
+                        write!(f, "{}", ty.fmt_with(ctx))?;
                     } else {
-                        let _ = write!(f, "{}, ", ty.fmt_with(ctx));
+                        write!(f, "{}, ", ty.fmt_with(ctx))?;
                     }
                 }
                 f.write_str(")")
             }
             Type::Array(ty) => write!(f, "[{}]", ctx.types[*ty]),
             Type::Measured(ty) => write!(f, "!{}", ctx.types[*ty]),
+            Type::Func(tys, ret) => {
+                f.write_str("Fn(")?;
+                for (n, ty) in tys.iter().enumerate() {
+                    if n == tys.len() - 1 {
+                        write!(f, "{}", ty.fmt_with(ctx))?;
+                    } else {
+                        write!(f, "{}, ", ty.fmt_with(ctx))?;
+                    }
+                }
+                write!(f, ") -> {}", ctx.types[*ret])
+            }
         }
     }
 }

@@ -1,17 +1,23 @@
 [package]
+authors = ["mcncm <cavy-lang-support@mit.edu>"]
+build = "build.rs"
+edition = "2018"
 name = "cavy-core"
 version = "0.1.0"
-authors = ["mcncm <cavy-lang-support@mit.edu>"]
-edition = "2018"
-build = "build.rs"
-
 [dependencies]
-serde = { version = "1.0.113", features = ["derive"] }
-serde_json = "1.0"
 dirs = "2.0.2"
-cavy-macros = { path = "../cavy-macros" }
+disjoint-sets = "*"
+serde_json = "1.0"
 
+[dependencies.cavy-macros]
+path = "../cavy-macros"
+
+[dependencies.serde]
+features = ["derive"]
+version = "1.0.113"
+
+[dev-dependencies]
 [dev-dependencies.cargo-husky]
-version = "1"
 default-features = false
 features = ["user-hooks"]
+version = "1"
