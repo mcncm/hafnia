@@ -59,6 +59,12 @@ impl CtxDisplay for SpanReport {
         // Columns to annotate: remember that columns are 1-indexed.
         let start = self.span.start.col;
         let end = self.span.end.col;
+        // How many tabs in the run-up to the start?
+        let tabs = line
+            .chars()
+            .take(start.saturating_sub(1))
+            .filter(|&c| c == '\t')
+            .count();
         // Carets
         let mut annot = "^".repeat(end - start + 1);
         if let Some(msg) = &self.msg {
@@ -74,15 +80,16 @@ impl CtxDisplay for SpanReport {
             "\
 {s:digits$} |
 {linum:digits$} | {}
-{s:digits$} | {s:start$}{}\
+{s:digits$} | {s:\t<tabs$}{s:start$}{}\
 ",
             line,
             annot,
             linum = self.span.start.line,
             s = "",
+            tabs = tabs,
             digits = digits,
             // start of annotation
-            start = start - 1
+            start = start - tabs - 1
         )
     }
 }
