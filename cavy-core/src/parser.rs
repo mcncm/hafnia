@@ -1064,6 +1064,7 @@ mod tests {
                         LiteralKind::True => Lexeme::True,
                         LiteralKind::False => Lexeme::False,
                         LiteralKind::Nat(n, sz) => Lexeme::Nat(n, sz),
+                        LiteralKind::Ord => todo!(),
                     };
                     assert_eq!(lexeme, $($lit)*);
                 }

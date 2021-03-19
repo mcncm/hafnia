@@ -160,4 +160,25 @@ test_compiles! {
             !x
         }
     }
+
+    assn_from_cond {
+        fn main() {
+            let x = ?true;
+            let y = if x {
+                ?true
+            } else {
+                ?false
+            };
+        }
+    }
+
+    if_incompatible_types fail {
+        fn main() {
+            let x = if true {
+                true
+            } else {
+                3u8
+            };
+        }
+    }
 }

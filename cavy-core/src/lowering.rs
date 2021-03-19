@@ -689,12 +689,7 @@ mod typing {
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
-                ExprKind::If { cond, dir, ind } => {
-                    // This is a stopgap. Until there is proper type inference
-                    // in this language, we will have to disable `if`
-                    // expressions altogether, and allow only `if` statements.
-                    self.ctx.common.unit
-                }
+                ExprKind::If { cond, dir, ind } => self.type_if(cond, dir, ind)?,
                 ExprKind::For { bind, iter, body } => self.ctx.common.unit,
                 // FIXME note that here weare resolving this function a *second*
                 // time (the other is in the lowering method). This suggests
@@ -817,10 +812,29 @@ mod typing {
         }
 
         fn type_block(&mut self, block: &Block) -> Maybe<TyId> {
-            // This is manifestly incorrect.
+            // FIXME This is manifestly incorrect.
             match &block.expr {
                 Some(expr) => self.type_inner(expr),
                 None => Ok(self.ctx.common.unit),
+            }
+        }
+
+        fn type_if(&mut self, cond: &Expr, dir: &Block, ind: &Option<Box<Block>>) -> Maybe<TyId> {
+            let ty_dir = self.type_block(dir)?;
+            let ty_ind = if let Some(blk) = ind {
+                self.type_block(blk)?
+            } else {
+                self.ctx.common.unit
+            };
+
+            if ty_dir == ty_ind {
+                Ok(ty_ind)
+            } else {
+                Err(self.errors.push(errors::IfIncompatibleTypes {
+                    span: cond.span,
+                    dir: ty_dir,
+                    ind: ty_ind,
+                }))
             }
         }
 
@@ -1032,5 +1046,18 @@ mod errors {
     pub struct InvalidLhsKind {
         #[span(msg = "expected a variable here")]
         pub span: Span,
+    }
+
+    // NOTE this error message could be more helpful: the single span points to
+    // the condition. There should be spans for each of the return types.
+    #[derive(Diagnostic)]
+    #[msg = "incompatible types in conditional branches: found `{dir}` and `{ind}`"]
+    pub struct IfIncompatibleTypes {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub dir: TyId,
+        #[ctx]
+        pub ind: TyId,
     }
 }
