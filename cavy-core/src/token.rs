@@ -13,7 +13,7 @@ pub enum Lexeme {
 
     // keywords
     If, Else, For, Let, In, Fn, Type, Struct, Print, True, False,
-    Bool, U4, U8, U16, U32,
+    Bool, U4, U8, U16, U32, Ord,
 
     // literals
     Nat(Unsigned, Option<Uint>),
@@ -32,47 +32,57 @@ pub enum Lexeme {
 impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Lexeme::*;
-        match self {
-            Ident(s) => write!(f, "{}", s),
-            Fn => f.write_str("fn"),
-            For => f.write_str("for"),
-            Let => f.write_str("let"),
-            In => f.write_str("in"),
-            Bool => f.write_str("bool"),
-            U8 => f.write_str("u8"),
-            U16 => f.write_str("u16"),
-            U32 => f.write_str("u32"),
+        let s = match self {
+            Ident(s) => return write!(f, "{}", s),
+            Fn => "fn",
+            For => "for",
+            Let => "let",
+            In => "in",
+            Bool => "bool",
+            U8 => "u8",
+            U16 => "u16",
+            U32 => "u32",
             Nat(nat, sz) => {
                 let _ = write!(f, "{}", nat);
                 if let Some(sz) = sz {
                     let _ = write!(f, "{}", sz);
                 }
-                f.write_str("")
+                return f.write_str("");
             }
-            DotDot => f.write_str(".."),
-            EqualEqual => f.write_str("=="),
-            TildeEqual => f.write_str("~="),
-            MinusRAngle => f.write_str("->"),
-            Equal => f.write_str("="),
-            Plus => f.write_str("+"),
-            Minus => f.write_str("-"),
-            Star => f.write_str("*"),
-            Percent => f.write_str("%"),
-            Bang => f.write_str("!"),
-            Tilde => f.write_str("~"),
-            Comma => f.write_str(","),
-            Semicolon => f.write_str(";"),
-            Colon => f.write_str(":"),
-            LParen => f.write_str("("),
-            RParen => f.write_str(")"),
-            LBracket => f.write_str("["),
-            RBracket => f.write_str("]"),
-            LBrace => f.write_str("{"),
-            RBrace => f.write_str("}"),
-            LAngle => f.write_str("<"),
-            RAngle => f.write_str(">"),
-            _ => f.write_str("?"),
-        }
+            DotDot => "..",
+            EqualEqual => "==",
+            TildeEqual => "~=",
+            MinusRAngle => "->",
+            Equal => "=",
+            Plus => "+",
+            Minus => "-",
+            Star => "*",
+            Percent => "%",
+            Bang => "!",
+            Tilde => "~",
+            Comma => ",",
+            Semicolon => ";",
+            Colon => ":",
+            LParen => "(",
+            RParen => ")",
+            LBracket => "[",
+            RBracket => "]",
+            LBrace => "{",
+            RBrace => "}",
+            LAngle => "<",
+            RAngle => ">",
+            If => "if",
+            Else => "else",
+            Type => "type",
+            Struct => "struct",
+            Print => "print",
+            True => "true",
+            False => "false",
+            U4 => "u4",
+            Question => "?",
+            Ord => "ord",
+        };
+        f.write_str(s)
     }
 }
 

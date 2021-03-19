@@ -449,6 +449,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.expect_type(&[ty], lit_ty, lit.span)?;
                 Const::Nat(*n)
             }
+            LiteralKind::Ord => {
+                self.expect_type(&[ty], self.ctx.common.ord, lit.span)?;
+                Const::Ord
+            }
         };
         let rhs = Rvalue {
             span: lit.span,
@@ -807,6 +811,7 @@ mod typing {
                 LiteralKind::Nat(_, Some(Uint::U16)) => self.ctx.common.u16,
                 LiteralKind::Nat(_, Some(Uint::U32)) => self.ctx.common.u32,
                 LiteralKind::Nat(_, None) => self.ctx.common.u32,
+                LiteralKind::Ord => self.ctx.common.ord,
             };
             Ok(ty)
         }
@@ -839,14 +844,14 @@ mod typing {
     /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
     pub fn resolve_type<'a>(annot: &Annot, tab: &TableId, ctx: &mut Context<'a>) -> Maybe<TyId> {
         let ty = match &annot.data {
-            AnnotKind::Bool => {
-                let ty = Type::Bool;
-                ctx.types.intern(ty)
-            }
-            AnnotKind::Uint(u) => {
-                let ty = Type::Uint(*u);
-                ctx.types.intern(ty)
-            }
+            AnnotKind::Bool => ctx.common.bool,
+            AnnotKind::Uint(u) => match u {
+                Uint::U2 => unimplemented!(),
+                Uint::U4 => ctx.common.u4,
+                Uint::U8 => ctx.common.u8,
+                Uint::U16 => ctx.common.u16,
+                Uint::U32 => ctx.common.u32,
+            },
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
@@ -866,8 +871,8 @@ mod typing {
                 let ty = resolve_type(inner, tab, ctx)?;
                 resolve_annot_bang(ctx, ty)?
             }
-            AnnotKind::Ident(_ident) => {
-                todo!()
+            AnnotKind::Ident(_) => {
+                todo!();
             }
             AnnotKind::Func(params, ret) => {
                 let param_tys = params
@@ -877,6 +882,7 @@ mod typing {
                 let ret_ty = resolve_type(ret, tab, ctx)?;
                 ctx.types.intern(Type::Func(param_tys, ret_ty))
             }
+            AnnotKind::Ord => ctx.common.ord,
         };
 
         Ok(ty)

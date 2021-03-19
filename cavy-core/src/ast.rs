@@ -323,6 +323,8 @@ pub enum LiteralKind {
     /// A natural number literal consists of a number in the internal
     /// representation, together with an optional tag representing its size.
     Nat(Unsigned, Option<Uint>),
+    /// A literal inhabitant of the provisional experimental type
+    Ord,
 }
 
 impl FromToken for Literal {
@@ -332,6 +334,7 @@ impl FromToken for Literal {
             Nat(n, sz) => LiteralKind::Nat(n, sz),
             True => LiteralKind::True,
             False => LiteralKind::False,
+            Ord => LiteralKind::Ord,
             _ => {
                 return Err(());
             }
@@ -544,6 +547,9 @@ pub enum AnnotKind {
 
     ///Function types
     Func(Vec<Annot>, Box<Annot>),
+
+    /// Provisional experimental type
+    Ord,
 }
 
 #[derive(Debug)]

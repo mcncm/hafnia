@@ -33,6 +33,7 @@ mod common;
 mod feedback;
 mod linearity;
 mod subconditional;
+// mod wires;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 

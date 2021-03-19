@@ -21,7 +21,9 @@ macro_rules! common_types {
 
 common_types! {
     unit, bool, u4, u8, u16, u32,
-    q_bool, q_u4, q_u8, q_u16, q_u32
+    q_bool, q_u4, q_u8, q_u16, q_u32,
+    // This is a provisional type not intended to stay in the compiler forever
+    ord
 }
 
 /// This is the big data structure that carries around all the data associated
@@ -56,6 +58,7 @@ impl<'ctx> Context<'ctx> {
             q_u8: types.intern(Type::Q_Uint(Uint::U8)),
             q_u16: types.intern(Type::Q_Uint(Uint::U16)),
             q_u32: types.intern(Type::Q_Uint(Uint::U32)),
+            ord: types.intern(Type::Ord),
         };
         Self {
             conf,

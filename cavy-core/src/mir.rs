@@ -257,6 +257,8 @@ pub enum Const {
     /// The unique value of the unit type. This *will* be deprecated, since the
     /// unit type ought to be *literally* an empty tuple.
     Unit,
+    /// The unique value of the provisional experimental type.
+    Ord,
 }
 
 // ====== Display and formatting ======
@@ -380,6 +382,7 @@ impl fmt::Display for Const {
             Self::False => f.write_str("false"),
             Self::True => f.write_str("true"),
             Self::Unit => f.write_str("()"),
+            Self::Ord => f.write_str("ord"),
             Self::Nat(val) => write!(f, "{}", val),
         }
     }

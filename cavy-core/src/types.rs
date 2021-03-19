@@ -76,6 +76,9 @@ pub enum Type {
 
     /// A struct or enum
     UserType(UserType),
+
+    /// A provisional experimental type
+    Ord,
 }
 
 impl Type {
@@ -104,6 +107,14 @@ impl Type {
                 let lin_tag = ty.tag.map_or(false, |ty| ty.is_linear(ctx));
                 lin_tag || ty.fields.iter().any(|field| field.1.is_linear(ctx))
             }
+            Type::Ord => true,
+        }
+    }
+
+    pub fn is_ord(&self, _ctx: &Context) -> bool {
+        match self {
+            Type::Ord => true,
+            _ => false,
         }
     }
 }
@@ -140,6 +151,7 @@ impl CtxDisplay for TyId {
                 write!(f, ") -> {}", ctx.types[*ret])
             }
             Type::UserType(ty) => write!(f, "{}", ty.def_name.fmt_with(ctx)),
+            Type::Ord => write!(f, "ord"),
         }
     }
 }

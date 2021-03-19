@@ -212,6 +212,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         match lexeme {
             Lexeme::Fn => self.fn_item(span),
             Lexeme::Struct => self.struct_item(),
+            Lexeme::Type => self.type_item(),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
             lexeme => Err(self.errors.push(ExpectedItem {
@@ -267,6 +268,15 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             // called from within `declaration`.
             None => unreachable!(),
         }
+    }
+
+    /// Parse a type alias item
+    fn type_item(&mut self) -> Maybe<()> {
+        let _name = self.consume_ident()?;
+        self.consume(Lexeme::Equal)?;
+        let _ty = self.type_annotation()?;
+        self.consume(Lexeme::Semicolon)?;
+        todo!()
     }
 
     /// Parse a struct item; intern the type and insert the name in a symbol table
@@ -574,7 +584,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     Lexeme::RBrace => {
                         break;
                     }
-                    Fn => prsr.item()?,
+                    Lexeme::Fn | Lexeme::Struct | Lexeme::Type => prsr.item()?,
                     _ => stmts.push(prsr.statement()?),
                 }
             }
@@ -687,6 +697,10 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 span,
                 data: AnnotKind::Uint(Uint::from_lexeme(lexeme).unwrap()),
             },
+            Ord => Annot {
+                span,
+                data: AnnotKind::Ord,
+            },
             LBracket => self.finish_array_type(span)?,
             LParen => self.finish_tuple_type(span)?,
             Question => {
@@ -793,7 +807,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
-            Nat(_, _) | True | False => {
+            Nat(_, _) | True | False | Ord => {
                 let lit = ast::Literal::from_token(token, self.ctx).unwrap();
                 let lit_span = lit.span;
                 Ok(self.node(ExprKind::Literal(lit), lit_span))
