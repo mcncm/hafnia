@@ -63,7 +63,7 @@ pub fn check_recursion(errs: &mut ErrorBuf, call_sites: &CallGraph) {
 }
 
 /// This data structure is an implementation detail of the SSCFinder to get a
-/// stack with O(1) lookup and satellite data. We can simly use a `BTreeSet`
+/// stack with O(1) lookup and satellite data. We can simply use a `BTreeSet`
 /// once [map_first_last](https://github.com/rust-lang/rust/issues/62924)
 /// stabilizes.
 struct StackMap<K: Hash + Eq + Clone, V> {

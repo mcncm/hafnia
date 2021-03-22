@@ -1,6 +1,7 @@
+use crate::ast::FnId;
 use crate::target::{qasm::Qasm, IntoTarget, Target};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
 };
 use Gate::*;
@@ -16,6 +17,7 @@ pub enum Gate {
     H(Qubit),
     Z(Qubit),
     CX { tgt: Qubit, ctrl: Qubit },
+    SWAP { fst: Qubit, snd: Qubit },
     // Measurement "gate"
     M(Qubit),
 }
@@ -28,6 +30,7 @@ impl Gate {
             H(tgt) => vec![*tgt],
             Z(tgt) => vec![*tgt],
             CX { ctrl, tgt } => vec![*ctrl, *tgt],
+            SWAP { fst, snd } => vec![*fst, *snd],
             M(tgt) => vec![*tgt],
         }
     }
@@ -68,6 +71,7 @@ impl Gate {
                 T { tgt: inner_ctrl, conj: true },
                 CX { ctrl, tgt: inner_ctrl },
             ],
+            SWAP{ .. } => todo!(),
             M(_) => todo!(),
         }
     }
@@ -89,39 +93,58 @@ impl IntoTarget<Qasm> for Gate {
     #[rustfmt::skip]
     fn into_target(&self, _target: &Qasm) -> String {
         match self {
-            X(tgt)           => format!("x q[{}];", tgt),
-            T { tgt, conj }  => format!("{} q[{}];",
-                                        if *conj { "tdg" } else { "t" },
-                                        tgt),
-            H(tgt)           => format!("h q[{}];", tgt),
-            Z(tgt)           => format!("z q[{}];", tgt),
-            CX { tgt, ctrl } => format!("cx q[{}], q[{}];", ctrl, tgt),
-            M(tgt)           => format!("measure q[{}] -> c[{}];", tgt, tgt)
+            X(tgt)            => format!("x q[{}];", tgt),
+            T { tgt, conj }   => format!("{} q[{}];",
+                                         if *conj { "tdg" } else { "t" },
+                                         tgt),
+            H(tgt)            => format!("h q[{}];", tgt),
+            Z(tgt)            => format!("z q[{}];", tgt),
+            CX { tgt, ctrl }  => format!("cx q[{}], q[{}];", ctrl, tgt),
+            SWAP { .. }       => todo!(),
+            M(tgt)            => format!("measure q[{}] -> c[{}];", tgt, tgt)
         }
     }
+}
+
+/// A terrible name that will be fixed later: each of the "things" that take
+/// place, namely gates and procedure calls.
+#[derive(Debug)]
+pub enum Instruction {
+    Gate(Gate),
+    FnCall(FnId, Vec<Qubit>),
+}
+
+/// The type of a single procedure in the low-level circuit IR. For now, these
+/// are *finite* lists of gates and procedure calls. In the future, they will
+/// look more like some kind of stream.
+///
+/// FIXME Also, this is not a great name for this struct, and it's likely to change.
+#[derive(Default, Debug)]
+pub struct LirGraph {
+    /// The number of qubits used in calling this procedure. This may one day be
+    /// split into `qargs` and `cargs` or something like this, essentially
+    /// typing the parameters.
+    ///
+    /// For now, we're assuming this to be finite.
+    pub args: usize,
+    /// The number of other qubits used by the procedure. The circuit width of
+    /// the procedure, ignoring subroutines, is then `args + ancillae`.
+    pub ancillae: usize,
+    /// All the instructions of the compiled subroutine. Note that this is, for
+    /// now, a finite structure. That is likely to change.
+    pub instructions: Vec<Instruction>,
 }
 
 /// This is the main public circuit type
 #[derive(Default, Debug)]
 pub struct Circuit {
-    pub circ_buf: VecDeque<Gate>,
-    pub max_qubit: Option<Qubit>,
+    pub graphs: HashMap<FnId, LirGraph>,
+    pub entry_point: FnId,
 }
 
 impl Circuit {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, gate: Gate) {
-        use std::cmp;
-        // This unwrap is safe as long as all gates act on *some* qubit.
-        let max_in_gate = *gate.qubits().iter().max().unwrap();
-        self.max_qubit = match self.max_qubit {
-            Some(u) => Some(cmp::max(u, max_in_gate)),
-            None => Some(max_in_gate),
-        };
-        self.circ_buf.push_back(gate);
+    pub fn max_qubit(&self) -> Option<usize> {
+        todo!()
     }
 }
 

@@ -40,37 +40,39 @@ pub fn cavy_comptime(input: TokenStream) -> TokenStream {
 /// Turns a `Circuit` value into code that builds that literal circuit.
 ///
 /// TODO better: to this by implementing `ToTokens` for `Circuit`.
-fn quote_circuit(circ: Circuit) -> TokenStream {
-    let Circuit {
-        circ_buf,
-        max_qubit,
-    } = circ;
+fn quote_circuit(_circ: Circuit) -> TokenStream {
+    todo!()
+    // let Circuit {
+    //     circ_buf,
+    //     max_qubit,
+    // } = circ;
 
-    let gates = circ_buf.iter().map(|gate| match gate {
-        Gate::X(q) => quote! { ::cavy::circuit::Gate::X(#q) },
-        Gate::T { tgt, conj } => quote! { ::cavy::circuit::Gate::T { tgt: #tgt, conj: #conj } },
-        Gate::H(q) => quote! { ::cavy::circuit::Gate::H(#q) },
-        Gate::Z(q) => quote! { ::cavy::circuit::Gate::Z(#q) },
-        Gate::CX { tgt, ctrl } => quote! { ::cavy::circuit::Gate::CX { tgt: #tgt, ctrl: #ctrl } },
-        Gate::M(q) => quote! { ::cavy::circuit::Gate::M(#q) },
-    });
+    // let gates = circ_buf.iter().map(|gate| match gate {
+    //     Gate::X(q) => quote! { ::cavy::circuit::Gate::X(#q) },
+    //     Gate::T { tgt, conj } => quote! { ::cavy::circuit::Gate::T { tgt: #tgt, conj: #conj } },
+    //     Gate::H(q) => quote! { ::cavy::circuit::Gate::H(#q) },
+    //     Gate::Z(q) => quote! { ::cavy::circuit::Gate::Z(#q) },
+    //     Gate::CX { tgt, ctrl } => quote! { ::cavy::circuit::Gate::CX { tgt: #tgt, ctrl: #ctrl } },
+    //     Gate::SWAP { fst, snd } => quote! { ::cavy::circuit::Gate::Swap { fst: #fst, snd: #snd } },
+    //     Gate::M(q) => quote! { ::cavy::circuit::Gate::M(#q) },
+    // });
 
-    let max_qubit = match max_qubit {
-        Some(u) => quote! { Some(#u) },
-        None => quote! { None },
-    };
+    // let max_qubit = match max_qubit {
+    //     Some(u) => quote! { Some(#u) },
+    //     None => quote! { None },
+    // };
 
-    let circuit_def = quote! {
-        {
-            let mut circ_buf = ::std::collections::VecDeque::new();
-            #(circ_buf.push_back(#gates);)*
-            let max_qubit = #max_qubit;
-            ::cavy::circuit::Circuit {
-                circ_buf,
-                max_qubit,
-            }
-        }
-    };
+    // let circuit_def = quote! {
+    //     {
+    //         let mut circ_buf = ::std::collections::VecDeque::new();
+    //         #(circ_buf.push_back(#gates);)*
+    //         let max_qubit = #max_qubit;
+    //         ::cavy::circuit::Circuit {
+    //             circ_buf,
+    //             max_qubit,
+    //         }
+    //     }
+    // };
 
-    circuit_def.into()
+    // circuit_def.into()
 }

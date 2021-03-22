@@ -691,7 +691,7 @@ mod typing {
                 ExprKind::Block(block) => self.type_block(block)?,
                 ExprKind::If { cond, dir, ind } => self.type_if(cond, dir, ind)?,
                 ExprKind::For { bind, iter, body } => self.ctx.common.unit,
-                // FIXME note that here weare resolving this function a *second*
+                // FIXME note that here we are resolving this function a *second*
                 // time (the other is in the lowering method). This suggests
                 // that we should factor out function resolution to some earlier
                 // step. It might even be a good idea to use an HIR or

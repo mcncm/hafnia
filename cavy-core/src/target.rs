@@ -73,22 +73,23 @@ pub mod qasm {
     }
 
     impl IntoTarget<Qasm> for crate::circuit::Circuit {
-        fn into_target(&self, target: &Qasm) -> String {
-            let declaration = {
-                if let Some(max_qubit) = self.max_qubit {
-                    let qubits = max_qubit + 1;
-                    format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
-                } else {
-                    String::new()
-                }
-            };
-            let gates = self
-                .circ_buf
-                .iter()
-                .map(|gate| gate.into_target(target))
-                .collect::<Vec<String>>()
-                .join("\n");
-            format!("{}\n{}\n", declaration, gates)
+        fn into_target(&self, _target: &Qasm) -> String {
+            todo!()
+            // let declaration = {
+            //     if let Some(max_qubit) = self.max_qubit {
+            //         let qubits = max_qubit + 1;
+            //         format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
+            //     } else {
+            //         String::new()
+            //     }
+            // };
+            // let gates = self
+            //     .circ_buf
+            //     .iter()
+            //     .map(|gate| gate.into_target(target))
+            //     .collect::<Vec<String>>()
+            //     .join("\n");
+            // format!("{}\n{}\n", declaration, gates)
         }
     }
 }
@@ -174,24 +175,25 @@ pub mod latex {
         fn push_gate(&mut self, gate: &crate::circuit::Gate) {
             use crate::circuit::Gate::*;
             match gate {
-                X(tgt)           => self.insert_single(tgt, r"\gate{X}".to_string()),
-                T { tgt, conj }  => self.insert_single(tgt, {
+                X(tgt)            => self.insert_single(tgt, r"\gate{X}".to_string()),
+                T { tgt, conj }   => self.insert_single(tgt, {
                     if *conj {
                         r"\gate{T^\dag}".to_string()
                     } else {
                         r"\gate{T}".to_string()
                     }
                 }),
-                H(tgt)           => self.insert_single(tgt, r"\gate{H}".to_string()),
-                Z(tgt)           => self.insert_single(tgt, r"\gate{Z}".to_string()),
-                CX { ctrl, tgt } => {
+                H(tgt)            => self.insert_single(tgt, r"\gate{H}".to_string()),
+                Z(tgt)            => self.insert_single(tgt, r"\gate{Z}".to_string()),
+                CX { ctrl, tgt }  => {
                     let dist = (*tgt as isize) - (*ctrl as isize);
                     let ctrl_label = format!(r"\ctrl{{{}}}", dist);
                     let ctrl = (ctrl, ctrl_label);
                     let tgt = (tgt, r"\targ{}".to_string());
                     self.insert_multiple(vec![ctrl, tgt]);
                 }
-                M(tgt)           => self.insert_single(tgt, r"\meter{}".to_string()),
+                SWAP { .. } => todo!(),
+                M(tgt)            => self.insert_single(tgt, r"\meter{}".to_string()),
             }
         }
 
@@ -278,20 +280,21 @@ pub mod latex {
 
     impl IntoTarget<Latex> for LayoutArray {
         fn into_target(&self, _target: &Latex) -> String {
-            self.arr
-                .iter()
-                .map(|wire| {
-                    wire.iter()
-                        .map(|gate| match gate {
-                            LayoutState::Some(gate) => gate,
-                            _ => r"\qw",
-                        })
-                        .collect::<Vec<&str>>()
-                        .join(" & ")
-                })
-                .collect::<Vec<String>>()
-                // Must not be a raw string; we really want to emit a newline!
-                .join(" \\\\\n")
+            todo!()
+            // self.arr
+            //     .iter()
+            //     .map(|wire| {
+            //         wire.iter()
+            //             .map(|gate| match gate {
+            //                 LayoutState::Some(gate) => gate,
+            //                 _ => r"\qw",
+            //             })
+            //             .collect::<Vec<&str>>()
+            //             .join(" & ")
+            //     })
+            //     .collect::<Vec<String>>()
+            //     // Must not be a raw string; we really want to emit a newline!
+            //     .join(" \\\\\n")
         }
     }
 
@@ -308,21 +311,22 @@ pub mod latex {
 \end{document}
 ";
 
-        fn diagram(&self, circuit: &crate::circuit::Circuit) -> String {
-            let max_qubit = match circuit.max_qubit {
-                Some(qb) => qb,
-                None => {
-                    return String::new();
-                }
-            };
+        fn diagram(&self, _circuit: &crate::circuit::Circuit) -> String {
+            todo!()
+            // let max_qubit = match circuit.max_qubit {
+            //     Some(qb) => qb,
+            //     None => {
+            //         return String::new();
+            //     }
+            // };
 
-            let mut layout_array = LayoutArray::new(max_qubit + 1);
+            // let mut layout_array = LayoutArray::new(max_qubit + 1);
 
-            for gate in circuit.circ_buf.iter() {
-                layout_array.push_gate(gate);
-            }
+            // for gate in circuit.circ_buf.iter() {
+            //     layout_array.push_gate(gate);
+            // }
 
-            layout_array.into_target(self)
+            // layout_array.into_target(self)
         }
     }
 
