@@ -1,6 +1,6 @@
 use crate::arch::Arch;
 use crate::cavy_errors::ErrorBuf;
-use crate::circuit::Qubit;
+use crate::circuit::VirtAddr;
 use crate::values::Value;
 use std::convert::TryInto;
 
@@ -35,16 +35,17 @@ pub struct QubitAllocator {
     arch: Arch,
 }
 
-impl Allocator<Qubit> for QubitAllocator {
-    fn alloc(&mut self, n: usize) -> Result<Vec<Qubit>, ErrorBuf> {
-        let end = self.least_free + n;
-        if self.arch.qb_count < end.into() {
-            // Should fail if we run out of qubits!
-            todo!();
-        }
-        let qubits = (self.least_free..end).collect();
-        self.least_free = end;
-        Ok(qubits)
+impl Allocator<VirtAddr> for QubitAllocator {
+    fn alloc(&mut self, _n: usize) -> Result<Vec<VirtAddr>, ErrorBuf> {
+        todo!()
+        // let end = self.least_free + n;
+        // if self.arch.qb_count < end.into() {
+        //     // Should fail if we run out of qubits!
+        //     todo!();
+        // }
+        // let qubits = (self.least_free..end).collect();
+        // self.least_free = end;
+        // Ok(qubits)
     }
 
     /// Yes, this is a no-op.
@@ -59,7 +60,7 @@ impl QubitAllocator {
         }
     }
 
-    pub fn q_bool(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+    pub fn q_bool(&mut self) -> Result<Vec<VirtAddr>, ErrorBuf> {
         Ok(self.alloc(1)?)
     }
 
@@ -74,15 +75,15 @@ impl QubitAllocator {
         }
     }
 
-    pub fn q_u8(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+    pub fn q_u8(&mut self) -> Result<Vec<VirtAddr>, ErrorBuf> {
         self.alloc(8)
     }
 
-    pub fn alloc_q_u16(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+    pub fn alloc_q_u16(&mut self) -> Result<Vec<VirtAddr>, ErrorBuf> {
         self.alloc(16)
     }
 
-    pub fn alloc_q_u32(&mut self) -> Result<Vec<Qubit>, ErrorBuf> {
+    pub fn alloc_q_u32(&mut self) -> Result<Vec<VirtAddr>, ErrorBuf> {
         self.alloc(32)
     }
 }

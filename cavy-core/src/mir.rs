@@ -232,14 +232,19 @@ pub struct Rvalue {
     pub span: Span,
 }
 
-/// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
-pub enum RvalueKind {
-    BinOp(BinOp, LocalId, LocalId),
-    UnOp(UnOp, LocalId),
+pub enum Operand {
     Const(Const),
     Copy(LocalId),
     Move(LocalId),
+}
+
+/// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
+#[derive(Debug)]
+pub enum RvalueKind {
+    BinOp(BinOp, Operand, Operand),
+    UnOp(UnOp, Operand),
+    Use(Operand),
 }
 
 // Consider if you really want this alias, of if you ought to either lower the
@@ -358,14 +363,22 @@ impl fmt::Display for Place {
     }
 }
 
+impl fmt::Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operand::Const(c) => write!(f, "{}", c),
+            Operand::Copy(x) => write!(f, "copy {}", x),
+            Operand::Move(x) => write!(f, "move {}", x),
+        }
+    }
+}
+
 impl fmt::Display for RvalueKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BinOp(op, left, right) => write!(f, "{} {} {}", left, op, right),
             Self::UnOp(op, right) => write!(f, "{} {}", op, right),
-            Self::Const(val) => write!(f, "const {}", val),
-            Self::Copy(local) => write!(f, "copy {}", local),
-            Self::Move(local) => write!(f, "move {}", local),
+            RvalueKind::Use(arg) => write!(f, "{}", arg),
         }
     }
 }

@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
-    mir::{BlockData, BlockKind, LocalId, RvalueKind},
+    mir::{BlockData, BlockKind, LocalId, Operand, RvalueKind},
     source::Span,
 };
 
@@ -48,6 +48,18 @@ impl Lattice for MeasState {
     }
 }
 
+impl MeasState {
+    /// Get a measurement upstream of an operand, if we care about it; that is,
+    /// if the operand is `Copy`.
+    fn upstream_delin(&self, arg: &Operand) -> Option<&Span> {
+        if let Operand::Copy(local) = arg {
+            self.delin.get(local)
+        } else {
+            None
+        }
+    }
+}
+
 /// Note that this uses a *lot* more space than it needs to! We could really use
 /// two bits for each local, for a whole procedure. (...That must be what this
 /// gen-kill thing is all about.)
@@ -58,26 +70,25 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
     type Domain = MeasState;
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
+        use RvalueKind::*;
         match &stmt.rhs.data {
-            RvalueKind::BinOp(_, left, right) => {
-                if let Some(&span) = state.delin.get(left).or_else(|| state.delin.get(right)) {
+            BinOp(_, left, right) => {
+                if let Some(&span) = state
+                    .upstream_delin(left)
+                    .or_else(|| state.upstream_delin(right))
+                {
                     state.delin.insert(stmt.place, span);
                 }
             }
-            RvalueKind::UnOp(UnOpKind::Linear, right) => {
+            UnOp(UnOpKind::Linear, Operand::Copy(right))
+            | UnOp(UnOpKind::Linear, Operand::Move(right)) => {
                 state.lin.insert(*right, stmt.rhs.span);
             }
-            RvalueKind::UnOp(UnOpKind::Delin, _) => {
+            UnOp(UnOpKind::Delin, _) => {
                 state.delin.insert(stmt.place, stmt.rhs.span);
             }
-            RvalueKind::UnOp(_, right) => {
-                if let Some(&span) = state.delin.get(right) {
-                    state.delin.insert(stmt.place, span);
-                }
-            }
-            RvalueKind::Const(_) => {}
-            RvalueKind::Copy(local) | RvalueKind::Move(local) => {
-                if let Some(&span) = state.delin.get(local) {
+            UnOp(_, operand) | Use(operand) => {
+                if let Some(&span) = state.upstream_delin(operand) {
                     state.delin.insert(stmt.place, span);
                 }
             }

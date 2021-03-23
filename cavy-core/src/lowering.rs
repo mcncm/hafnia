@@ -350,6 +350,19 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
+    /// Convert a local to an operand, basing the choice to move or copy on its
+    /// type
+    fn operand_of(&self, local: LocalId) -> Operand {
+        // FIXME This is doing extra work to rediscover the type of this local.
+        // Take a look at its call sites. I don't like it.
+        let ty = &self.gr.locals[local].ty;
+        if ty.is_linear(self.ctx) {
+            Operand::Move(local)
+        } else {
+            Operand::Copy(local)
+        }
+    }
+
     fn lower_into_binop(
         &mut self,
         place: LocalId,
@@ -371,11 +384,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             return Err(e);
         }
 
+        let left = self.operand_of(l_place);
+        let right = self.operand_of(r_place);
+
         let stmt = mir::Stmt {
             place,
             rhs: Rvalue {
                 span,
-                data: RvalueKind::BinOp(op.data, l_place, r_place),
+                data: RvalueKind::BinOp(op.data, left, right),
             },
         };
         self.push_stmt(stmt);
@@ -394,9 +410,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let r_place = self.gr.auto_local(*arg_ty);
         self.lower_into(r_place, right)?;
 
+        let right = self.operand_of(r_place);
         let rhs = Rvalue {
             span,
-            data: RvalueKind::UnOp(op.data, r_place),
+            data: RvalueKind::UnOp(op.data, right),
         };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
@@ -409,7 +426,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             place,
             rhs: Rvalue {
                 span: Span::default(),
-                data: RvalueKind::Const(Const::Unit),
+                data: RvalueKind::Use(Operand::Const(Const::Unit)),
             },
         });
 
@@ -456,7 +473,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         };
         let rhs = Rvalue {
             span: lit.span,
-            data: RvalueKind::Const(constant),
+            data: RvalueKind::Use(Operand::Const(constant)),
         };
         self.push_stmt(mir::Stmt { place, rhs });
         Ok(())
@@ -465,17 +482,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Maybe<()> {
         let rhs = match self.st.get(&ident.data) {
             Some(id) => {
-                let local = &self.gr.locals[*id];
-                if local.ty.is_linear(self.ctx) {
-                    Rvalue {
-                        span: ident.span,
-                        data: RvalueKind::Move(*id),
-                    }
-                } else {
-                    Rvalue {
-                        span: ident.span,
-                        data: RvalueKind::Copy(*id),
-                    }
+                let operand = self.operand_of(*id);
+                Rvalue {
+                    span: ident.span,
+                    data: RvalueKind::Use(operand),
                 }
             }
             None => {

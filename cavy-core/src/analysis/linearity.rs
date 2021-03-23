@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
-    mir::{BlockData, BlockKind, LocalId, RvalueKind},
+    mir::{BlockData, BlockKind, LocalId, Operand, RvalueKind},
     source::Span,
 };
 
@@ -45,9 +45,27 @@ impl Lattice for MoveState {
     }
 }
 
+impl MoveState {
+    /// Update the move state with a new operand use
+    fn update(&mut self, arg: &Operand, span: Span) {
+        if let Operand::Move(local) = arg {
+            match self.moved.entry(*local) {
+                Entry::Occupied(_) => {
+                    self.double_moved.insert(*local, span);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(span);
+                }
+            }
+        }
+    }
+}
+
 /// Note that this uses a *lot* more space than it needs to! We could really use
 /// two bits for each local, for a whole procedure.
 pub struct LinearityAnalysis {}
+
+impl LinearityAnalysis {}
 
 impl Analysis<'_, '_> for LinearityAnalysis {
     type Direction = Forward;
@@ -55,18 +73,13 @@ impl Analysis<'_, '_> for LinearityAnalysis {
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
         match &stmt.rhs.data {
-            RvalueKind::BinOp(_, _, _) => {}
-            RvalueKind::UnOp(_, _) => {}
-            RvalueKind::Const(_) => {}
-            RvalueKind::Copy(_) => {}
-            RvalueKind::Move(local) => match state.moved.entry(*local) {
-                Entry::Occupied(_) => {
-                    state.double_moved.insert(*local, stmt.rhs.span);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(stmt.rhs.span);
-                }
-            },
+            RvalueKind::BinOp(_, left, right) => {
+                // There should really be more fine-grained span data here
+                state.update(left, stmt.rhs.span);
+                state.update(right, stmt.rhs.span);
+            }
+            RvalueKind::UnOp(_, right) => state.update(right, stmt.rhs.span),
+            RvalueKind::Use(arg) => state.update(arg, stmt.rhs.span),
         }
     }
 
