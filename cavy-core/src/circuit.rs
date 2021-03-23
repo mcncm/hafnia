@@ -7,23 +7,23 @@ use std::{
 use Gate::*;
 
 /// This type alias identifies qubits with their numerical indices
-pub type Qubit = usize;
+pub type VirtAddr = usize;
 
 /// These are gates from which most ordinary circuits will be built
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
-    X(Qubit),
-    T { tgt: Qubit, conj: bool },
-    H(Qubit),
-    Z(Qubit),
-    CX { tgt: Qubit, ctrl: Qubit },
-    SWAP { fst: Qubit, snd: Qubit },
+    X(VirtAddr),
+    T { tgt: VirtAddr, conj: bool },
+    H(VirtAddr),
+    Z(VirtAddr),
+    CX { tgt: VirtAddr, ctrl: VirtAddr },
+    SWAP { fst: VirtAddr, snd: VirtAddr },
     // Measurement "gate"
-    M(Qubit),
+    M(VirtAddr),
 }
 
 impl Gate {
-    pub fn qubits(&self) -> Vec<Qubit> {
+    pub fn qubits(&self) -> Vec<VirtAddr> {
         match self {
             X(tgt) => vec![*tgt],
             T { tgt, conj: _ } => vec![*tgt],
@@ -43,7 +43,7 @@ impl Gate {
     }
 
     #[rustfmt::skip]
-    fn controlled_on_one(self, ctrl: Qubit) -> Vec<Gate> {
+    fn controlled_on_one(self, ctrl: VirtAddr) -> Vec<Gate> {
         match self {
             X(tgt) => vec![CX { ctrl, tgt }],
             T { tgt: _, conj: _ } => todo!(),
@@ -77,7 +77,7 @@ impl Gate {
     }
 
     /// Control on multiple qubits
-    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = Qubit>>) -> Vec<Gate> {
+    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = VirtAddr>>) -> Vec<Gate> {
         let mut inner_gates = vec![self];
         for ctrl in ctrls {
             inner_gates = inner_gates
@@ -111,7 +111,7 @@ impl IntoTarget<Qasm> for Gate {
 #[derive(Debug)]
 pub enum Instruction {
     Gate(Gate),
-    FnCall(FnId, Vec<Qubit>),
+    FnCall(FnId, Vec<VirtAddr>),
 }
 
 /// The type of a single procedure in the low-level circuit IR. For now, these

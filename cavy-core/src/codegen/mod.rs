@@ -1,15 +1,21 @@
 //! This module implements the compiler backend.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::{alloc::QubitAllocator, circuit::LirGraph, context::Context};
+use crate::{
+    alloc::QubitAllocator,
+    ast::BinOpKind,
+    circuit::{Instruction, LirGraph},
+    context::Context,
+    mir,
+};
 use crate::{
     ast::{FnId, UnOpKind},
     types::Type,
 };
 use crate::{circuit::Gate, mir::*};
 use crate::{
-    circuit::{Circuit, Qubit},
+    circuit::{Circuit, VirtAddr},
     mir::Mir,
 };
 
@@ -55,69 +61,84 @@ impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
 struct LirBuilder<'mir, 'ctx> {
     gr: &'mir Graph,
     ctx: &'mir Context<'ctx>,
+    lir: LirGraph,
 }
 
 impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     fn new(gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
-        Self { gr, ctx }
-    }
-
-    fn build(mut self) -> LirGraph {
-        let mut lir = LirGraph {
+        let lir = LirGraph {
             args: 0,
             ancillae: 0,
             instructions: Vec::new(),
         };
+        Self { gr, ctx, lir }
+    }
 
-        lir
+    fn build(mut self) -> LirGraph {
+        self.translate_block(self.gr.entry_block);
+        self.lir
+    }
+
+    /// Lower from the MIR, building from a given blck.
+    fn translate_block(&mut self, blk: BlockId) {
+        let blk = &self.gr.blocks[blk];
+        for stmt in blk.stmts.iter() {
+            self.translate_stmt(stmt);
+        }
+        match &blk.kind {
+            BlockKind::Goto(blk) => self.translate_block(*blk),
+            BlockKind::Switch { cond, blks } => self.translate_switch(cond, blks),
+            BlockKind::Call {
+                callee,
+                span: _,
+                args,
+                blk,
+            } => {
+                self.translate_call(*callee, args, *blk);
+            }
+            BlockKind::Ret => {}
+        }
+    }
+
+    fn translate_stmt(&mut self, stmt: &mir::Stmt) {
+        use RvalueKind::*;
+        let mir::Stmt { ref place, ref rhs } = stmt;
+        match rhs.data {
+            BinOp(_, _, _) => {}
+            UnOp(op, right) => {}
+            Use(_) => {}
+        }
+    }
+
+    fn translate_switch(&mut self, cond: &LocalId, blks: &[BlockId]) {
+        // FIXME This is incorrect, since of course no controls are applied. I
+        // think, as we flesh this out, we should get the conditions on each
+        // block from the analysis phase.
+        for blk in blks {
+            self.translate_block(*blk);
+        }
+    }
+
+    fn translate_call(&mut self, callee: FnId, args: &Vec<LocalId>, blk: BlockId) {
+        let args = args
+            .iter()
+            .map(|local| self.lookup_addr(local))
+            .flatten()
+            .collect();
+        self.lir
+            .instructions
+            .push(Instruction::FnCall(callee, args));
+        self.translate_block(blk);
+    }
+
+    /// are, we would need to supply a location (or more!) as well.
+    /// Get the procedure-local virtual bit addresses associated with a local.
+    ///
+    /// NOTE: this doesn't work if addresses are position-dependent. If
+    /// reassignment does the 'pre-optimization' of address reassignment, then
+    /// we would need to keep track of that information. We might be able to
+    /// avoid such a need by using SSA.
+    fn lookup_addr(&self, local: &LocalId) -> Vec<VirtAddr> {
+        todo!();
     }
 }
-
-//    fn gen_function(&mut self, fn_id: FnId) {
-//        use RvalueKind::*;
-//
-//        let gr = &self.mir.graphs[fn_id];
-//        for stmt in gr.blocks[gr.entry_block].stmts.iter() {
-//            let Stmt { place, rhs } = stmt;
-//            match rhs.data {
-//                BinOp(_, _, _) => {}
-//                UnOp(UnOpKind::Minus, _right) => {}
-//                RvalueKind::UnOp(UnOpKind::Not, right) => {
-//                    let ty = &self.ctx.types[gr.locals[right].ty];
-//                    match ty {
-//                        Type::Bool => {
-//                            // TODO classical case
-//                        }
-//                        Type::Q_Bool => {
-//                            let qb = self.bindings.remove(&right).unwrap();
-//                            let qb_idx = qb[0];
-//                            self.circ.push(Gate::X(qb_idx));
-//                            self.bindings.insert(*place, qb);
-//                        }
-//                        _ => unreachable!(),
-//                    }
-//                }
-//                UnOp(UnOpKind::Linear, _right) => {
-//                    let qb = self.alloc.q_bool().unwrap();
-//                    // let qb_idx = qb[0];
-//                    self.bindings.insert(*place, qb);
-//                    // self.circ.push(crate::circuit::Gate::X(qb_idx));
-//                    //
-//                    // TODO determine the value of `right`, if it has a
-//                    // determinable compile-time value, and apply a gate
-//                    // appropriately.
-//                }
-//                UnOp(UnOpKind::Delin, _right) => {}
-//                Const(_) => {
-//                    // TODO
-//                }
-//                Copy(_) => {
-//                    // TODO
-//                }
-//                Move(orig) => {
-//                    self.bindings
-//                        .insert(*place, self.bindings.get(&orig).unwrap().to_vec());
-//                }
-//            }
-//        }
-//    }
