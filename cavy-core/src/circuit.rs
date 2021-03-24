@@ -136,6 +136,9 @@ pub struct LirGraph {
 }
 
 /// This is the main public circuit type
+///
+/// NOTE should probably rename this to `Lir` or something, and name an actual
+/// (physically-addressed) circuit as `Circuit`.
 #[derive(Default, Debug)]
 pub struct Circuit {
     pub graphs: HashMap<FnId, LirGraph>,
@@ -144,15 +147,44 @@ pub struct Circuit {
 
 impl Circuit {
     pub fn max_qubit(&self) -> Option<usize> {
-        todo!()
+        /// FIXME This is manifestly wrong. Although maybe this struct shouldn't
+        /// have any such idea, anyway.
+        None
+    }
+
+    pub fn iter(&self) -> CircuitStream {
+        CircuitStream::new(self)
     }
 }
 
-// impl fmt::Display for Circuit {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         use crate::target::{qasm::Qasm, IntoTarget};
-//         let backend = Qasm {};
-//         let repr: String = self.into_target(&backend);
-//         write!(f, "{}", repr)
-//     }
-// }
+pub struct CircuitStream<'c> {
+    circ: &'c Circuit,
+    active: std::slice::Iter<'c, Instruction>,
+    // FIXME this implementation is a problem for arbitrary mutual recursion,
+    // as the stack will grow indefinitely.
+    stack: Vec<std::slice::Iter<'c, Instruction>>,
+}
+
+impl<'c> CircuitStream<'c> {
+    fn new(circ: &'c Circuit) -> Self {
+        let gr = &circ.graphs[&circ.entry_point];
+        let active = gr.instructions.iter();
+        Self {
+            circ,
+            active,
+            stack: vec![],
+        }
+    }
+}
+
+impl<'c> Iterator for CircuitStream<'c> {
+    type Item = &'c Gate;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.active.next() {
+            None => None,
+            Some(Instruction::Gate(gate)) => Some(gate),
+            Some(Instruction::FnCall(_, _)) => todo!(),
+        }
+    }
+}

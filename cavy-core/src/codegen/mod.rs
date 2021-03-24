@@ -5,19 +5,15 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     alloc::QubitAllocator,
     ast::BinOpKind,
-    circuit::{Instruction, LirGraph},
+    ast::{FnId, UnOpKind},
+    circuit::{Instruction, LirGraph, VirtAddr},
     context::Context,
     mir,
+    store::Counter,
+    types::{TyId, Type},
 };
-use crate::{
-    ast::{FnId, UnOpKind},
-    types::Type,
-};
+use crate::{circuit::Circuit, mir::Mir};
 use crate::{circuit::Gate, mir::*};
-use crate::{
-    circuit::{Circuit, VirtAddr},
-    mir::Mir,
-};
 
 pub fn codegen(mir: &Mir, ctx: &Context) -> Circuit {
     let builder = CircuitBuilder::new(mir, ctx);
@@ -28,8 +24,6 @@ struct CircuitBuilder<'mir, 'ctx> {
     ctx: &'mir Context<'ctx>,
     mir: &'mir Mir,
     circ: Circuit,
-    /// Qubit allocator
-    alloc: QubitAllocator,
 }
 
 impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
@@ -40,13 +34,7 @@ impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
             entry_point,
             graphs: HashMap::new(),
         };
-        let alloc = QubitAllocator::new(ctx.conf.arch);
-        Self {
-            ctx,
-            mir,
-            circ,
-            alloc,
-        }
+        Self { ctx, mir, circ }
     }
 
     fn build(mut self) -> Circuit {
@@ -58,10 +46,19 @@ impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
     }
 }
 
+#[derive(Clone)]
+struct Allocation {
+    qbits: Vec<usize>,
+    cbits: Vec<usize>,
+}
+
 struct LirBuilder<'mir, 'ctx> {
     gr: &'mir Graph,
     ctx: &'mir Context<'ctx>,
     lir: LirGraph,
+    bindings: HashMap<LocalId, Allocation>,
+    qcounter: std::ops::RangeFrom<usize>,
+    ccounter: std::ops::RangeFrom<usize>,
 }
 
 impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
@@ -71,15 +68,58 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             ancillae: 0,
             instructions: Vec::new(),
         };
-        Self { gr, ctx, lir }
+        let bindings = HashMap::new();
+        Self {
+            gr,
+            ctx,
+            lir,
+            bindings,
+            qcounter: (0..).into_iter(),
+            ccounter: (0..).into_iter(),
+        }
     }
 
     fn build(mut self) -> LirGraph {
+        self.bind_args();
         self.translate_block(self.gr.entry_block);
         self.lir
     }
 
-    /// Lower from the MIR, building from a given blck.
+    /// Is this the right return type? It might be unnecessarily expensive to
+    /// store these ranges of consecutive numbers.
+    fn qalloc(&mut self, n: usize) -> Vec<usize> {
+        // FIXME Ok, why does't this work with just `self.counter`?
+        (&mut self.qcounter).take(n).collect()
+    }
+
+    /// FIXME regrettable name; has nothing to do with C `calloc`
+    fn calloc(&mut self, n: usize) -> Vec<usize> {
+        (&mut self.ccounter).take(n).collect()
+    }
+
+    /// Allocate space for a given type
+    fn alloc_for(&mut self, ty: TyId) -> Allocation {
+        let sz = ty.size(self.ctx);
+        Allocation {
+            qbits: self.qalloc(sz.qsize),
+            cbits: self.qalloc(sz.csize),
+        }
+    }
+
+    /// Create the initial local bindings for arguments and return site
+    ///
+    /// NOTE this method, along with the binding mechanism, is destined for
+    /// replacement.
+    fn bind_args(&mut self) {
+        // Take one for each argument, plus one for the return site
+        let n = self.gr.nargs + 1;
+        for (idx, Local { ty, .. }) in self.gr.locals.idx_enumerate().take(n) {
+            let allocation = self.alloc_for(*ty);
+            self.bindings.insert(idx, allocation);
+        }
+    }
+
+    /// Lower from the MIR, building from a given block.
     fn translate_block(&mut self, blk: BlockId) {
         let blk = &self.gr.blocks[blk];
         for stmt in blk.stmts.iter() {
@@ -103,10 +143,43 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     fn translate_stmt(&mut self, stmt: &mir::Stmt) {
         use RvalueKind::*;
         let mir::Stmt { ref place, ref rhs } = stmt;
-        match rhs.data {
-            BinOp(_, _, _) => {}
-            UnOp(op, right) => {}
-            Use(_) => {}
+        let ty = self.gr.locals[*place].ty;
+        match &rhs.data {
+            BinOp(op, left, right) => todo!(),
+            UnOp(op, right) => {
+                match op {
+                    UnOpKind::Minus => todo!(),
+                    UnOpKind::Not => {
+                        // FIXME very much under construction
+                        let right = match right {
+                            Operand::Const(_) => unreachable!(),
+                            Operand::Copy(x) => x,
+                            Operand::Move(x) => x,
+                        };
+                        let bits = self.bindings.get(right).unwrap();
+                        for bit in &bits.qbits {
+                            let inst = Instruction::Gate(Gate::X(*bit));
+                            self.lir.instructions.push(inst);
+                        }
+                    }
+                    UnOpKind::Linear => {
+                        let allocation = self.alloc_for(ty);
+                        self.bindings.insert(*place, allocation);
+                    }
+                    UnOpKind::Delin => {
+                        let allocation = self.alloc_for(ty);
+                        self.bindings.insert(*place, allocation);
+                    }
+                }
+                // do some extra stuff
+            }
+            Use(val) => match val {
+                Operand::Const(_) => {}
+                Operand::Copy(loc) | Operand::Move(loc) => {
+                    let bits = self.bindings.get(loc).unwrap();
+                    self.bindings.insert(*place, bits.clone());
+                }
+            },
         }
     }
 

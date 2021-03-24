@@ -73,23 +73,21 @@ pub mod qasm {
     }
 
     impl IntoTarget<Qasm> for crate::circuit::Circuit {
-        fn into_target(&self, _target: &Qasm) -> String {
-            todo!()
-            // let declaration = {
-            //     if let Some(max_qubit) = self.max_qubit {
-            //         let qubits = max_qubit + 1;
-            //         format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
-            //     } else {
-            //         String::new()
-            //     }
-            // };
-            // let gates = self
-            //     .circ_buf
-            //     .iter()
-            //     .map(|gate| gate.into_target(target))
-            //     .collect::<Vec<String>>()
-            //     .join("\n");
-            // format!("{}\n{}\n", declaration, gates)
+        fn into_target(&self, target: &Qasm) -> String {
+            let declaration = {
+                if let Some(max_qubit) = self.max_qubit() {
+                    let qubits = max_qubit + 1;
+                    format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
+                } else {
+                    String::new()
+                }
+            };
+            let gates = self
+                .iter()
+                .map(|gate| gate.into_target(target))
+                .collect::<Vec<String>>()
+                .join("\n");
+            format!("{}\n{}\n", declaration, gates)
         }
     }
 }

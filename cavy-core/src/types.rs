@@ -22,6 +22,12 @@ impl TyId {
         let ty = &ctx.types[*self];
         ty.is_linear(ctx)
     }
+
+    /// Mutually recursive with `Type::size`.
+    pub fn size(&self, ctx: &Context) -> TypeSize {
+        let ty = &ctx.types[*self];
+        ty.size(ctx)
+    }
 }
 
 /// This struct tracks the structural properties of a given type
@@ -44,6 +50,36 @@ pub struct UserType {
 impl UserType {
     fn is_enum(&self) -> bool {
         self.tag.is_some()
+    }
+
+    fn as_tuple(&self) -> Type {
+        Type::Tuple(self.fields.iter().map(|field| field.1).collect())
+    }
+}
+
+/// The total size of a type, calculated recursively.
+pub struct TypeSize {
+    /// Number of quantum bits
+    pub qsize: usize,
+    /// Number of classical bits
+    pub csize: usize,
+}
+
+impl std::ops::Add for TypeSize {
+    type Output = TypeSize;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            qsize: self.qsize + rhs.qsize,
+            csize: self.csize + rhs.csize,
+        }
+    }
+}
+
+impl std::iter::Sum<TypeSize> for TypeSize {
+    fn sum<I: Iterator<Item = TypeSize>>(iter: I) -> Self {
+        let init = TypeSize { qsize: 0, csize: 0 };
+        iter.fold(init, |acc, elem| acc + elem)
     }
 }
 
@@ -68,9 +104,6 @@ pub enum Type {
     /// Arrays
     Array(TyId),
 
-    /// Wrapper type of measured value
-    Measured(TyId),
-
     /// A function type
     Func(Vec<TyId>, TyId),
 
@@ -92,6 +125,30 @@ impl Type {
         Type::Uint(Uint::U32)
     }
 
+    /// Number of qubits owned by a type
+    pub fn size(&self, ctx: &Context) -> TypeSize {
+        match self {
+            Type::Bool => TypeSize { qsize: 0, csize: 1 },
+            Type::Uint(u) => TypeSize {
+                qsize: 0,
+                csize: *u as usize,
+            },
+            Type::Q_Bool => TypeSize { qsize: 1, csize: 0 },
+            Type::Q_Uint(u) => TypeSize {
+                qsize: *u as usize,
+                csize: 0,
+            },
+            Type::Tuple(elems) => elems.iter().map(|ty| ty.size(ctx)).sum(),
+            Type::Array(_) => todo!(),
+            Type::Func(_, _) => todo!(),
+            Type::UserType(udt) => {
+                let tup = udt.as_tuple();
+                tup.size(ctx)
+            }
+            Type::Ord => TypeSize { qsize: 0, csize: 0 },
+        }
+    }
+
     pub fn is_linear(&self, ctx: &Context) -> bool {
         match self {
             Type::Bool => false,
@@ -100,7 +157,6 @@ impl Type {
             Type::Q_Uint(_) => true,
             Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear(ctx)),
             Type::Array(ty) => ty.is_linear(ctx),
-            Type::Measured(_) => false,
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
             Type::UserType(ty) => {
@@ -138,7 +194,6 @@ impl CtxDisplay for TyId {
                 f.write_str(")")
             }
             Type::Array(ty) => write!(f, "[{}]", ctx.types[*ty]),
-            Type::Measured(ty) => write!(f, "!{}", ctx.types[*ty]),
             Type::Func(tys, ret) => {
                 f.write_str("Fn(")?;
                 for (n, ty) in tys.iter().enumerate() {

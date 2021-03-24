@@ -59,6 +59,10 @@ pub struct Graph {
     /// The variables used within the CFG. This also contains the parameter and
     /// return values.
     pub locals: LocalStore,
+    /// The number of arguments. We don't need to pass in any more information
+    /// than this, because we can rely on the invariant that the return site and
+    /// arguments are the first `nargs + 1` locals.
+    pub nargs: usize,
     /// The basic blocks of the Cfg
     pub blocks: BlockStore,
     /// The first block of the Cfg
@@ -67,12 +71,14 @@ pub struct Graph {
 
 impl Graph {
     /// Create a graph with a single empty block
-    pub fn new() -> Self {
+    pub fn new(sig: &TypedSig) -> Self {
         let mut blocks = BlockStore::new();
         let entry_block = blocks.insert(BasicBlock::new());
+        let nargs = sig.params.len();
         Self {
             locals: LocalStore::new(),
             blocks,
+            nargs,
             entry_block,
         }
     }

@@ -201,7 +201,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let table = func.table;
         let body = &ast.bodies[func.body];
 
-        let mut gr = Graph::new();
+        let mut gr = Graph::new(&sigs[id]);
         let mut st = SymbolTable::new();
         let cursor = gr.entry_block;
 
