@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
-    mir::{BlockData, BlockKind, LocalId, Operand, RvalueKind},
+    mir::{self, BlockData, BlockKind, LocalId, Operand, RvalueKind},
     source::Span,
 };
 
@@ -40,7 +40,7 @@ impl Lattice for MeasState {
         Self { delin, lin }
     }
 
-    fn bottom(_: &crate::mir::Graph, _: &crate::context::Context) -> Self {
+    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
         Self {
             delin: HashMap::new(),
             lin: HashMap::new(),
@@ -69,27 +69,32 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
     type Direction = Forward;
     type Domain = MeasState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
         use RvalueKind::*;
-        match &stmt.rhs.data {
+        let (place, rhs) = match &stmt.kind {
+            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+            _ => return,
+        };
+
+        match &rhs.data {
             BinOp(_, left, right) => {
                 if let Some(&span) = state
                     .upstream_delin(left)
                     .or_else(|| state.upstream_delin(right))
                 {
-                    state.delin.insert(stmt.place, span);
+                    state.delin.insert(place, span);
                 }
             }
             UnOp(UnOpKind::Linear, Operand::Copy(right))
             | UnOp(UnOpKind::Linear, Operand::Move(right)) => {
-                state.lin.insert(*right, stmt.rhs.span);
+                state.lin.insert(*right, rhs.span);
             }
             UnOp(UnOpKind::Delin, _) => {
-                state.delin.insert(stmt.place, stmt.rhs.span);
+                state.delin.insert(place, rhs.span);
             }
             UnOp(_, operand) | Use(operand) => {
                 if let Some(&span) = state.upstream_delin(operand) {
-                    state.delin.insert(stmt.place, span);
+                    state.delin.insert(place, span);
                 }
             }
         }

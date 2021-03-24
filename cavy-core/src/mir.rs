@@ -1,6 +1,7 @@
 //! The control-flow graph representation of the program. This is analogous to
 //! rustc's MIR. Like the MIR, it is a fully-typed version of the program, with
-//! all names resolved.
+//! all names resolved, and its structure is *very* similar. This module is
+//! *essentially* a simplified version of `rustc_middle/src/mir/mod.rs`.
 
 use crate::{
     ast::{self, Ast, FnId},
@@ -224,12 +225,22 @@ pub enum PlaceKind {
     /// The memory hole
     Null,
 }
+
 /// For the time being, at least, lowered statements are *all* of the form `lhs
 /// = rhs`.
 #[derive(Debug)]
 pub struct Stmt {
-    pub place: LocalId,
-    pub rhs: Rvalue,
+    pub span: Span,
+    pub kind: StmtKind,
+}
+
+#[derive(Debug)]
+pub enum StmtKind {
+    /// Assign an `Rvalue` to a local. In the future, this will support more
+    /// complex left-hand sides.
+    Assn(LocalId, Rvalue),
+    /// Handy for deleting statements in O(1) time.
+    Nop,
 }
 
 #[derive(Debug)]
@@ -356,7 +367,10 @@ impl fmt::Display for BlockKind {
 
 impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = {};", self.place, self.rhs)
+        match &self.kind {
+            StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
+            StmtKind::Nop => f.write_str("nop;"),
+        }
     }
 }
 

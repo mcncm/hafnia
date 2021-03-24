@@ -1,7 +1,7 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    circuit::Circuit,
+    circuit::Lir,
     context::{Context, CtxDisplay, CtxFmt},
     lowering, parser, scanner,
     session::Phase,

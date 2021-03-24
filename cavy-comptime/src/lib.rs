@@ -5,7 +5,7 @@
 //! library crate.
 
 use cavy_core::{
-    circuit::{Circuit, Gate},
+    circuit::{Gate, Lir},
     compile,
     context::Context,
     session::Config,
@@ -40,7 +40,7 @@ pub fn cavy_comptime(input: TokenStream) -> TokenStream {
 /// Turns a `Circuit` value into code that builds that literal circuit.
 ///
 /// TODO better: to this by implementing `ToTokens` for `Circuit`.
-fn quote_circuit(_circ: Circuit) -> TokenStream {
+fn quote_circuit(_circ: Lir) -> TokenStream {
     todo!()
     // let Circuit {
     //     circ_buf,

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{self, *},
+    ast::{self, StmtKind, *},
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
     context::{Context, CtxDisplay, SymbolId},
     mir::{self, *},
@@ -257,6 +257,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.gr.push_stmt(self.cursor, stmt);
     }
 
+    /// Push an assignment statement into the current basic block
+    fn assn_stmt(&mut self, place: LocalId, rhs: Rvalue) {
+        let stmt = mir::Stmt {
+            span: Span::default(), // FIXME this is always wrong
+            kind: mir::StmtKind::Assn(place, rhs),
+        };
+        self.push_stmt(stmt);
+    }
+
     /// Create a new block, inheriting the satellite data of the block currently
     /// under the cursor.
     fn new_block(&mut self) -> BlockId {
@@ -388,11 +397,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let right = self.operand_of(r_place);
 
         let stmt = mir::Stmt {
-            place,
-            rhs: Rvalue {
-                span,
-                data: RvalueKind::BinOp(op.data, left, right),
-            },
+            span: span.clone(), // FIXME actually a different span
+            kind: mir::StmtKind::Assn(
+                place,
+                Rvalue {
+                    span,
+                    data: RvalueKind::BinOp(op.data, left, right),
+                },
+            ),
         };
         self.push_stmt(stmt);
         Ok(())
@@ -415,20 +427,29 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             span,
             data: RvalueKind::UnOp(op.data, right),
         };
-        self.push_stmt(mir::Stmt { place, rhs });
+
+        let stmt = mir::Stmt {
+            span: span.clone(), // FIXME actually a different span
+            kind: mir::StmtKind::Assn(place, rhs),
+        };
+        self.push_stmt(stmt);
         Ok(())
     }
 
     fn lower_into_assn(&mut self, place: LocalId, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
-        self.push_stmt(mir::Stmt {
-            place,
-            rhs: Rvalue {
-                span: Span::default(),
-                data: RvalueKind::Use(Operand::Const(Const::Unit)),
-            },
-        });
+        let stmt = mir::Stmt {
+            span: Span::default(), // FIXME always wrong!
+            kind: mir::StmtKind::Assn(
+                place,
+                Rvalue {
+                    span: Span::default(), // ibid
+                    data: RvalueKind::Use(Operand::Const(Const::Unit)),
+                },
+            ),
+        };
+        self.push_stmt(stmt);
 
         let lhs = match &lhs.data {
             ExprKind::Ident(name) => name,
@@ -475,7 +496,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             span: lit.span,
             data: RvalueKind::Use(Operand::Const(constant)),
         };
-        self.push_stmt(mir::Stmt { place, rhs });
+        self.assn_stmt(place, rhs);
         Ok(())
     }
 
@@ -495,7 +516,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 });
             }
         };
-        self.push_stmt(mir::Stmt { place, rhs });
+        self.assn_stmt(place, rhs);
         Ok(())
     }
 

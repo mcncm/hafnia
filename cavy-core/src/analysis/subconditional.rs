@@ -12,7 +12,7 @@ use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,
-    mir::{BlockData, BlockId, BlockKind, RvalueKind},
+    mir::{self, BlockData, BlockId, BlockKind, RvalueKind},
     source::Span,
     store::Store,
 };
@@ -58,7 +58,7 @@ impl Lattice for SubCondData {
         }
     }
 
-    fn bottom(gr: &crate::mir::Graph, ctx: &crate::context::Context) -> Self {
+    fn bottom(gr: &mir::Graph, ctx: &crate::context::Context) -> Self {
         Self {
             has_delin: false,
             has_cc: false,
@@ -75,13 +75,18 @@ impl Analysis<'_, '_> for SubCondAnalysis {
     type Domain = SubCondData;
 
     /// If we encounter a delinearization operator, add that.
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, data: &BlockData) {
-        if let RvalueKind::UnOp(UnOpKind::Delin, _) = stmt.rhs.data {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, data: &BlockData) {
+        let (place, rhs) = match &stmt.kind {
+            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+            _ => return,
+        };
+
+        if let RvalueKind::UnOp(UnOpKind::Delin, _) = rhs.data {
             state.has_delin = true;
             if let Some(blk) = data.sup_lin_branch {
                 state.delins.insert(MeasUnderCond {
                     cond: blk,
-                    span: stmt.rhs.span,
+                    span: rhs.span,
                 });
             }
         }

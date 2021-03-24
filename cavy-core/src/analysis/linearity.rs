@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
-    mir::{BlockData, BlockKind, LocalId, Operand, RvalueKind},
+    mir::{self, BlockData, BlockKind, LocalId, Operand, RvalueKind},
     source::Span,
 };
 
@@ -37,7 +37,7 @@ impl Lattice for MoveState {
         }
     }
 
-    fn bottom(_: &crate::mir::Graph, _: &crate::context::Context) -> Self {
+    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
         Self {
             moved: HashMap::new(),
             double_moved: HashMap::new(),
@@ -71,15 +71,22 @@ impl Analysis<'_, '_> for LinearityAnalysis {
     type Direction = Forward;
     type Domain = MoveState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &crate::mir::Stmt, _data: &BlockData) {
-        match &stmt.rhs.data {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
+        // NOTE this pattern is repeated in a lot of these analyses. Consider an
+        // abstraction.
+        let (place, rhs) = match &stmt.kind {
+            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+            _ => return,
+        };
+
+        match &rhs.data {
             RvalueKind::BinOp(_, left, right) => {
                 // There should really be more fine-grained span data here
-                state.update(left, stmt.rhs.span);
-                state.update(right, stmt.rhs.span);
+                state.update(left, rhs.span);
+                state.update(right, rhs.span);
             }
-            RvalueKind::UnOp(_, right) => state.update(right, stmt.rhs.span),
-            RvalueKind::Use(arg) => state.update(arg, stmt.rhs.span),
+            RvalueKind::UnOp(_, right) => state.update(right, rhs.span),
+            RvalueKind::Use(arg) => state.update(arg, rhs.span),
         }
     }
 

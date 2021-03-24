@@ -2,7 +2,7 @@
 //! This is all pretty unstable for the time being, so don’t rely on it too much
 //! externally.
 
-use crate::circuit::Circuit;
+use crate::circuit::Lir;
 
 /// This type alias replaces the associated type previously attached to `Target`
 pub type ObjectCode = String;
@@ -10,7 +10,7 @@ pub type ObjectCode = String;
 /// This is a marker trait for compile targets. Must be `Send` in order to use
 /// `Box<dyn Target>` in FFI.
 pub trait Target: std::fmt::Debug + Send {
-    fn from(&self, circ: &Circuit) -> ObjectCode;
+    fn from(&self, circ: &Lir) -> ObjectCode;
 }
 
 impl Default for Box<dyn Target> {
@@ -37,7 +37,7 @@ pub mod null {
     #[derive(Debug)]
     pub struct NullTarget();
     impl Target for NullTarget {
-        fn from(&self, _circ: &Circuit) -> ObjectCode {
+        fn from(&self, _circ: &Lir) -> ObjectCode {
             String::new()
         }
     }
@@ -61,18 +61,18 @@ pub mod qasm {
             format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
         }
 
-        fn circuit(&self, circuit: &crate::circuit::Circuit) -> String {
+        fn circuit(&self, circuit: &crate::circuit::Lir) -> String {
             circuit.into_target(self)
         }
     }
 
     impl Target for Qasm {
-        fn from(&self, circ: &Circuit) -> String {
+        fn from(&self, circ: &Lir) -> String {
             format!("{}\n{}", self.headers(), self.circuit(circ))
         }
     }
 
-    impl IntoTarget<Qasm> for crate::circuit::Circuit {
+    impl IntoTarget<Qasm> for crate::circuit::Lir {
         fn into_target(&self, target: &Qasm) -> String {
             let declaration = {
                 if let Some(max_qubit) = self.max_qubit() {
@@ -309,7 +309,7 @@ pub mod latex {
 \end{document}
 ";
 
-        fn diagram(&self, _circuit: &crate::circuit::Circuit) -> String {
+        fn diagram(&self, _circuit: &crate::circuit::Lir) -> String {
             todo!()
             // let max_qubit = match circuit.max_qubit {
             //     Some(qb) => qb,
@@ -330,7 +330,7 @@ pub mod latex {
 
     impl Target for Latex {
         #[rustfmt::skip]
-        fn from(&self, circ: &Circuit) -> ObjectCode {
+        fn from(&self, circ: &Lir) -> ObjectCode {
             let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
             let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
             format!(

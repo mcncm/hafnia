@@ -135,20 +135,17 @@ pub struct LirGraph {
     pub instructions: Vec<Instruction>,
 }
 
-/// This is the main public circuit type
-///
-/// NOTE should probably rename this to `Lir` or something, and name an actual
-/// (physically-addressed) circuit as `Circuit`.
+/// This is the low-level IR, which is a blend of the MIR and a circuit.
 #[derive(Default, Debug)]
-pub struct Circuit {
+pub struct Lir {
     pub graphs: HashMap<FnId, LirGraph>,
     pub entry_point: FnId,
 }
 
-impl Circuit {
+impl Lir {
     pub fn max_qubit(&self) -> Option<usize> {
-        /// FIXME This is manifestly wrong. Although maybe this struct shouldn't
-        /// have any such idea, anyway.
+        // FIXME This is manifestly wrong. Although maybe this struct shouldn't
+        // have any such idea, anyway.
         None
     }
 
@@ -158,7 +155,7 @@ impl Circuit {
 }
 
 pub struct CircuitStream<'c> {
-    circ: &'c Circuit,
+    circ: &'c Lir,
     active: std::slice::Iter<'c, Instruction>,
     // FIXME this implementation is a problem for arbitrary mutual recursion,
     // as the stack will grow indefinitely.
@@ -166,7 +163,7 @@ pub struct CircuitStream<'c> {
 }
 
 impl<'c> CircuitStream<'c> {
-    fn new(circ: &'c Circuit) -> Self {
+    fn new(circ: &'c Lir) -> Self {
         let gr = &circ.graphs[&circ.entry_point];
         let active = gr.instructions.iter();
         Self {
