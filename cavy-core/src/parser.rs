@@ -5,7 +5,6 @@
 //!
 //! Some of the validations performed at this stage include:
 //! * The uniqueness of the `main` function, as well its type signature
-//! * No shadowing (this will presumably be relaxed in the future)
 //! * Use before declaration
 //!
 //! Other checks cannot be performed at this time, because the data may not be
@@ -995,13 +994,6 @@ mod errors {
     #[derive(Diagnostic)]
     #[msg = "entry point `main` must not take parameters or return"]
     pub struct InvalidMainSignature {
-        #[span]
-        pub span: Span,
-    }
-
-    #[derive(Diagnostic)]
-    #[msg = "shadowed locals are currently not allowed"]
-    pub struct ShadowedLocal {
         #[span]
         pub span: Span,
     }

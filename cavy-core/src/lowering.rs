@@ -676,10 +676,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     (_, Some(rhs)) => self.type_inner(rhs)?,
                 };
                 let place = self.gr.user_local(ty);
-                self.st.insert(lhs.data, place);
                 if let Some(rhs) = rhs {
                     self.lower_into(place, rhs)?;
                 }
+                self.st.insert(lhs.data, place);
                 Ok(())
             }
         }

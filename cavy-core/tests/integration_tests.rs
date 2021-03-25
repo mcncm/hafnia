@@ -94,6 +94,14 @@ test_compiles! {
         }
     }
 
+    move_after_shadow {
+        fn main() {
+            let x = false;
+            let x = ?x;
+            let y = x;
+        }
+    }
+
     recursion fail {
         fn main() { main() }
     }

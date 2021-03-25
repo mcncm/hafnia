@@ -121,8 +121,8 @@ impl Interpreter {
                 Evaluated::No
             }
             RvalueKind::UnOp(UnOp::Not, Copy(v)) | RvalueKind::UnOp(UnOp::Not, Move(v)) => {
-                if let Some(c) = self.env.get(v) {
-                    self.env.insert(place, self.eval_not(c.clone()));
+                if let Some(c) = self.env.get(v).cloned() {
+                    self.env.insert(place, self.eval_not(c));
                     return Evaluated::Yes;
                 }
                 Evaluated::No
@@ -130,7 +130,7 @@ impl Interpreter {
             RvalueKind::UnOp(_, _) => todo!(),
             RvalueKind::Use(val) => match val {
                 Move(v) | Copy(v) => {
-                    if let Some(c) = self.env.get(v) {
+                    if let Some(c) = self.env.get(v).cloned() {
                         self.env.insert(place, c.clone());
                         return Evaluated::Yes;
                     }
@@ -140,7 +140,6 @@ impl Interpreter {
                     self.env.insert(place, c.clone());
                     return Evaluated::Yes;
                 }
-                _ => Evaluated::No,
             },
         }
     }

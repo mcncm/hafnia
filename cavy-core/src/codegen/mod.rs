@@ -217,7 +217,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     /// reassignment does the 'pre-optimization' of address reassignment, then
     /// we would need to keep track of that information. We might be able to
     /// avoid such a need by using SSA.
-    fn translate_arg(&self, arg: &Operand) -> Vec<VirtAddr> {
+    fn translate_arg(&self, _arg: &Operand) -> Vec<VirtAddr> {
         todo!();
     }
 }
