@@ -8,7 +8,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-pub mod alloc;
+// pub mod alloc;
 pub mod analysis;
 pub mod arch;
 pub mod ast;
@@ -18,6 +18,7 @@ pub mod codegen;
 pub mod compile;
 pub mod context;
 pub mod mir;
+pub mod opt;
 pub mod session;
 // pub mod environment;
 // pub mod functions;

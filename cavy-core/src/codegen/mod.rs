@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    alloc::QubitAllocator,
     ast::BinOpKind,
     ast::{FnId, UnOpKind},
     circuit::{Instruction, LirGraph, VirtAddr},

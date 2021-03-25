@@ -151,6 +151,10 @@ impl<Idx: Index, V> Store<Idx, V> {
         self.backing_store.iter()
     }
 
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, V> {
+        self.backing_store.iter_mut()
+    }
+
     // This isn't really the conventional Rust API: `enumerate` is something that takes
     // an _iterator_. I _could_ define this on the thing that *iter* returns, but
     // I'd need two new iterable types.

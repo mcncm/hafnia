@@ -11,7 +11,7 @@ use crate::{
 use std::path::PathBuf;
 
 /// Compile a program to a quantum(-classical) circuit representation.
-pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Circuit>, ErrorBuf> {
+pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Lir>, ErrorBuf> {
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
     let ast = parser::parse(tokens, ctx)?;
@@ -20,7 +20,7 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<C
         return Ok(None);
     }
 
-    let mir = lowering::lower(ast, ctx)?;
+    let mut mir = lowering::lower(ast, ctx)?;
     if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
         println!("{}", mir.fmt_with(&ctx));
         return Ok(None);
@@ -30,6 +30,8 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<C
     if ctx.conf.debug && ctx.last_phase() == &Phase::Analysis {
         return Ok(None);
     }
+
+    crate::opt::optimize(&mut mir, ctx);
 
     let circ = crate::codegen::codegen(&mir, ctx);
     Ok(Some(circ))
