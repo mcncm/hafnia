@@ -4,10 +4,10 @@ use std::panic;
 use std::path::PathBuf;
 use std::process;
 
-use cavy_core::arch;
 use cavy_core::context::{Context, CtxDisplay};
 use cavy_core::session::{Config, Phase, PhaseConfig};
 use cavy_core::target;
+use cavy_core::{arch, session::OptConfig};
 use cavy_core::{compile, sys};
 
 // use cavy_cli::repl::Repl;
@@ -16,8 +16,8 @@ use clap::{load_yaml, App, ArgMatches};
 use fs::File;
 
 /// Get the optimization level
-fn get_opt(argmatches: &ArgMatches) -> u8 {
-    let opt = match argmatches.value_of("opt") {
+fn get_opt(argmatches: &ArgMatches) -> OptConfig {
+    let level = match argmatches.value_of("opt") {
         Some("0") => 0,
         Some("1") => 1,
         Some("2") => 2,
@@ -25,13 +25,17 @@ fn get_opt(argmatches: &ArgMatches) -> u8 {
         Some(_) => unreachable!(),
         None => 0,
     };
-    if opt > 0 {
+
+    let no_comptime = argmatches.is_present("no_comptime");
+
+    if level > 0 {
         eprintln!(
             "Warning: running with optimization level O{}. This option is currently disabled.",
-            opt
+            level
         );
     }
-    opt
+
+    OptConfig { level, no_comptime }
 }
 
 /// Collect information about which compiler phases to execute
@@ -42,6 +46,7 @@ fn get_phase(argmatches: &ArgMatches) -> PhaseConfig {
         Some("parse") => Phase::Parse,
         Some("typecheck") => Phase::Typecheck,
         Some("analysis") => Phase::Analysis,
+        Some("optimization") => Phase::Optimization,
         Some("evaluate") => Phase::Evaluate,
         Some(_) => unreachable!(),
         None => Phase::Evaluate,

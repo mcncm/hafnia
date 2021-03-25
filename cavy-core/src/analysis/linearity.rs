@@ -74,7 +74,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
-        let (place, rhs) = match &stmt.kind {
+        let (_place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (*place, rhs),
             _ => return,
         };

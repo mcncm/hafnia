@@ -32,6 +32,9 @@ args:
         - "2"
         - "3"
       required: false
+  - no_comptime:
+      long: no-comptime
+      about: Compile without constant propagation
   - debug:
       short: d
       long: debug
@@ -46,6 +49,7 @@ args:
         - "parse"
         - "typecheck"
         - "analysis"
+        - "optimization"
         - "evaluate"
   - typecheck:
       long: typecheck

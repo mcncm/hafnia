@@ -76,7 +76,7 @@ impl Analysis<'_, '_> for SubCondAnalysis {
 
     /// If we encounter a delinearization operator, add that.
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, data: &BlockData) {
-        let (place, rhs) = match &stmt.kind {
+        let (_place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (*place, rhs),
             _ => return,
         };

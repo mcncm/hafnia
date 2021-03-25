@@ -11,10 +11,12 @@ use std::path::PathBuf;
 pub enum Phase {
     Tokenize,
     Parse,
-    /// Shorthand for all semantic-analysis passes
+    /// After typechecking and lowering
     Typecheck,
-    ///
+    /// After running static analysis checks
     Analysis,
+    /// After applying MIR optimizations
+    Optimization,
     /// The tree-walk interpreter: this will be replaced with a `codegen` phase
     /// or something to that effect.
     Evaluate,
@@ -36,6 +38,12 @@ pub struct PhaseConfig {
     pub last_phase: Phase,
 }
 
+#[derive(Debug, PartialEq, Eq, Default)]
+pub struct OptConfig {
+    pub level: u8,
+    pub no_comptime: bool,
+}
+
 /// Configuration data for the operation of the compiler
 #[derive(Debug, Default)]
 pub struct Config {
@@ -46,8 +54,8 @@ pub struct Config {
     pub arch: Arch,
     /// Compile target data
     pub target: Box<dyn Target>,
-    /// Optimization level.
-    pub opt: u8,
+    /// Optimization settings.
+    pub opt: OptConfig,
     /// Which compilation phases to run
     pub phase_config: PhaseConfig,
 }

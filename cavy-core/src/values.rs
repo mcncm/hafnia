@@ -22,6 +22,9 @@ pub enum Value {
     Tuple(Vec<Value>),
 
     Array(Vec<Value>),
+
+    // Provisional, experimental type
+    Ord,
 }
 
 impl Value {
@@ -104,7 +107,8 @@ impl fmt::Display for Value {
                     .join(", ");
                 write!(f, "({})", repr)
             }
-            _ =>           write!(f, "<value>"),
+
+            Ord => f.write_str("ord"),
         }
     }
 }

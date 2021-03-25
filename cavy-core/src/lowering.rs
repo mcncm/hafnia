@@ -8,6 +8,7 @@ use crate::{
     store::Index,
     store::Store,
     types::{TyId, Type},
+    values::Value,
 };
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -445,7 +446,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 place,
                 Rvalue {
                     span: Span::default(), // ibid
-                    data: RvalueKind::Use(Operand::Const(Const::Unit)),
+                    data: RvalueKind::Use(Operand::Const(Value::Unit)),
                 },
             ),
         };
@@ -469,27 +470,29 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let constant = match &lit.data {
             LiteralKind::True => {
                 self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
-                Const::True
+                Value::Bool(true)
             }
             LiteralKind::False => {
                 self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
-                Const::False
+                Value::Bool(false)
             }
             LiteralKind::Nat(n, sz) => {
-                let lit_ty = match sz {
+                // FIXME These downcasts are definitely not correct! Overflowing
+                // literals should be an error, or at least a lint.
+                let (lit_ty, val) = match sz {
                     Some(Uint::U2) => todo!(),
-                    Some(Uint::U4) => self.ctx.common.u4,
-                    Some(Uint::U8) => self.ctx.common.u8,
-                    Some(Uint::U16) => self.ctx.common.u16,
-                    Some(Uint::U32) => self.ctx.common.u32,
-                    None => self.ctx.common.u32,
+                    Some(Uint::U4) => todo!(),
+                    Some(Uint::U8) => (self.ctx.common.u8, Value::U8(*n as u8)),
+                    Some(Uint::U16) => (self.ctx.common.u16, Value::U16(*n as u16)),
+                    Some(Uint::U32) => (self.ctx.common.u32, Value::U32(*n as u32)),
+                    None => (self.ctx.common.u32, Value::U32(*n as u32)),
                 };
                 self.expect_type(&[ty], lit_ty, lit.span)?;
-                Const::Nat(*n)
+                val
             }
             LiteralKind::Ord => {
                 self.expect_type(&[ty], self.ctx.common.ord, lit.span)?;
-                Const::Ord
+                Value::Ord
             }
         };
         let rhs = Rvalue {
@@ -621,11 +624,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let arg_locals: Vec<_> = func_sig
             .params
             .iter()
-            .map(|(_symb, ty)| self.gr.auto_local(*ty))
+            .map(|(_symb, ty)| {
+                let local = self.gr.auto_local(*ty);
+                // Call by value!
+                self.operand_of(local)
+            })
             .collect();
 
-        for (arg, ty) in args.into_iter().zip(arg_locals.iter()) {
-            self.lower_into(*ty, arg)?;
+        for (arg, operand) in args.into_iter().zip(arg_locals.iter()) {
+            if let Operand::Copy(loc) | Operand::Move(loc) = operand {
+                self.lower_into(*loc, arg)?;
+            }
         }
 
         let tail_block = self.new_block();

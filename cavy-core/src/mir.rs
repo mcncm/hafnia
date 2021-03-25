@@ -8,6 +8,7 @@ use crate::{
     context::CtxDisplay,
     source::Span,
     store::Store,
+    values::Value,
 };
 // use crate::functions::{Func, UserFunc};
 use crate::store_type;
@@ -190,7 +191,7 @@ pub enum BlockKind {
         callee: FnId,
         /// The span of the function call
         span: Span,
-        args: Vec<LocalId>,
+        args: Vec<Operand>,
         /// The block to which the function returns
         blk: BlockId,
     },
@@ -251,7 +252,7 @@ pub struct Rvalue {
 
 #[derive(Debug)]
 pub enum Operand {
-    Const(Const),
+    Const(Value),
     Copy(LocalId),
     Move(LocalId),
 }
@@ -269,19 +270,6 @@ pub enum RvalueKind {
 pub type BinOp = ast::BinOpKind;
 
 pub type UnOp = ast::UnOpKind;
-
-// This type is currently a *duplicate* of ast::LiteralKind.
-#[derive(Debug)]
-pub enum Const {
-    False,
-    True,
-    Nat(num::NativeNum),
-    /// The unique value of the unit type. This *will* be deprecated, since the
-    /// unit type ought to be *literally* an empty tuple.
-    Unit,
-    /// The unique value of the provisional experimental type.
-    Ord,
-}
 
 // ====== Display and formatting ======
 
@@ -406,17 +394,5 @@ impl fmt::Display for RvalueKind {
 impl fmt::Display for Rvalue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.data)
-    }
-}
-
-impl fmt::Display for Const {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::False => f.write_str("false"),
-            Self::True => f.write_str("true"),
-            Self::Unit => f.write_str("()"),
-            Self::Ord => f.write_str("ord"),
-            Self::Nat(val) => write!(f, "{}", val),
-        }
     }
 }

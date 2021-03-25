@@ -148,7 +148,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
 
         let ty = self.gr.locals[place].ty;
         match &rhs.data {
-            BinOp(op, left, right) => todo!(),
+            BinOp(_op, _left, _right) => todo!(),
             UnOp(op, right) => {
                 match op {
                     UnOpKind::Minus => todo!(),
@@ -189,7 +189,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    fn translate_switch(&mut self, cond: &LocalId, blks: &[BlockId]) {
+    fn translate_switch(&mut self, _cond: &LocalId, blks: &[BlockId]) {
         // FIXME This is incorrect, since of course no controls are applied. I
         // think, as we flesh this out, we should get the conditions on each
         // block from the analysis phase.
@@ -198,10 +198,10 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    fn translate_call(&mut self, callee: FnId, args: &Vec<LocalId>, blk: BlockId) {
+    fn translate_call(&mut self, callee: FnId, args: &Vec<Operand>, blk: BlockId) {
         let args = args
             .iter()
-            .map(|local| self.lookup_addr(local))
+            .map(|arg| self.translate_arg(arg))
             .flatten()
             .collect();
         self.lir
@@ -217,7 +217,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     /// reassignment does the 'pre-optimization' of address reassignment, then
     /// we would need to keep track of that information. We might be able to
     /// avoid such a need by using SSA.
-    fn lookup_addr(&self, local: &LocalId) -> Vec<VirtAddr> {
+    fn translate_arg(&self, arg: &Operand) -> Vec<VirtAddr> {
         todo!();
     }
 }

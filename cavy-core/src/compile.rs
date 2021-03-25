@@ -32,6 +32,10 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<L
     }
 
     crate::opt::optimize(&mut mir, ctx);
+    if ctx.conf.debug && ctx.last_phase() == &Phase::Optimization {
+        println!("{}", mir.fmt_with(&ctx));
+        return Ok(None);
+    }
 
     let circ = crate::codegen::codegen(&mir, ctx);
     Ok(Some(circ))
