@@ -12,10 +12,11 @@ use crate::{
 /// space and time.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct MoveState {
-    /// This map points to the location of the first move of each local
+    /// This map points to the location of the first move of each local that is
+    /// not currently live.
     pub moved: HashMap<LocalId, Span>,
     /// This map points to the second move, if any, of each local
-    pub double_moved: HashMap<LocalId, Span>,
+    pub double_moved: HashMap<LocalId, (Span, Span)>,
 }
 
 impl Lattice for MoveState {
@@ -46,18 +47,26 @@ impl Lattice for MoveState {
 }
 
 impl MoveState {
-    /// Update the move state with a new operand use
-    fn update(&mut self, arg: &Operand, span: Span) {
+    /// Update the move state with a new operand use, adding anything linear to
+    /// the moved list.
+    fn move_from(&mut self, arg: &Operand, span: Span) {
         if let Operand::Move(local) = arg {
             match self.moved.entry(*local) {
-                Entry::Occupied(_) => {
-                    self.double_moved.insert(*local, span);
+                Entry::Occupied(entry) => {
+                    let fst_move = *entry.get();
+                    self.double_moved.insert(*local, (fst_move, span));
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(span);
                 }
             }
         }
+    }
+
+    /// Update a variable into which a value has been moved by taking it off the
+    /// moved list.
+    fn move_into(&mut self, place: &LocalId) {
+        self.moved.remove(place);
     }
 }
 
@@ -74,20 +83,21 @@ impl Analysis<'_, '_> for LinearityAnalysis {
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
-        let (_place, rhs) = match &stmt.kind {
+        let (place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (*place, rhs),
             _ => return,
         };
 
         match &rhs.data {
             RvalueKind::BinOp(_, left, right) => {
-                // There should really be more fine-grained span data here
-                state.update(left, rhs.span);
-                state.update(right, rhs.span);
+                // FIXME There should really be more fine-grained span data here
+                state.move_from(left, rhs.span);
+                state.move_from(right, rhs.span);
             }
-            RvalueKind::UnOp(_, right) => state.update(right, rhs.span),
-            RvalueKind::Use(arg) => state.update(arg, rhs.span),
+            RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
+            RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
         }
+        state.move_into(&place);
     }
 
     fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {

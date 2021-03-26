@@ -86,6 +86,14 @@ test_compiles! {
         }
     }
 
+    double_move_self {
+        fn main() {
+            let y = ?false;
+            y = y;
+            y = y;
+        }
+    }
+
     chained_move {
         fn main() {
             let x = ?false;
@@ -101,6 +109,7 @@ test_compiles! {
             let y = x;
         }
     }
+
 
     recursion fail {
         fn main() { main() }

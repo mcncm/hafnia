@@ -49,11 +49,10 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
         let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
-        for (local, &snd_move) in linearity_res.exit_state.double_moved.iter() {
-            let fst_move = linearity_res.exit_state.moved[local];
+        for (_local, &(fst, snd)) in linearity_res.exit_state.double_moved.iter() {
             errs.push(errors::DoubleMove {
-                span: fst_move,
-                snd_move,
+                span: fst,
+                snd_move: snd,
             });
         }
 
