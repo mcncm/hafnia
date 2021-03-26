@@ -549,8 +549,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
         let kind = ExprKind::If {
             cond,
-            dir: then_branch,
-            ind: else_branch,
+            tru: then_branch,
+            fls: else_branch,
         };
 
         Ok(self.node(kind, span))

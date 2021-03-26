@@ -349,7 +349,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 todo!()
             }
             ExprKind::Block(block) => self.lower_into_block(place, block),
-            ExprKind::If { cond, dir, ind } => self.lower_into_if(place, cond, dir, ind),
+            ExprKind::If { cond, tru, fls } => self.lower_into_if(place, cond, tru, fls),
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
@@ -551,14 +551,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         &mut self,
         place: LocalId,
         cond: &Expr,
-        dir: &Block,
-        ind: &Option<Box<Block>>,
+        tru: &Block,
+        fls: &Option<Box<Block>>,
     ) -> Maybe<()> {
         // TODO: `lower_into`, and all the `lower_into_` functions, should
         // return a `Result<LocalId>`, where on success they echo back the
         // location they were lowered into. It would make this all a lot neater.
-        // Could expect to get Ok(cond), then unwrap in the same match as `dir`
-        // and `ind`.
+        // Could expect to get Ok(cond), then unwrap in the same match as `tru`
+        // and `fls`.
         //
         // TODO: Again, I'm cheating by trying to fit this into a
         // `bool`, when it could also be a `?bool`.
@@ -578,8 +578,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             blk_data.sup_lin_branch = Some(self.cursor);
         }
 
-        // Indirect branch
-        let ind = match ind {
+        // Falsy branch
+        let fls = match fls {
             Some(ind) => self.with_goto(tail_block, |self_| {
                 self_.gr.blocks[self_.cursor].data = blk_data.clone();
                 self_.lower_into_block(place, ind)?;
@@ -588,22 +588,22 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             None => Ok(tail_block),
         };
 
-        // Direct branch
-        let dir = self.with_goto(tail_block, |self_| {
+        // Truthy branch
+        let tru = self.with_goto(tail_block, |self_| {
             self_.gr.blocks[self_.cursor].data = blk_data;
-            self_.lower_into_block(place, dir)?;
+            self_.lower_into_block(place, tru)?;
             Ok(self_.cursor)
         });
 
         // Propagate errors from branches
-        let (dir, ind, _) = match (dir, ind, cond) {
-            (Ok(dir), Ok(ind), Ok(cond)) => Ok((dir, ind, cond)),
+        let (tru, fls, _) = match (tru, fls, cond) {
+            (Ok(tru), Ok(fls), Ok(cond)) => Ok((tru, fls, cond)),
             (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(err),
         }?;
 
         let switch = BlockKind::Switch {
             cond: cond_place,
-            blks: vec![dir, ind],
+            blks: vec![fls, tru],
         };
         self.set_terminator(switch);
         self.cursor = tail_block;
@@ -729,7 +729,11 @@ mod typing {
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
-                ExprKind::If { cond, dir, ind } => self.type_if(cond, dir, ind)?,
+                ExprKind::If {
+                    cond,
+                    tru: dir,
+                    fls: ind,
+                } => self.type_if(cond, dir, ind)?,
                 ExprKind::For { bind, iter, body } => self.ctx.common.unit,
                 // FIXME note that here we are resolving this function a *second*
                 // time (the other is in the lowering method). This suggests

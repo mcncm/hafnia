@@ -390,8 +390,10 @@ pub enum ExprKind {
     Block(Box<Block>),
     If {
         cond: Box<Expr>,
-        dir: Box<Block>,
-        ind: Option<Box<Block>>,
+        /// Truthy branch
+        tru: Box<Block>,
+        /// Falsy branch
+        fls: Option<Box<Block>>,
     },
     For {
         bind: Box<LValue>,
