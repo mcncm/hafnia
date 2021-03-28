@@ -26,16 +26,9 @@ fn get_opt(argmatches: &ArgMatches) -> OptConfig {
         None => 0,
     };
 
-    let no_comptime = argmatches.is_present("no_comptime");
+    let comptime = !argmatches.is_present("no_comptime");
 
-    if level > 0 {
-        eprintln!(
-            "Warning: running with optimization level O{}. This option is currently disabled.",
-            level
-        );
-    }
-
-    OptConfig { level, no_comptime }
+    OptConfig { level, comptime }
 }
 
 /// Collect information about which compiler phases to execute

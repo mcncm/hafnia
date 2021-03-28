@@ -14,11 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::{
-    context::Context,
-    mir::{UnOp, *},
-    values::Value,
-};
+use crate::{context::Context, mir::*, values::Value};
 
 /// Main entry point for compile-time evaluation. This takes the form of a Mir
 /// optimization, which is currently a function taking a mutable reference to
@@ -26,7 +22,7 @@ use crate::{
 /// framework, similar to the dataflow analyses.
 ///
 /// For now, even *this* optimization is intraprocedural. That *must* change.
-pub fn simplify(mir: &mut Mir, _ctx: &Context) {
+pub fn propagate_consts(mir: &mut Mir, _ctx: &Context) {
     for gr in mir.graphs.iter_mut() {
         simpl_graph(gr);
     }
@@ -42,6 +38,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
     for stmt in blk.stmts.iter_mut() {
         simpl_stmt(stmt, interp);
     }
+
     match &mut blk.kind {
         BlockKind::Goto(_) => {}
         BlockKind::Switch { cond, ref mut blks } => match interp.value_of(cond) {
@@ -107,19 +104,42 @@ impl Interpreter {
         self.env.get(&local)
     }
 
+    fn operand_value(&self, operand: &Operand) -> Option<Value> {
+        match operand {
+            Operand::Const(v) => Some(v.clone()),
+            Operand::Copy(loc) | Operand::Move(loc) => self.env.get(loc).cloned(),
+        }
+    }
+
     /// If possible, evaluate the right-hand side, and store the result in the
     /// left-hand-side. It's possible to evaluate the rhs iff everything
     /// appearing in it is const.
     fn exec(&mut self, place: LocalId, rhs: &mut Rvalue) -> Evaluated {
         use Operand::*;
         match &mut rhs.data {
-            RvalueKind::BinOp(_, _, _) => Evaluated::No,
+            RvalueKind::BinOp(op, u, v) => {
+                if let (Some(u), Some(v)) = (self.operand_value(u), self.operand_value(v)) {
+                    match op {
+                        BinOp::Plus => self.env.insert(place, self.eval_plus(u, v)),
+                        BinOp::Times => self.env.insert(place, self.eval_times(u, v)),
+                        BinOp::Equal => self.env.insert(place, self.eval_equal(u, v)),
+                        BinOp::Nequal => {
+                            self.env.insert(place, self.eval_not(self.eval_equal(u, v)))
+                        }
+                        _ => todo!(),
+                    };
+                    return Evaluated::Yes;
+                }
+                Evaluated::No
+            }
+
             RvalueKind::UnOp(UnOp::Linear, Copy(v)) | RvalueKind::UnOp(UnOp::Linear, Move(v)) => {
                 if let Some(c) = self.env.get(v) {
                     rhs.data = RvalueKind::UnOp(UnOp::Linear, Const(c.clone()));
                 }
                 Evaluated::No
             }
+
             RvalueKind::UnOp(UnOp::Not, Copy(v)) | RvalueKind::UnOp(UnOp::Not, Move(v)) => {
                 if let Some(c) = self.env.get(v).cloned() {
                     self.env.insert(place, self.eval_not(c));
@@ -127,7 +147,9 @@ impl Interpreter {
                 }
                 Evaluated::No
             }
+
             RvalueKind::UnOp(_, _) => todo!(),
+
             RvalueKind::Use(val) => match val {
                 Move(v) | Copy(v) => {
                     if let Some(c) = self.env.get(v).cloned() {
@@ -152,6 +174,34 @@ impl Interpreter {
             Value::U32(n) => Value::U32(!n),
             // Forbidden by type checker
             _ => unreachable!(),
+        }
+    }
+
+    fn eval_plus(&self, n: Value, m: Value) -> Value {
+        match (n, m) {
+            (Value::U8(n), Value::U8(m)) => Value::U8(n + m),
+            (Value::U16(n), Value::U16(m)) => Value::U16(n + m),
+            (Value::U32(n), Value::U32(m)) => Value::U32(n + m),
+            // Forbidden by type checker
+            _ => unreachable!(),
+        }
+    }
+
+    fn eval_times(&self, n: Value, m: Value) -> Value {
+        match (n, m) {
+            (Value::U8(n), Value::U8(m)) => Value::U8(n * m),
+            (Value::U16(n), Value::U16(m)) => Value::U16(n * m),
+            (Value::U32(n), Value::U32(m)) => Value::U32(n * m),
+            // Forbidden by type checker
+            _ => unreachable!(),
+        }
+    }
+
+    fn eval_equal(&self, u: Value, v: Value) -> Value {
+        if u == v {
+            Value::Bool(true)
+        } else {
+            Value::Bool(false)
         }
     }
 }

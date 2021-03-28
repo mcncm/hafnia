@@ -15,25 +15,31 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<L
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
     let ast = parser::parse(tokens, ctx)?;
-    if ctx.conf.debug && ctx.last_phase() == &Phase::Parse {
-        println!("{:#?}", ast);
+    if ctx.last_phase() == &Phase::Parse {
+        if ctx.conf.debug {
+            println!("{:#?}", ast);
+        }
         return Ok(None);
     }
 
     let mut mir = lowering::lower(ast, ctx)?;
-    if ctx.conf.debug && ctx.last_phase() == &Phase::Typecheck {
-        println!("{}", mir.fmt_with(&ctx));
+    if ctx.last_phase() == &Phase::Typecheck {
+        if ctx.conf.debug {
+            println!("{}", mir.fmt_with(&ctx));
+        }
         return Ok(None);
     }
 
     crate::analysis::check(&mir, ctx)?;
-    if ctx.conf.debug && ctx.last_phase() == &Phase::Analysis {
+    if ctx.last_phase() == &Phase::Analysis {
         return Ok(None);
     }
 
     crate::opt::optimize(&mut mir, ctx);
-    if ctx.conf.debug && ctx.last_phase() == &Phase::Optimization {
-        println!("{}", mir.fmt_with(&ctx));
+    if ctx.last_phase() == &Phase::Optimization {
+        if ctx.conf.debug {
+            println!("{}", mir.fmt_with(&ctx));
+        }
         return Ok(None);
     }
 

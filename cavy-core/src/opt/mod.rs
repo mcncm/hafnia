@@ -15,7 +15,7 @@ type GuardFn = dyn Fn(&Config) -> bool;
 #[rustfmt::skip]
 const OPTS: [(&OptFn, &GuardFn); 1] = [
     // Compile-time evaluation: should be applied unconditionally.
-    (&comptime::simplify, &|_| true)
+    (&comptime::propagate_consts, &|conf| conf.opt.comptime)
 ];
 
 /// Decide whether to apply an optimization based on the attached guard function

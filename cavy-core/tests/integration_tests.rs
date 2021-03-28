@@ -7,16 +7,18 @@ use cavy_core::{compile, context, session};
 /// This simple macro builds compilation tests. It's not very fine-grained, so
 /// you can't e.g. test the diagnostic.
 macro_rules! test_compiles {
-    ($($name:ident $($x:ident)? { $($src:tt)* })*) => {
+    ($($name:ident $($x:ident)? $([$phase:ident])? { $($src:tt)* })*) => {
         $(
             $(is_fail!{$x} #[should_panic])?
             #[test]
+            #[allow(unused_mut)]
             pub fn $name() {
                 // This is identical to the current stand-in `cavy` macro in
                 // cavy/lib.rs. We can't necessarily use that macro, though,
                 // because I want access to the config. Maybe it should *return*
                 // the config? Not clear. Good enough for now.
-                let conf = session::Config::default();
+                let mut conf = session::Config::default();
+                $(conf.phase_config.last_phase = session::Phase::$phase;)?
                 let mut ctx = context::Context::new(&conf);
                 let id = ctx.srcs.insert_input(&stringify!($($src)*));
                 let circ = compile::compile_circuit(id, &mut ctx);
@@ -78,7 +80,7 @@ test_compiles! {
         }
     }
 
-    double_move fail {
+    double_move fail [Analysis] {
         fn main() {
             let x = ?false;
             let y = x;
@@ -86,7 +88,7 @@ test_compiles! {
         }
     }
 
-    double_move_self {
+    double_move_self [Analysis] {
         fn main() {
             let y = ?false;
             y = y;
@@ -94,7 +96,7 @@ test_compiles! {
         }
     }
 
-    chained_move {
+    chained_move [Analysis] {
         fn main() {
             let x = ?false;
             let y = x;
@@ -102,7 +104,7 @@ test_compiles! {
         }
     }
 
-    move_after_shadow {
+    move_after_shadow [Analysis] {
         fn main() {
             let x = false;
             let x = ?x;
@@ -111,17 +113,17 @@ test_compiles! {
     }
 
 
-    recursion fail {
+    recursion fail [Analysis] {
         fn main() { main() }
     }
 
-    mutual_recursion fail {
+    mutual_recursion fail [Analysis] {
         fn main() {}
         fn f() { g() }
         fn g() { f() }
     }
 
-    classical_feedback fail {
+    classical_feedback fail [Analysis] {
         fn main() {
             let q = ?true;
             let c = !q;

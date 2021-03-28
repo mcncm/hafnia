@@ -40,8 +40,10 @@ pub struct PhaseConfig {
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub struct OptConfig {
+    /// Integer optimization level.
     pub level: u8,
-    pub no_comptime: bool,
+    /// Perform const propagation, or compile-time evaluation of classical operations?
+    pub comptime: bool,
 }
 
 /// Configuration data for the operation of the compiler

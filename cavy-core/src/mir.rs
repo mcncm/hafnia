@@ -235,6 +235,17 @@ pub struct Stmt {
     pub kind: StmtKind,
 }
 
+impl Stmt {
+    pub fn is_nop(&self) -> bool {
+        // Or, could just derive `Eq`
+        if let StmtKind::Nop = self.kind {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum StmtKind {
     /// Assign an `Rvalue` to a local. In the future, this will support more

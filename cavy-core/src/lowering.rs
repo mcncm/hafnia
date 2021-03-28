@@ -339,9 +339,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Assn { lhs, rhs } => self.lower_into_assn(place, lhs, rhs),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
-            ExprKind::Tuple(_) => {
-                todo!()
-            }
+            ExprKind::Tuple(elems) => self.lower_into_tuple(place, elems),
             ExprKind::IntArr { item, reps } => {
                 todo!()
             }
@@ -521,6 +519,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         };
         self.assn_stmt(place, rhs);
         Ok(())
+    }
+
+    fn lower_into_tuple(&mut self, _place: LocalId, _elems: &[Expr]) -> Maybe<()> {
+        todo!();
     }
 
     /// Lower an AST block and store its value in the given location.
@@ -725,7 +727,7 @@ mod typing {
                 ExprKind::Assn { .. } => self.ctx.common.unit,
                 ExprKind::Literal(lit) => self.type_literal(lit)?,
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
-                ExprKind::Tuple(_) => todo!(),
+                ExprKind::Tuple(elems) => self.type_tuple(elems)?,
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
@@ -894,6 +896,15 @@ mod typing {
             };
             let local = &self.gr.locals[*local];
             Ok(local.ty)
+        }
+
+        fn type_tuple(&mut self, elems: &[Expr]) -> Maybe<TyId> {
+            let tys = elems
+                .iter()
+                .map(|elem| self.type_expr(elem))
+                .collect::<Maybe<Vec<TyId>>>()?;
+            let ty = self.ctx.types.intern(Type::Tuple(tys));
+            Ok(ty)
         }
     }
 
