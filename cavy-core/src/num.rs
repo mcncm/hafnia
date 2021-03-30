@@ -2,7 +2,6 @@
 //! types defined here are used by both `annot.rs` and `types.rs`.
 
 use crate::token::Lexeme;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The raw number representation. This should be equal to the largest numeric
@@ -13,7 +12,7 @@ pub type NativeNum = u32;
 /// integer sizes supported by Cavy, and their concrete values are their sizes
 /// in bits.
 #[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Uint {
     U2 = 2,
     U4 = 4,

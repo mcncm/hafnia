@@ -1,5 +1,4 @@
 use crate::{ast::Expr, token::Token};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The enum of all the classical Cavy values, comprising the unit type
@@ -7,7 +6,7 @@ use std::fmt;
 /// types. The quantized integer types are all little-endian by default. In
 /// future versions of the compiler, it may be possible to specify the
 /// endianness of the backend.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
     Unit,

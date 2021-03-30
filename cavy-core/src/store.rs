@@ -7,7 +7,6 @@
 //! retrieve them. The second is `Interner<V, Idx>`, which is a wrapper around a
 //! `HashMap<V, Idx>`.
 
-use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{borrow::Borrow, hash::Hash, rc::Rc};
 use std::{
@@ -61,18 +60,7 @@ impl<I: Index> Counter<I> {
 #[macro_export]
 macro_rules! index_type {
     ($index:ident) => {
-        #[derive(
-            Debug,
-            Clone,
-            Copy,
-            Hash,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            serde::Serialize,
-            serde::Deserialize,
-        )]
+        #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
         pub struct $index(u32);
 
         /// Seems to be required by some other part of my code
