@@ -22,7 +22,7 @@ pub enum Lexeme {
     DotDot, EqualEqual, TildeEqual, MinusRAngle,
 
     // single-character token types
-    Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde, Comma, Semicolon,
+    Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde, Comma, Semicolon,
     Colon,
 
     // delimiters
@@ -49,6 +49,7 @@ impl fmt::Display for Lexeme {
                 }
                 return f.write_str("");
             }
+            Dot => ".",
             DotDot => "..",
             EqualEqual => "==",
             TildeEqual => "~=",

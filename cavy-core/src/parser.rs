@@ -621,7 +621,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     pub fn expression(&mut self) -> Maybe<Expr> {
-        match self.peek_lexeme() {
+        // The head or root of the expression
+        let mut expr = match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
             Some(Lexeme::LBrace) => self.block_expr(),
@@ -630,7 +631,16 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 self.precedence_climb(lhs, 0)
             }
             None => Err(self.errors.push(UnexpectedEof { span: self.loc })),
+        }?;
+        // Field accesses against this expression
+        while let Some(Dot) = self.peek_lexeme() {
+            self.tokens.next();
+            let field = self.field()?;
+            let span = expr.span.join(&field.span).unwrap();
+            let kind = ExprKind::Field(Box::new(expr), field);
+            expr = self.node(kind, span);
         }
+        Ok(expr)
     }
 
     fn unary(&mut self) -> Maybe<Expr> {
@@ -751,6 +761,27 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(Annot { span, data: kind })
     }
 
+    /// A field access on an expression, like `x.a`
+    fn field(&mut self) -> Maybe<Field> {
+        let token = self.token()?;
+        let span = token.span;
+        let field = match token.lexeme {
+            Ident(ident) => {
+                let ident = self.ctx.symbols.intern(ident);
+                Field {
+                    span,
+                    data: FieldKind::Ident(ident),
+                }
+            }
+            Nat(n, None) => Field {
+                span,
+                data: FieldKind::Num(n),
+            },
+            actual => return Err(self.errors.push(ExpectedFieldToken { span, actual })),
+        };
+        Ok(field)
+    }
+
     /// Call a function or index into an array.
     #[rustfmt::skip]
     fn call(&mut self) -> Maybe<Expr> {
@@ -813,8 +844,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             Ident(_) => {
                 let ident = ast::Ident::from_token(token, self.ctx).unwrap();
-                let ident_span = ident.span;
-                Ok(self.node(ExprKind::Ident(ident), ident_span))
+                let span = ident.span;
+                Ok(self.node(ExprKind::Ident(ident), span))
             }
             LParen => self.finish_group(token.span),
 
@@ -965,6 +996,14 @@ mod errors {
         #[span]
         pub span: Span,
         /// The lexeme actually found
+        pub actual: Lexeme,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "expected identifier or numeral, found `{actual}`"]
+    pub struct ExpectedFieldToken {
+        #[span]
+        pub span: Span,
         pub actual: Lexeme,
     }
 

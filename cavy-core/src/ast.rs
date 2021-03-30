@@ -205,6 +205,15 @@ impl FromToken for Ident {
     }
 }
 
+/// The kinds of field accesses, like `x.a` and `b.1`.
+#[derive(Debug, Clone)]
+pub enum FieldKind {
+    Ident(SymbolId),
+    Num(u32),
+}
+
+pub type Field = Spanned<FieldKind>;
+
 /// a pattern, such as appears on the receiving side of a `let` statement, or in
 /// a (yet unimplemented) match arm.
 pub type Pattern = Spanned<PatternKind>;
@@ -397,14 +406,16 @@ pub enum ExprKind {
     Literal(Literal),
     /// Identifiers
     Ident(Ident),
-    /// Sequences of the form (1, 2, 3)
+    /// Sequences of the form `(1, 2, 3)`
     Tuple(Vec<Expr>),
-    /// Intensional arrays of the form [1; 4]
+    /// Intensional arrays of the form `[1; 4]`
     IntArr {
         item: Box<Expr>,
         reps: Box<Expr>,
     },
-    /// Extensional arrays of the form [1, 2, 3]
+    /// A field access, like `x.a` or `y.0`
+    Field(Box<Expr>, Field),
+    /// Extensional arrays of the form `[1, 2, 3]`
     ExtArr(Vec<Expr>),
     Block(Box<Block>),
     If {
@@ -442,6 +453,7 @@ impl ExprKind {
             Assn { .. } => true,
             Literal(_) => true,
             Ident(_) => true,
+            Field { .. } => true,
             Tuple { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,

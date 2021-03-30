@@ -52,6 +52,7 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         '~' => Lexeme::Tilde,
         '=' => Lexeme::Equal,
         ',' => Lexeme::Comma,
+        '.' => Lexeme::Dot,
         '!' => Lexeme::Bang,
         '?' => Lexeme::Question,
         ';' => Lexeme::Semicolon,
@@ -508,8 +509,8 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn single_character_tokens() {
-        lex_test!("+ * ~ , ! ? ; [ ] ( ) { }";
-                  Plus, Star, Tilde, Comma, Bang, Question, Semicolon,
+        lex_test!("+ * ~ , . ! ? ; [ ] ( ) { }";
+                  Plus, Star, Tilde, Comma, Dot, Bang, Question, Semicolon,
                   LBracket, RBracket, LParen, RParen, LBrace, RBrace);
     }
 
