@@ -205,6 +205,25 @@ impl FromToken for Ident {
     }
 }
 
+/// a pattern, such as appears on the receiving side of a `let` statement, or in
+/// a (yet unimplemented) match arm.
+pub type Pattern = Spanned<PatternKind>;
+
+/// Currently, the only kind of pattern is a bare local
+#[derive(Debug, Clone)]
+pub enum PatternKind {
+    Ident(SymbolId),
+}
+
+impl From<Ident> for Pattern {
+    fn from(ident: Ident) -> Self {
+        Self {
+            data: PatternKind::Ident(ident.data),
+            span: ident.span,
+        }
+    }
+}
+
 /// Binary operator node
 pub type BinOp = Spanned<BinOpKind>;
 
@@ -401,7 +420,7 @@ pub enum ExprKind {
         body: Box<Block>,
     },
     Call {
-        // For the time being, functions are not values, so the callee is not an
+        // FIXME For the time being, functions are not values, so the callee is not an
         // expression, but just a name. Arguments should also be expressions,
         // but they are currently also just identifiers.
         callee: Ident,
@@ -469,16 +488,15 @@ pub enum StmtKind {
     Expr(Box<Expr>),
     /// An expression with a semicolon.
     ExprSemi(Box<Expr>),
-    /// A variable declaration. The nomenclature here has been taken from
-    /// rustc’s ast.rs.
-    Local {
+    /// A variable declaration.
+    Decl {
         /// lvalues might not just be names! In particular, we would like to make
         /// destructuring possible. The same is true of other contexts in which
         /// lvalues appear, as in the bound expression in a for loop.
         ///
         /// For now, though, we're going to ignore that possibility, disable
         /// destructuring, and allow only a symbol on the lhs.
-        lhs: Box<Ident>,
+        lhs: Box<Pattern>,
         ty: Option<Annot>,
         rhs: Option<Box<Expr>>,
     },

@@ -438,7 +438,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn local(&mut self) -> Maybe<Stmt> {
         let opening = self.next().unwrap().span;
         // For now, only admit symbols on the lhs.
-        let lhs = Box::new(self.consume_ident()?);
+        let lhs = Box::new(self.consume_ident()?.into());
         let ty = if self.match_lexeme(Colon) {
             Some(self.type_annotation()?)
         } else {
@@ -454,7 +454,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let semi = self.consume(Semicolon)?.span;
 
         let stmt = Stmt {
-            data: StmtKind::Local { lhs, ty, rhs },
+            data: StmtKind::Decl { lhs, ty, rhs },
             span: opening.join(&semi).unwrap(),
         };
         Ok(stmt)

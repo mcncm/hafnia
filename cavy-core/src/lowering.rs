@@ -668,28 +668,40 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 let place = self.gr.auto_place(self.ctx.common.unit);
                 self.lower_into(&place, expr)
             }
-            StmtKind::Local { lhs, ty, rhs } => {
-                // Is this annotated, or must we infer the type?
-                let ty = match (ty, rhs) {
-                    // This should work, rather than emit an error, if we ever
-                    // have proper type inferece!
-                    (None, None) => {
-                        return Err(self.errors.push(errors::InferenceFailure {
-                            span: lhs.span,
-                            name: lhs.data,
-                        }))
-                    }
-                    (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
-                    (_, Some(rhs)) => self.type_inner(rhs)?,
-                };
-                let place = self.gr.user_place(ty);
-                if let Some(rhs) = rhs {
-                    self.lower_into(&place, rhs)?;
-                }
-                self.st.insert(lhs.data, place.root);
-                Ok(())
-            }
+            StmtKind::Decl { lhs, ty, rhs } => self.lower_decl(lhs, ty, rhs),
         }
+    }
+
+    fn lower_decl(
+        &mut self,
+        lhs: &Pattern,
+        ty: &Option<Annot>,
+        rhs: &Option<Box<Expr>>,
+    ) -> Maybe<()> {
+        // FIXME Just unwrap the pattern, which for now can only be an identifier
+        let (lhs_data, lhs_span) = match lhs.data {
+            PatternKind::Ident(ident) => (ident, lhs.span),
+        };
+
+        // Is this annotated, or must we infer the type?
+        let ty = match (ty, rhs) {
+            // This should work, rather than emit an error, if we ever
+            // have proper type inferece!
+            (None, None) => {
+                return Err(self.errors.push(errors::InferenceFailure {
+                    span: lhs_span,
+                    name: lhs_data,
+                }))
+            }
+            (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
+            (_, Some(rhs)) => self.type_inner(rhs)?,
+        };
+        let place = self.gr.user_place(ty);
+        if let Some(rhs) = rhs {
+            self.lower_into(&place, rhs)?;
+        }
+        self.st.insert(lhs_data, place.root);
+        Ok(())
     }
 
     fn resolve_function(&self, func: &SymbolId) -> Option<FnId> {
