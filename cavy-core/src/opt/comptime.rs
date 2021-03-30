@@ -54,8 +54,8 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
         } => {
             // Replace args with compile-time evaluated ones
             for arg in args.iter_mut() {
-                if let Operand::Copy(loc) | Operand::Move(loc) = arg {
-                    if let Some(c) = interp.value_of(loc) {
+                if let Operand::Copy(place) | Operand::Move(place) = arg {
+                    if let Some(c) = interp.value_of(&place) {
                         *arg = Operand::Const(c.clone());
                     }
                 }
@@ -73,7 +73,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
 fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
     match &mut stmt.kind {
         StmtKind::Assn(place, ref mut rhs) => {
-            if let Evaluated::Yes = interp.exec(*place, rhs) {
+            if let Evaluated::Yes = interp.exec(place.clone(), rhs) {
                 stmt.kind = StmtKind::Nop;
             }
         }
@@ -100,21 +100,22 @@ impl Interpreter {
         }
     }
 
-    fn value_of(&self, local: &LocalId) -> Option<&Value> {
-        self.env.get(&local)
+    fn value_of(&self, place: &Place) -> Option<&Value> {
+        self.env.get(&place.root)
     }
 
     fn operand_value(&self, operand: &Operand) -> Option<Value> {
         match operand {
             Operand::Const(v) => Some(v.clone()),
-            Operand::Copy(loc) | Operand::Move(loc) => self.env.get(loc).cloned(),
+            Operand::Copy(place) | Operand::Move(place) => self.env.get(&place.root).cloned(),
         }
     }
 
     /// If possible, evaluate the right-hand side, and store the result in the
     /// left-hand-side. It's possible to evaluate the rhs iff everything
     /// appearing in it is const.
-    fn exec(&mut self, place: LocalId, rhs: &mut Rvalue) -> Evaluated {
+    fn exec(&mut self, place: Place, rhs: &mut Rvalue) -> Evaluated {
+        let place = place.root; // FIXME
         use Operand::*;
         match &mut rhs.data {
             RvalueKind::BinOp(op, u, v) => {
@@ -133,15 +134,17 @@ impl Interpreter {
                 Evaluated::No
             }
 
-            RvalueKind::UnOp(UnOp::Linear, Copy(v)) | RvalueKind::UnOp(UnOp::Linear, Move(v)) => {
-                if let Some(c) = self.env.get(v) {
+            RvalueKind::UnOp(UnOp::Linear, Copy(rplace))
+            | RvalueKind::UnOp(UnOp::Linear, Move(rplace)) => {
+                if let Some(c) = self.env.get(&rplace.root) {
                     rhs.data = RvalueKind::UnOp(UnOp::Linear, Const(c.clone()));
                 }
                 Evaluated::No
             }
 
-            RvalueKind::UnOp(UnOp::Not, Copy(v)) | RvalueKind::UnOp(UnOp::Not, Move(v)) => {
-                if let Some(c) = self.env.get(v).cloned() {
+            RvalueKind::UnOp(UnOp::Not, Copy(rplace))
+            | RvalueKind::UnOp(UnOp::Not, Move(rplace)) => {
+                if let Some(c) = self.env.get(&rplace.root).cloned() {
                     self.env.insert(place, self.eval_not(c));
                     return Evaluated::Yes;
                 }
@@ -151,8 +154,8 @@ impl Interpreter {
             RvalueKind::UnOp(_, _) => todo!(),
 
             RvalueKind::Use(val) => match val {
-                Move(v) | Copy(v) => {
-                    if let Some(c) = self.env.get(v).cloned() {
+                Move(rplace) | Copy(rplace) => {
+                    if let Some(c) = self.env.get(&rplace.root).cloned() {
                         self.env.insert(place, c.clone());
                         return Evaluated::Yes;
                     }

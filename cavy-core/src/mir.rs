@@ -85,6 +85,14 @@ impl Graph {
         }
     }
 
+    pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
+        let mut ty = self.locals[place.root].ty;
+        for elem in place.path.iter() {
+            ty = ty.slot(*elem, ctx);
+        }
+        ty
+    }
+
     /// The local corresponding to the routine's return value
     pub fn return_site(&self) -> LocalId {
         LocalId::default()
@@ -113,15 +121,11 @@ impl Graph {
     }
 
     pub fn auto_place(&mut self, ty: TyId) -> Place {
-        Place {
-            kind: PlaceKind::Local(self.auto_local(ty)),
-        }
+        self.auto_local(ty).into()
     }
 
     pub fn user_place(&mut self, ty: TyId) -> Place {
-        Place {
-            kind: PlaceKind::Local(self.user_local(ty)),
-        }
+        self.user_local(ty).into()
     }
 
     pub fn push_stmt(&mut self, block: BlockId, stmt: Stmt) {
@@ -183,7 +187,7 @@ pub enum BlockKind {
     /// NOTE: this vec will *almost always* have only two elements. Is there a
     /// lighter-weight alternative that could be used here? Smallvec might be an
     /// option.
-    Switch { cond: LocalId, blks: Vec<BlockId> },
+    Switch { cond: Place, blks: Vec<BlockId> },
     /// A block ending in a function call
     Call {
         /// The function being called. This might not be the right type, in
@@ -214,17 +218,21 @@ pub enum LocalKind {
     User,
 }
 
-#[derive(Debug)]
+/// As in rustc, a `Place` where data can be stored is a path rooted at a local
+/// variable.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
-    pub kind: PlaceKind,
+    pub root: LocalId,
+    pub path: Vec<usize>,
 }
 
-#[derive(Debug)]
-pub enum PlaceKind {
-    /// A local variable: a temporary or a user-defined variable.
-    Local(LocalId),
-    /// The memory hole
-    Null,
+impl From<LocalId> for Place {
+    fn from(root: LocalId) -> Self {
+        Self {
+            root,
+            path: Vec::new(),
+        }
+    }
 }
 
 /// For the time being, at least, lowered statements are *all* of the form `lhs
@@ -250,7 +258,7 @@ impl Stmt {
 pub enum StmtKind {
     /// Assign an `Rvalue` to a local. In the future, this will support more
     /// complex left-hand sides.
-    Assn(LocalId, Rvalue),
+    Assn(Place, Rvalue),
     /// Handy for deleting statements in O(1) time.
     Nop,
 }
@@ -264,8 +272,8 @@ pub struct Rvalue {
 #[derive(Debug)]
 pub enum Operand {
     Const(Value),
-    Copy(LocalId),
-    Move(LocalId),
+    Copy(Place),
+    Move(Place),
 }
 
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
@@ -375,10 +383,11 @@ impl fmt::Display for Stmt {
 
 impl fmt::Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            PlaceKind::Local(local) => write!(f, "{}", local),
-            PlaceKind::Null => f.write_str("_"),
+        write!(f, "{}", self.root)?;
+        for elem in self.path.iter() {
+            write!(f, ".{}", elem)?;
         }
+        f.write_str("")
     }
 }
 

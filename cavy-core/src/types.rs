@@ -28,6 +28,10 @@ impl TyId {
         let ty = &ctx.types[*self];
         ty.size(ctx)
     }
+
+    pub fn slot(&self, elem: usize, ctx: &Context) -> TyId {
+        ctx.types[*self].slot(elem)
+    }
 }
 
 /// This struct tracks the structural properties of a given type
@@ -123,6 +127,15 @@ impl Type {
     /// Create an instance of the size/index type
     pub const fn size_type() -> Self {
         Type::Uint(Uint::U32)
+    }
+
+    /// Get the path positions held by this type
+    pub fn slot(&self, elem: usize) -> TyId {
+        match self {
+            Type::Tuple(tys) => tys[elem],
+            Type::UserType(_udt) => unimplemented!(),
+            _ => unreachable!(),
+        }
     }
 
     /// Number of qubits owned by a type

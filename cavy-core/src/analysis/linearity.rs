@@ -50,11 +50,11 @@ impl MoveState {
     /// Update the move state with a new operand use, adding anything linear to
     /// the moved list.
     fn move_from(&mut self, arg: &Operand, span: Span) {
-        if let Operand::Move(local) = arg {
-            match self.moved.entry(*local) {
+        if let Operand::Move(place) = arg {
+            match self.moved.entry(place.root) {
                 Entry::Occupied(entry) => {
                     let fst_move = *entry.get();
-                    self.double_moved.insert(*local, (fst_move, span));
+                    self.double_moved.insert(place.root, (fst_move, span));
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(span);
@@ -84,7 +84,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
         let (place, rhs) = match &stmt.kind {
-            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
             _ => return,
         };
 
@@ -97,7 +97,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
             RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
             RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
         }
-        state.move_into(&place);
+        state.move_into(&place.root);
     }
 
     fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {

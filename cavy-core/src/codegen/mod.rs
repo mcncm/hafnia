@@ -141,12 +141,12 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
 
     fn translate_stmt(&mut self, stmt: &mir::Stmt) {
         use RvalueKind::*;
-        let (place, rhs) = match &stmt.kind {
-            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+        let (lplace, rhs) = match &stmt.kind {
+            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
             _ => return,
         };
 
-        let ty = self.gr.locals[place].ty;
+        let ty = self.gr.type_of(&lplace, self.ctx);
         match &rhs.data {
             BinOp(_op, _left, _right) => todo!(),
             UnOp(op, right) => {
@@ -159,37 +159,37 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                             Operand::Copy(x) => x,
                             Operand::Move(x) => x,
                         };
-                        let bits = self.bindings.get(right).unwrap().clone();
+                        let bits = self.bindings.get(&right.root).unwrap().clone();
                         for bit in &bits.qbits {
                             let inst = Instruction::Gate(Gate::X(*bit));
                             self.lir.instructions.push(inst);
                         }
-                        self.bindings.insert(place, bits);
+                        self.bindings.insert(lplace.root, bits);
                     }
                     UnOpKind::Linear => {
                         let allocation = self.alloc_for(ty);
-                        self.bindings.insert(place, allocation);
+                        self.bindings.insert(lplace.root, allocation);
                     }
                     UnOpKind::Delin => {
                         let allocation = self.alloc_for(ty);
-                        self.bindings.insert(place, allocation);
+                        self.bindings.insert(lplace.root, allocation);
                     }
                 }
                 // do some extra stuff
             }
             Use(val) => match val {
                 Operand::Const(_) => {}
-                Operand::Copy(loc) | Operand::Move(loc) => {
+                Operand::Copy(rplace) | Operand::Move(rplace) => {
                     // FIXME This is currently failing integration test
                     // `return_assigned`, but that's probably ok.
-                    let bits = self.bindings.get(loc).unwrap().clone();
-                    self.bindings.insert(place, bits);
+                    let bits = self.bindings.get(&rplace.root).unwrap().clone();
+                    self.bindings.insert(lplace.root, bits);
                 }
             },
         }
     }
 
-    fn translate_switch(&mut self, _cond: &LocalId, blks: &[BlockId]) {
+    fn translate_switch(&mut self, _cond: &Place, blks: &[BlockId]) {
         // FIXME This is incorrect, since of course no controls are applied. I
         // think, as we flesh this out, we should get the conditions on each
         // block from the analysis phase.

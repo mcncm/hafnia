@@ -259,7 +259,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     /// Push an assignment statement into the current basic block
-    fn assn_stmt(&mut self, place: LocalId, rhs: Rvalue) {
+    fn assn_stmt(&mut self, place: Place, rhs: Rvalue) {
         let stmt = mir::Stmt {
             span: Span::default(), // FIXME this is always wrong
             kind: mir::StmtKind::Assn(place, rhs),
@@ -306,8 +306,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // store an `Option<Graph>` in each slot, or to keep a hash table of graphs
     // in the `Mir` data structure.
     fn lower(mut self) -> Result<Graph, (Graph, ErrorBuf)> {
-        let place = self.gr.return_site();
-        let _ = self.lower_into(place, self.body);
+        let place = self.gr.return_site().into();
+        let _ = self.lower_into(&place, self.body);
 
         if !self.errors.is_empty() {
             Err((self.gr, self.errors))
@@ -322,13 +322,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // do that, since some types cannot not known without walking the tree at
     // least once.
     #[allow(unused_variables)]
-    fn lower_into(&mut self, place: LocalId, expr: &Expr) -> Maybe<()> {
+    fn lower_into(&mut self, place: &Place, expr: &Expr) -> Maybe<()> {
+        // FIXME possibly-unnecessar clone
+        let place = place.clone();
         // We can (and must) defer type-checking of a block, since we'd
         // otherwise need to do some relatively complicated type inference.
         if !matches!(expr.data, ExprKind::Block(_)) {
             let ty = self.type_expr(expr)?;
             // This is now the center of all type-checking
-            self.expect_type(&[self.gr.locals[place].ty], ty, expr.span)?;
+            self.expect_type(&[self.gr.locals[place.root].ty], ty, expr.span)?;
         }
 
         match &expr.data {
@@ -358,36 +360,36 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    /// Convert a local to an operand, basing the choice to move or copy on its
+    /// Convert a place to an operand, basing the choice to move or copy on its
     /// type
-    fn operand_of(&self, local: LocalId) -> Operand {
+    fn operand_of(&self, place: Place) -> Operand {
         // FIXME This is doing extra work to rediscover the type of this local.
         // Take a look at its call sites. I don't like it.
-        let ty = &self.gr.locals[local].ty;
+        let ty = &self.gr.type_of(&place, self.ctx);
         if ty.is_linear(self.ctx) {
-            Operand::Move(local)
+            Operand::Move(place)
         } else {
-            Operand::Copy(local)
+            Operand::Copy(place)
         }
     }
 
     fn lower_into_binop(
         &mut self,
-        place: LocalId,
+        place: Place,
         left: &Expr,
         op: &ast::BinOp,
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
-        let ty = self.gr.locals[place].ty;
+        let ty = self.gr.locals[place.root].ty;
         // Let's assume for now that all the binops take the same two types, in
         // both arguments. This won't be true, but it's a convenient simplifying
         // assumption.
-        let l_place = self.gr.auto_local(ty);
-        let r_place = self.gr.auto_local(ty);
+        let l_place = self.gr.auto_place(ty);
+        let r_place = self.gr.auto_place(ty);
 
-        let left = self.lower_into(l_place, left);
-        let right = self.lower_into(r_place, right);
+        let left = self.lower_into(&l_place, left);
+        let right = self.lower_into(&r_place, right);
         if let (Err(e), _) | (_, Err(e)) = (left, right) {
             return Err(e);
         }
@@ -411,15 +413,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     fn lower_into_unop(
         &mut self,
-        place: LocalId,
+        place: Place,
         op: &ast::UnOp,
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
         // Should not be here, of course
         let arg_ty = self.gamma.get(&right.node).unwrap();
-        let r_place = self.gr.auto_local(*arg_ty);
-        self.lower_into(r_place, right)?;
+        let r_place = self.gr.auto_place(*arg_ty);
+        self.lower_into(&r_place, right)?;
 
         let right = self.operand_of(r_place);
         let rhs = Rvalue {
@@ -435,7 +437,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_assn(&mut self, place: LocalId, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
+    fn lower_into_assn(&mut self, place: Place, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
         let stmt = mir::Stmt {
@@ -455,16 +457,18 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
 
-        let lhs_local = match self.st.get(&lhs.data) {
+        let lhs = match self.st.get(&lhs.data) {
             Some(local) => *local,
             None => return Err(self.errors.push(errors::UndeclaredLhs { span: lhs.span })),
-        };
+        }
+        // FIXME we'll temporarily assume that left-hand sides are just identifiers
+        .into();
 
-        self.lower_into(lhs_local, rhs)
+        self.lower_into(&lhs, rhs)
     }
 
-    fn lower_into_literal(&mut self, place: LocalId, lit: &Literal) -> Maybe<()> {
-        let ty = self.gr.locals[place].ty;
+    fn lower_into_literal(&mut self, place: Place, lit: &Literal) -> Maybe<()> {
+        let ty = self.gr.locals[place.root].ty;
         let constant = match &lit.data {
             LiteralKind::True => {
                 self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
@@ -501,10 +505,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_ident(&mut self, place: LocalId, ident: &Ident) -> Maybe<()> {
+    fn lower_into_ident(&mut self, place: Place, ident: &Ident) -> Maybe<()> {
         let rhs = match self.st.get(&ident.data) {
             Some(id) => {
-                let operand = self.operand_of(*id);
+                // FIXME temporarily simply convert to a place
+                let operand = self.operand_of((*id).into());
                 Rvalue {
                     span: ident.span,
                     data: RvalueKind::Use(operand),
@@ -521,12 +526,12 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_tuple(&mut self, _place: LocalId, _elems: &[Expr]) -> Maybe<()> {
+    fn lower_into_tuple(&mut self, _place: Place, _elems: &[Expr]) -> Maybe<()> {
         todo!();
     }
 
     /// Lower an AST block and store its value in the given location.
-    fn lower_into_block(&mut self, place: LocalId, block: &Block) -> Maybe<()> {
+    fn lower_into_block(&mut self, place: Place, block: &Block) -> Maybe<()> {
         #![allow(unused_variables)]
         let Block {
             stmts,
@@ -544,14 +549,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
 
         match expr {
-            Some(expr) => self.lower_into(place, expr),
+            Some(expr) => self.lower_into(&place, expr),
             None => Ok(()),
         }
     }
 
     fn lower_into_if(
         &mut self,
-        place: LocalId,
+        place: Place,
         cond: &Expr,
         tru: &Block,
         fls: &Option<Box<Block>>,
@@ -570,8 +575,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             cond_ty,
             cond.span,
         )?;
-        let cond_place = self.gr.auto_local(cond_ty);
-        let cond = self.lower_into(cond_place, cond);
+        let cond_place = self.gr.auto_place(cond_ty);
+        let cond = self.lower_into(&cond_place, cond);
         let tail_block = self.new_block();
 
         let mut blk_data = self.gr.blocks[self.cursor].data.clone();
@@ -584,7 +589,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let fls = match fls {
             Some(ind) => self.with_goto(tail_block, |self_| {
                 self_.gr.blocks[self_.cursor].data = blk_data.clone();
-                self_.lower_into_block(place, ind)?;
+                self_.lower_into_block(place.clone(), ind)?;
                 Ok(self_.cursor)
             }),
             None => Ok(tail_block),
@@ -627,7 +632,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             .params
             .iter()
             .map(|(_symb, ty)| {
-                let local = self.gr.auto_local(*ty);
+                let local = self.gr.auto_place(*ty);
                 // Call by value!
                 self.operand_of(local)
             })
@@ -635,7 +640,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
         for (arg, operand) in args.into_iter().zip(arg_locals.iter()) {
             if let Operand::Copy(loc) | Operand::Move(loc) = operand {
-                self.lower_into(*loc, arg)?;
+                self.lower_into(loc, arg)?;
             }
         }
 
@@ -660,8 +665,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
-                let place = self.gr.auto_local(self.ctx.common.unit);
-                self.lower_into(place, expr)
+                let place = self.gr.auto_place(self.ctx.common.unit);
+                self.lower_into(&place, expr)
             }
             StmtKind::Local { lhs, ty, rhs } => {
                 // Is this annotated, or must we infer the type?
@@ -677,11 +682,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
                     (_, Some(rhs)) => self.type_inner(rhs)?,
                 };
-                let place = self.gr.user_local(ty);
+                let place = self.gr.user_place(ty);
                 if let Some(rhs) = rhs {
-                    self.lower_into(place, rhs)?;
+                    self.lower_into(&place, rhs)?;
                 }
-                self.st.insert(lhs.data, place);
+                self.st.insert(lhs.data, place.root);
                 Ok(())
             }
         }

@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
-    mir::{self, BlockData, BlockKind, LocalId, Operand, RvalueKind},
+    mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
     source::Span,
 };
 
@@ -52,8 +52,9 @@ impl MeasState {
     /// Get a measurement upstream of an operand, if we care about it; that is,
     /// if the operand is `Copy`.
     fn upstream_delin(&self, arg: &Operand) -> Option<&Span> {
-        if let Operand::Copy(local) = arg {
-            self.delin.get(local)
+        if let Operand::Copy(place) = arg {
+            // FIXME
+            self.delin.get(&place.root)
         } else {
             None
         }
@@ -72,7 +73,7 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
         use RvalueKind::*;
         let (place, rhs) = match &stmt.kind {
-            mir::StmtKind::Assn(place, rhs) => (*place, rhs),
+            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
             _ => return,
         };
 
@@ -82,19 +83,20 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
                     .upstream_delin(left)
                     .or_else(|| state.upstream_delin(right))
                 {
-                    state.delin.insert(place, span);
+                    state.delin.insert(place.root, span);
                 }
             }
             UnOp(UnOpKind::Linear, Operand::Copy(right))
             | UnOp(UnOpKind::Linear, Operand::Move(right)) => {
-                state.lin.insert(*right, rhs.span);
+                // FIXME
+                state.lin.insert(right.root, rhs.span);
             }
             UnOp(UnOpKind::Delin, _) => {
-                state.delin.insert(place, rhs.span);
+                state.delin.insert(place.root, rhs.span);
             }
             UnOp(_, operand) | Use(operand) => {
                 if let Some(&span) = state.upstream_delin(operand) {
-                    state.delin.insert(place, span);
+                    state.delin.insert(place.root, span);
                 }
             }
         }
