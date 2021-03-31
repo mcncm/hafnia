@@ -16,3 +16,4 @@ path = "../cavy-comptime"
 [features]
 default = ["comptime"]
 comptime = ["cavy-comptime"]
+nightly-features = ["cavy-comptime/nightly-features"]
