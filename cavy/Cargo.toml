@@ -9,11 +9,11 @@ edition = "2018"
 [dependencies]
 cavy-core = { path = "../cavy-core" }
 
-[dependencies.cavy-comptime]
+[dependencies.cavy-inline]
 optional = true
-path = "../cavy-comptime"
+path = "../cavy-inline"
 
 [features]
-default = ["comptime"]
-comptime = ["cavy-comptime"]
-nightly-features = ["cavy-comptime/nightly-features"]
+default = ["inline"]
+inline = ["cavy-inline"]
+nightly-features = ["cavy-inline/nightly-features"]

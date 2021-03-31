@@ -17,10 +17,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 #[cfg(feature = "nightly-features")]
-mod diagnostics;
-
-#[cfg(feature = "nightly-features")]
-use proc_macro::{LineColumn, TokenTree};
+mod nightly;
 
 /// Compile Cavy code at Rust-compile-time. This is the best and easiest way to
 /// use Cavy as an embedded domain-specific language for quantum coprocessors
@@ -29,11 +26,11 @@ use proc_macro::{LineColumn, TokenTree};
 /// Currently, this macro provides no means to give non-default compiler
 /// options.
 #[proc_macro]
-pub fn cavy_comptime(input: TokenStream) -> TokenStream {
+pub fn inline_cavy(input: TokenStream) -> TokenStream {
     let conf = Config::default();
     let mut ctx = Context::new(&conf);
     let src = stringify(input);
-    let id = ctx.srcs.insert_input(&src);
+    let id = ctx.srcs.insert_input(&src.0);
     let circ = compile::compile_circuit(id, &mut ctx);
     // Can only get Ok(None) if compiler options ask to stop early
     let circ = circ.map(|circ| circ.unwrap());
@@ -49,11 +46,38 @@ pub fn cavy_comptime(input: TokenStream) -> TokenStream {
 
             #[cfg(feature = "nightly-features")]
             {
-                diagnostics::emit_diagnostics(errs, &mut ctx);
-                (quote! { Vec::new() }).into()
+                let spans = src.1;
+                nightly::emit_diagnostics(errs, spans, &mut ctx);
+                // Have to return something, or else get another error
+                (quote! { Vec::<cavy::circuit::Gate>::new() }).into()
             }
         }
     }
+}
+
+/*
+This is a bit of a funny hack. Without nightly-features, I only care about the
+strinfified source code. With nightly-features, I also need rustc's `Span`s,
+since these can't be reconstructed from integral source positions. Instead, we
+hve to retain the original `Span`s and search through them again in order to
+produce our error messages.
+
+To make this work, we'll return a tuple from both of these functions. The
+non-nightly one will only have a single element, the source itself. The nightly
+one will have two elements: the second contains the original rustc spans,
+retained for later use.
+*/
+
+// The variable *is* actually used
+#[allow(unused_variables)]
+#[cfg(not(feature = "nightly-features"))]
+fn stringify(input: TokenStream) -> (&'static str,) {
+    (stringify!(input),)
+}
+
+#[cfg(feature = "nightly-features")]
+fn stringify(input: TokenStream) -> (String, Vec<proc_macro::Span>) {
+    nightly::stringify_whitespace(input)
 }
 
 /// Turns a `Circuit` value into code that builds that literal circuit.
@@ -80,14 +104,3 @@ fn quote_circuit(circ: Lir) -> TokenStream {
 
     circuit_def.into()
 }
-
-#[cfg(not(feature = "nightly-features"))]
-fn stringify(input: TokenStream) -> String {
-    input.to_string()
-}
-
-#[cfg(feature = "nightly-features")]
-fn stringify(input: TokenStream) -> String {
-    input.to_string()
-}
-

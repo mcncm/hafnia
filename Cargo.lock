@@ -42,8 +42,8 @@ checksum = "7b02b629252fe8ef6460461409564e2c21d0c8e77e0944f3d189ff06c4e932ad"
 name = "cavy"
 version = "0.1.0"
 dependencies = [
- "cavy-comptime",
  "cavy-core",
+ "cavy-inline",
 ]
 
 [[package]]
@@ -55,19 +55,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "cavy-comptime"
-version = "0.1.0"
-dependencies = [
- "cavy-core",
- "quote",
-]
-
-[[package]]
 name = "cavy-core"
 version = "0.1.0"
 dependencies = [
  "cargo-husky",
  "cavy-macros",
+]
+
+[[package]]
+name = "cavy-inline"
+version = "0.1.0"
+dependencies = [
+ "cavy-core",
+ "quote",
 ]
 
 [[package]]

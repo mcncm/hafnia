@@ -477,8 +477,8 @@ mod tests {
     }
 
     fn check_span(token: &Token, start: usize, end: usize) {
-        assert_eq!(token.span.start.pos, start);
-        assert_eq!(token.span.end.pos, end);
+        assert_eq!(token.span.start, start);
+        assert_eq!(token.span.end, end);
     }
 
     //////////////////////////////////

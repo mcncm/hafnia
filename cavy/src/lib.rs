@@ -1,22 +1,25 @@
 pub use cavy_core::{arch, circuit, compile, context, session};
 
-#[cfg(feature = "comptime")]
-pub use cavy_comptime::cavy_comptime;
+/// Compiles inline Cavy code at Rust compile time. Cavy programs that fail to
+/// compile will fail Rust compilation. With a nightly compiler and the
+/// `nightly-features` flag, Cavy errors will also propagate out as Rust errors.
+///
+/// # Examples
+///
+/// ```compile_fail
+/// cavy::inline_cavy! {
+///     let x = ?true;
+///     let y = x;
+///     let z = x;
+/// }
+/// ```
+#[cfg(feature = "inline")]
+pub use cavy_inline::inline_cavy;
 
 /// This top-level macro can be used to build a circuit from literal code, a
 /// convenience when using Cavy as an embedded language within Rust. For the
 /// time being, there is no way to specify compiler options when using this
-/// macro.
-// NOTE This is not how this macro ought to work! It should be implemented as a
-// proc macro that actually compiles the Cavy source, and returns code to build
-// a literal circuit. This will make it possible to report errors at (Rust)
-// compile time. But there is a wrinkle: if we naively put that macro into
-// `cavy_macros`, there will be a circular dependency since, in order to compile
-// Cavy code at Rust compile time, we need access to the `cavy` crate. One
-// solution to this problem is to factor the `cavy` crate into a "core" library
-// and a public-facing crate that re-exports its contents along with the macro.
-// This will be a fantastic convenience feature, but I've done enough yak
-// shaving for right now.
+/// macro. Unlike `inline_cavy`, this compiles at runtime.
 #[macro_export]
 macro_rules! cavy {
     ($($src:tt)*) => {

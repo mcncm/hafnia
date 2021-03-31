@@ -1,5 +1,5 @@
 [package]
-name = "cavy-comptime"
+name = "cavy-inline"
 version = "0.1.0"
 authors = ["mcncm <33966432+mcncm@users.noreply.github.com>"]
 edition = "2018"
