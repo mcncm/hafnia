@@ -408,6 +408,12 @@ pub enum ExprKind {
     Ident(Ident),
     /// Sequences of the form `(1, 2, 3)`
     Tuple(Vec<Expr>),
+    /// A literal struct, like `A { a: true, b: ?3u8 }`
+    Struct {
+        /// The type named at the head of the expression
+        ty: Ident,
+        fields: Vec<(Ident, Expr)>,
+    },
     /// Intensional arrays of the form `[1; 4]`
     IntArr {
         item: Box<Expr>,
@@ -455,6 +461,7 @@ impl ExprKind {
             Ident(_) => true,
             Field { .. } => true,
             Tuple { .. } => true,
+            Struct { .. } => true,
             IntArr { .. } => true,
             ExtArr(_) => true,
             Block(_) => false,

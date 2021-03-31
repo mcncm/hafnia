@@ -112,7 +112,6 @@ test_compiles! {
         }
     }
 
-
     recursion fail [Analysis] {
         fn main() { main() }
     }
@@ -198,6 +197,35 @@ test_compiles! {
             } else {
                 3u8
             };
+        }
+    }
+
+    create_tuple {
+        fn main() {
+            let t = (0, ?true, (false, true));
+        }
+    }
+
+    // TODO we have a ways to go: this doesn’t lower yet!
+    create_struct [Parse] {
+        struct A {
+            a: u8,
+            b: ?bool,
+        }
+
+        fn main() {
+            let x = A {
+                a: 3,
+                b: ?true,
+            };
+        }
+    }
+
+    no_bare_struct_in_cond fail [Typecheck] {
+        struct A {}
+
+        fn main() {
+            if A {} {}
         }
     }
 }

@@ -12,21 +12,20 @@
 //! * Most kinds of name resolution: we can't resolve types, so in particular we
 //!   can't check that type annotations refer to something in-scope.
 
-use crate::context::{Context, SymbolId};
-use crate::source::Span;
-use crate::token::{
-    Lexeme::{self, *},
-    Token,
-};
 use crate::{
     ast::{self, *},
-    store::Counter,
-};
-use crate::{
     cavy_errors::{self, ErrorBuf, Maybe},
+    context::{Context, SymbolId},
+    num::Uint,
+    source::Span,
+    store::Counter,
+    token::{
+        Lexeme::{self, *},
+        Token,
+    },
     types,
+    types::Type,
 };
-use crate::{num::Uint, types::Type};
 use errors::*;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -81,6 +80,8 @@ pub struct Parser<'p, 'ctx> {
     /// We'll also want to maintain a list of errors to propagate upwards
     /// if necessary
     errors: ErrorBuf,
+    /// A flag that, when set, excludes struct literal expressions
+    excl_struct_lit: bool,
 }
 
 impl<'p, 'ctx> Parser<'p, 'ctx> {
@@ -95,6 +96,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             tokens: tokens.into_iter().peekable(),
             loc: Span::default(),
             errors: ErrorBuf::new(),
+            excl_struct_lit: false,
         }
     }
 
@@ -131,6 +133,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
         };
         Ok((t, self.pop_table().unwrap()))
+    }
+
+    /// Do something in a context where struct literal expressions are not
+    /// parsed. This is an ambiguity-resolving hack to deal with the situation
+    /// where an expression is expected to be followed by an `}`.
+    fn with_excl_struct_lit<T>(&mut self, excl: bool, f: impl FnOnce(&mut Self) -> T) -> T {
+        let old = self.excl_struct_lit;
+        self.excl_struct_lit = excl;
+        let val = f(self);
+        self.excl_struct_lit = old;
+        val
     }
 
     /// A convenience method for creating new nodes. Right now, this doesn't
@@ -535,7 +548,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     fn if_expr(&mut self) -> Maybe<Expr> {
         let opening = self.token()?.span;
-        let cond = Box::new(self.expression()?);
+        // Call `expression_inner` because we must parse the condition
+        // expression without first resetting the condition flag.
+        let cond = self.with_excl_struct_lit(true, Self::expression_inner)?;
         let then_branch = Box::new(self.block()?);
 
         let mut else_branch = None;
@@ -548,7 +563,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             span = opening.join(&then_branch.span).unwrap();
         }
         let kind = ExprKind::If {
-            cond,
+            cond: Box::new(cond),
             tru: then_branch,
             fls: else_branch,
         };
@@ -621,6 +636,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     pub fn expression(&mut self) -> Maybe<Expr> {
+        // Disable the struct literal exclusion condition, and restore it before
+        // returning.
+        self.with_excl_struct_lit(false, Self::expression_inner)
+    }
+
+    fn expression_inner(&mut self) -> Maybe<Expr> {
         // The head or root of the expression
         let mut expr = match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
@@ -844,6 +865,20 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             Ident(_) => {
                 let ident = ast::Ident::from_token(token, self.ctx).unwrap();
+                // NOTE There is a parsing ambiguity here: if we're in a context
+                // where a `{` is expected to follow an expression, as in an
+                // `if` expression, we must not parse a struct literal. So, we
+                // should include an escape hatch against doing this.
+                if matches!(self.peek_lexeme(), Some(LBrace)) & !self.excl_struct_lit {
+                    // This should be a struct literal, like `A { a: x, b: true }`
+                    //
+                    // NOTE it feels a little wrong to have this under a
+                    // production called "primary", since it's actually a nonterminal rule.
+                    // But this does seem to be the right place for it to live.
+                    self.tokens.next();
+                    return self.finish_struct_literal(ident);
+                }
+                // Just an identifier
                 let span = ident.span;
                 Ok(self.node(ExprKind::Ident(ident), span))
             }
@@ -855,6 +890,23 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 actual: lexeme,
             })),
         }
+    }
+
+    fn finish_struct_literal(&mut self, ty: ast::Ident) -> Maybe<Expr> {
+        let mut fields = Vec::new();
+        while self.peek_lexeme() != Some(&RBrace) {
+            let name = self.consume_ident()?;
+            self.consume(Colon)?;
+            let value = self.expression()?;
+            fields.push((name, value));
+            if !self.match_lexeme(Comma) {
+                break;
+            }
+        }
+        let close = self.consume(RBrace)?;
+        let span = ty.span.join(&close.span).unwrap();
+        let expr = ExprKind::Struct { ty, fields };
+        Ok(self.node(expr, span))
     }
 
     /// After reaching an `(` in the position of a primary token, we must have

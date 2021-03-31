@@ -323,14 +323,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // least once.
     #[allow(unused_variables)]
     fn lower_into(&mut self, place: &Place, expr: &Expr) -> Maybe<()> {
-        // FIXME possibly-unnecessar clone
+        // FIXME possibly-unnecessary clone
         let place = place.clone();
         // We can (and must) defer type-checking of a block, since we'd
         // otherwise need to do some relatively complicated type inference.
         if !matches!(expr.data, ExprKind::Block(_)) {
-            let ty = self.type_expr(expr)?;
+            let ty_actual = self.type_expr(expr)?;
+            let ty_expected = self.gr.type_of(&place, self.ctx);
             // This is now the center of all type-checking
-            self.expect_type(&[self.gr.locals[place.root].ty], ty, expr.span)?;
+            self.expect_type(&[ty_expected], ty_actual, expr.span)?;
         }
 
         match &expr.data {
@@ -343,6 +344,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Field { .. } => todo!(),
             ExprKind::Tuple(elems) => self.lower_into_tuple(place, elems),
+            ExprKind::Struct { .. } => todo!(),
             ExprKind::IntArr { item, reps } => {
                 todo!()
             }
@@ -469,7 +471,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_literal(&mut self, place: Place, lit: &Literal) -> Maybe<()> {
-        let ty = self.gr.locals[place.root].ty;
+        let ty = self.gr.type_of(&place, self.ctx);
         let constant = match &lit.data {
             LiteralKind::True => {
                 self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
@@ -507,6 +509,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_ident(&mut self, place: Place, ident: &Ident) -> Maybe<()> {
+        // NOTE Maybe this should lower unconditionally, and we should check if
+        // things are declared before they're assigned as an analysis pass?
         let rhs = match self.st.get(&ident.data) {
             Some(id) => {
                 // FIXME temporarily simply convert to a place
@@ -527,8 +531,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_tuple(&mut self, _place: Place, _elems: &[Expr]) -> Maybe<()> {
-        todo!();
+    fn lower_into_tuple(&mut self, place: Place, elems: &[Expr]) -> Maybe<()> {
+        for (field, elem) in elems.iter().enumerate() {
+            let mut place = place.clone();
+            place.path.push(field);
+            self.lower_into(&place, elem)?;
+        }
+        Ok(())
     }
 
     /// Lower an AST block and store its value in the given location.
@@ -747,6 +756,7 @@ mod typing {
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field { .. } => todo!(),
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
+                ExprKind::Struct { ty, .. } => todo!(),
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
