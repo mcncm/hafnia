@@ -92,9 +92,7 @@ struct ScanHead<'src> {
     /// The newlines from the SrcObject, to be filled in as the ScanHead passes
     /// over them.
     newlines: &'src mut Vec<usize>,
-    pub pos: usize,  // absolute position in source
-    pub line: usize, // line number in source
-    pub col: usize,  // column number in source
+    pub pos: usize, // absolute position in source
 }
 
 impl<'src> ScanHead<'src> {
@@ -103,16 +101,6 @@ impl<'src> ScanHead<'src> {
             src,
             newlines,
             pos: 0,
-            line: 1,
-            col: 1,
-        }
-    }
-
-    fn loc(&self) -> SrcPoint {
-        SrcPoint {
-            pos: self.pos,
-            line: self.line,
-            col: self.col,
         }
     }
 
@@ -123,11 +111,8 @@ impl<'src> ScanHead<'src> {
         if let Some(ch) = next {
             if ch == '\n' {
                 self.newlines.push(self.pos);
-                self.line += 1;
-                self.col = 0;
             }
             self.pos += 1;
-            self.col += 1;
         }
         next
     }
@@ -171,7 +156,7 @@ impl<'src> Iterator for ScanHead<'src> {
 
     // Advance the scan head to the next character, filtering whitespace.
     fn next(&mut self) -> Option<(SrcPoint, char)> {
-        while let (pt, Some(ch)) = (self.loc(), self.next_raw_char()) {
+        while let (pt, Some(ch)) = (self.pos, self.next_raw_char()) {
             if !ch.is_ascii_whitespace() {
                 return Some((pt, ch));
             }
@@ -254,7 +239,7 @@ impl<'s> Scanner<'s> {
 
     /// Get a single-character Span at the current point
     fn loc_span(&self) -> Span {
-        let pt = self.scan_head.loc();
+        let pt = self.scan_head.pos;
         Span {
             start: pt,
             end: pt,
@@ -281,7 +266,7 @@ impl<'s> Scanner<'s> {
     /// Advance the scan head to the next whitespace character, and return
     /// position before advancing.
     pub fn synchronize_to_whitespace(&mut self) -> SrcPoint {
-        let loc = self.scan_head.loc();
+        let loc = self.scan_head.pos;
         while let Some(ch) = self.scan_head.peek() {
             if !ch.is_ascii_whitespace() {
                 self.next_char();
@@ -296,7 +281,7 @@ impl<'s> Scanner<'s> {
     /// position before advancing. Here, 'alphanumeric' is understood as an
     /// 'identifier' character, which includes `_`.
     pub fn synchronize_to_non_alphanum(&mut self) -> SrcPoint {
-        let loc = self.scan_head.loc();
+        let loc = self.scan_head.pos;
         while let Some(ch) = self.scan_head.peek() {
             if is_ident_char(*ch) {
                 self.next_char();
@@ -317,7 +302,7 @@ impl<'s> Scanner<'s> {
             // on each iteration. However, there's no way to add an assertion
             // for this condition while using `while let` syntax. This is
             // probably fine for now.
-            self.token_buf.start = self.scan_head.loc();
+            self.token_buf.start = self.scan_head.pos;
             if let Some(next_ch) = self.next_char() {
                 ch = next_ch;
             } else {

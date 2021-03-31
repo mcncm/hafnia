@@ -2,15 +2,12 @@ use std::fs;
 use std::io::Write;
 use std::panic;
 use std::path::PathBuf;
-use std::process;
 
 use cavy_core::context::{Context, CtxDisplay};
 use cavy_core::session::{Config, Phase, PhaseConfig};
 use cavy_core::target;
 use cavy_core::{arch, session::OptConfig};
 use cavy_core::{compile, sys};
-
-// use cavy_cli::repl::Repl;
 
 use clap::{load_yaml, App, ArgMatches};
 use fs::File;
@@ -70,7 +67,7 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
         .parse::<usize>()
         .unwrap_or_else(|_| {
             eprintln!("Error: argument QRAM_SIZE must be a nonnegative integer.");
-            process::exit(1);
+            sys::exit(1);
         });
 
     let feedback = argmatches.is_present("feedback");
@@ -110,7 +107,7 @@ fn get_config(argmatches: &ArgMatches) -> Config {
         Ok(arch) => arch,
         Err(_) => {
             eprintln!("Failed to identify target architecture.");
-            process::exit(1);
+            sys::exit(1);
         }
     };
     let target = get_target(argmatches);

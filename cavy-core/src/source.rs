@@ -2,14 +2,27 @@
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use crate::store_type;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
+use std::{collections::HashMap, str::Chars};
 
 // /// Unique identifier of a source object. I'll be surprised if anyone ever needs more
 // /// than two bytes to identify all of their source objects.
 store_type! { SrcStore : SrcId -> SrcObject }
+
+pub struct SrcLine<'a> {
+    pub code: &'a str,
+    pub linum: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl<'a> SrcLine<'a> {
+    pub fn chars(&self) -> Chars<'a> {
+        self.code.chars()
+    }
+}
 
 /// Type returned by the public SrcStore interface. This is expected to be
 /// passed to a Scanner.
@@ -23,6 +36,14 @@ pub struct SrcObject {
 }
 
 impl SrcObject {
+    pub fn get_linum(&self, pos: SrcPoint) -> usize {
+        // Pointing to a newline character shouldn't happen; actual spans
+        // shouldn't point *at* newlines, but they might cross them.
+        self.newlines
+            .binary_search(&pos)
+            .expect_err("SrcPoint pointed at newline")
+    }
+
     /// Returns a slice to the line in the source containing a point. This is
     /// expected to be called only after a scanning phase has filled in the
     /// newlines, but that isn't invariant enforced (yet) by the type system.
@@ -35,28 +56,28 @@ impl SrcObject {
     ///     0     1     2      found position
     ///
     ///  ```
-    pub fn get_line(&self, pos: SrcPoint) -> &str {
-        // Pointing to a newline character shouldn't happen; actual spans
-        // shouldn't point *at* newlines, but they might cross them.
-        let n = self
-            .newlines
-            .binary_search(&pos.pos)
-            .expect_err("SrcPoint pointed at newline");
+    pub fn get_line(&self, pos: SrcPoint) -> SrcLine<'_> {
+        let linum = self.get_linum(pos);
         // line start: inclusive if pointing to first line, exclusive
         // otherwise (to exclude newline character)
-        let ln_start = match n {
+        let start = match linum {
             0 => 0,
             n => self.newlines[n - 1] + 1,
         };
 
         // line end
-        let ln_end = if n == self.newlines.len() {
+        let end = if linum == self.newlines.len() {
             self.code.len()
         } else {
-            self.newlines[n]
+            self.newlines[linum]
         };
 
-        &self.code[ln_start..ln_end]
+        SrcLine {
+            code: &self.code[start..end],
+            linum,
+            start,
+            end,
+        }
     }
 }
 
@@ -122,27 +143,8 @@ impl SrcKind {
     }
 }
 
-/// A character point within a file. Note that this is extremely uneconomical:
-/// three `usize`s make this struct occupy 24 bytes. This could be done a little
-/// more efficiently by having the parser cleverly mark newlines and so on in an
-/// auxiliary data structure associated with each source object.
-#[derive(Debug, Default, Eq, PartialEq, Hash, PartialOrd, Ord, Clone, Copy)]
-pub struct SrcPoint {
-    /// Position in source file: because derived PartialOrd and Ord use
-    /// lexicographical ordering based on the declaration order of the struct
-    /// members, this member alone will be compared in practice.
-    pub pos: usize,
-    /// Line number in source file
-    pub line: usize,
-    /// Column number in source file
-    pub col: usize,
-}
-
-impl SrcPoint {
-    pub fn zero() -> Self {
-        Self::default()
-    }
-}
+/// A character point within a file.
+pub type SrcPoint = usize;
 
 /// Span within a single source file. This plays basically the same role as a
 /// `Span` in rustc, but the data structure is much simpler.
@@ -188,23 +190,8 @@ impl fmt::Display for SrcObject {
     }
 }
 
-impl fmt::Display for Span {
+impl<'a> fmt::Display for SrcLine<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.start.line == self.end.line {
-            write!(
-                f,
-                "[{}:{}-{}]",
-                self.start.line, self.start.col, self.end.col
-            )
-        } else {
-            write!(
-                f,
-                "[{}:{}]-[{}:{}]",
-                self.start.line, self.start.col, self.end.line, self.end.col
-            )
-        }
+        write!(f, "{}", self.code)
     }
 }
-
-#[cfg(test)]
-mod tests {}

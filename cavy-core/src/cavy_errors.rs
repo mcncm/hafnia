@@ -52,13 +52,13 @@ impl CtxDisplay for SpanReport {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let src = &ctx.srcs[self.span.src_id];
         let line = src.get_line(self.span.start);
-        if src.get_line(self.span.end) != line {
+        if src.get_line(self.span.end).code != line.code {
             // FIXME assume for now that spans don't cross lines
             return f.write_str("Multiline span");
         }
         // Columns to annotate: remember that columns are 1-indexed.
-        let start = self.span.start.col;
-        let end = self.span.end.col;
+        let start = self.span.start - line.start;
+        let end = self.span.end - line.start;
         // How many tabs in the run-up to the start?
         let tabs = line
             .chars()
@@ -72,7 +72,7 @@ impl CtxDisplay for SpanReport {
             annot.push_str(&msg);
         }
         // How long should line numbers be?
-        let digits = util::count_digits(self.span.start.line);
+        let digits = util::count_digits(line.linum);
         // Reported code with annotations. This is a little ad-hoc, and should
         // really be some kind of "join" over reported lines.
         write!(
@@ -84,12 +84,12 @@ impl CtxDisplay for SpanReport {
 ",
             line,
             annot,
-            linum = self.span.start.line,
+            linum = line.linum,
             s = "",
             tabs = tabs,
             digits = digits,
             // start of annotation
-            start = start - tabs - 1
+            start = start - tabs
         )
     }
 }
@@ -155,6 +155,8 @@ impl CtxDisplay for ErrorBuf {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.iter().fold(true, |first, err| {
             if !first {
+                // NOTE This is correct: can't return an `Err` from this
+                // closure.
                 let _ = f.write_str("\n");
             }
             let _ = write!(f, "{}", err.fmt_with(ctx));
@@ -170,7 +172,32 @@ impl CtxDisplay for Box<dyn Diagnostic> {
         for span_report in self.spans() {
             let span = span_report.span;
             let origin = &ctx.srcs[span.src_id];
-            writeln!(f, "{} {}\n{}", origin, span, span_report.fmt_with(ctx))?;
+            let startln = origin.get_line(span.start);
+            let endln = origin.get_line(span.end);
+            write!(f, "{} ", origin)?;
+            if startln.linum == endln.linum {
+                if span.start == span.end {
+                    write!(f, "[{}:{}]", startln.linum, span.start - startln.start)?;
+                } else {
+                    write!(
+                        f,
+                        "[{}:{}-{}]",
+                        startln.linum,
+                        span.start - startln.start,
+                        span.end - startln.start
+                    )?;
+                }
+            } else {
+                write!(
+                    f,
+                    "[{}:{}]-[{}:{}]",
+                    startln.linum,
+                    span.start - startln.start,
+                    endln.linum,
+                    span.end - endln.end
+                )?;
+            }
+            writeln!(f, "\n{}", span_report.fmt_with(ctx))?;
         }
         Ok(())
     }

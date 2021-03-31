@@ -52,7 +52,6 @@ version = "0.1.0"
 dependencies = [
  "cavy-core",
  "clap",
- "lazy_static",
 ]
 
 [[package]]
