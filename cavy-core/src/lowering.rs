@@ -754,7 +754,7 @@ mod typing {
                 ExprKind::Assn { .. } => self.ctx.common.unit,
                 ExprKind::Literal(lit) => self.type_literal(lit),
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
-                ExprKind::Field { .. } => todo!(),
+                ExprKind::Field(root, field) => self.type_field(root, field)?,
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
                 ExprKind::Struct { ty, .. } => todo!(),
                 ExprKind::IntArr { item, reps } => todo!(),
@@ -785,6 +785,45 @@ mod typing {
                 ExprKind::Index { head, index } => todo!(),
             };
             self.gamma.insert(expr.node, ty);
+            Ok(ty)
+        }
+
+        fn type_field(&mut self, root: &Expr, field: &Field) -> Maybe<TyId> {
+            let root = self.type_expr(root)?;
+            let ty = match (&self.ctx.types[root], &field.data) {
+                (Type::Tuple(tys), FieldKind::Num(n)) => {
+                    // NOTE: maybe I should change these `u32`s for `usize`s?
+                    let n = *n as usize;
+                    if n < tys.len() {
+                        tys[n]
+                    } else {
+                        return Err(self.errors.push(errors::TupleOutOfBounds {
+                            span: field.span,
+                            len: tys.len(),
+                            attempt: n,
+                        }));
+                    }
+                }
+                // NOTE This arm can be simplified when `if let` guards are stabilized!
+                (Type::UserType(udt), FieldKind::Ident(ident)) => {
+                    if let Some((_, ty)) = udt.fields.iter().find(|(symb, _)| symb == ident) {
+                        *ty
+                    } else {
+                        return Err(self.errors.push(errors::NoSuchField {
+                            span: field.span,
+                            ty: root,
+                            field: FieldKind::Ident(*ident),
+                        }));
+                    }
+                }
+                (_, kind) => {
+                    return Err(self.errors.push(errors::NoSuchField {
+                        span: field.span,
+                        ty: root,
+                        field: kind.clone(),
+                    }))
+                }
+            };
             Ok(ty)
         }
 
@@ -1146,5 +1185,25 @@ mod errors {
         pub dir: TyId,
         #[ctx]
         pub ind: TyId,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "attempted to access field `{attempt}` of a tuple that only has {len} factors"]
+    pub struct TupleOutOfBounds {
+        #[span]
+        pub span: Span,
+        pub len: usize,
+        pub attempt: usize,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "the type `{ty}` has no field `{field}`"]
+    pub struct NoSuchField {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub ty: TyId,
+        #[ctx]
+        pub field: FieldKind,
     }
 }
