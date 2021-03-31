@@ -77,7 +77,7 @@ fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
                 stmt.kind = StmtKind::Nop;
             }
         }
-        StmtKind::Nop => return,
+        StmtKind::Nop => {}
     }
 }
 
@@ -156,14 +156,14 @@ impl Interpreter {
             RvalueKind::Use(val) => match val {
                 Move(rplace) | Copy(rplace) => {
                     if let Some(c) = self.env.get(&rplace.root).cloned() {
-                        self.env.insert(place, c.clone());
+                        self.env.insert(place, c);
                         return Evaluated::Yes;
                     }
                     Evaluated::No
                 }
                 Const(c) => {
                     self.env.insert(place, c.clone());
-                    return Evaluated::Yes;
+                    Evaluated::Yes
                 }
             },
         }

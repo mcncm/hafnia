@@ -73,8 +73,8 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             ctx,
             lir,
             bindings,
-            qcounter: (0..).into_iter(),
-            ccounter: (0..).into_iter(),
+            qcounter: 0..,
+            ccounter: 0..,
         }
     }
 
@@ -198,7 +198,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    fn translate_call(&mut self, callee: FnId, args: &Vec<Operand>, blk: BlockId) {
+    fn translate_call(&mut self, callee: FnId, args: &[Operand], blk: BlockId) {
         let args = args
             .iter()
             .map(|arg| self.translate_arg(arg))

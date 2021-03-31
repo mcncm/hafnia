@@ -37,11 +37,8 @@ impl Analysis<'_, '_> for CallGraphAnalysis {
     fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &crate::mir::Stmt, _data: &BlockData) {}
 
     fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, _data: &BlockData) {
-        match block {
-            BlockKind::Call { callee, span, .. } => {
-                state.insert(*callee, *span);
-            }
-            _ => {}
+        if let BlockKind::Call { callee, span, .. } = block {
+            state.insert(*callee, *span);
         }
     }
 }
@@ -52,7 +49,7 @@ pub type CallGraph = Store<FnId, CallSites>;
 /// A check on the results of the call graph analysis that verifies the absence
 /// of recursion.
 pub fn check_recursion(errs: &mut ErrorBuf, call_sites: &CallGraph) {
-    let components = SCCFinder::new(call_sites).components();
+    let components = SccFinder::new(call_sites).components();
     for cycle in components {
         if cycle.len() == 1 {
             errs.push(errors::SimpleRecursion { span: cycle[0].1 });
@@ -112,7 +109,7 @@ impl<K: Hash + Eq + Clone, V> StackMap<K, V> {
 /// components are only included in the output if they have a self-loop (simple
 /// recursion), and we add some satellite data to the nodes, which takes a
 /// little bookkeeping when components are emitted.
-struct SCCFinder<'cg> {
+struct SccFinder<'cg> {
     next_index: usize,
     stack: StackMap<FnId, Span>,
     // Can these be made into `Store`s? Probably.
@@ -122,7 +119,7 @@ struct SCCFinder<'cg> {
     components: Vec<Vec<(FnId, Span)>>,
 }
 
-impl<'cg> SCCFinder<'cg> {
+impl<'cg> SccFinder<'cg> {
     fn new(call_graph: &'cg CallGraph) -> Self {
         let indices = HashMap::with_capacity(call_graph.len());
         let lowlinks = HashMap::with_capacity(call_graph.len());

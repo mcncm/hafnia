@@ -27,6 +27,7 @@ where
 {
     // FIXME Consider changing the name: in Rust, it is conventional for
     // methods called `into` to call by move.
+    #[allow(clippy::wrong_self_convention)]
     fn into_target(&self, target: &T) -> ObjectCode;
 }
 

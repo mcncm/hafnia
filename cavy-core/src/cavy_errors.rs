@@ -68,7 +68,7 @@ impl CtxDisplay for SpanReport {
         // Carets
         let mut annot = "^".repeat(end - start + 1);
         if let Some(msg) = &self.msg {
-            annot.push_str(" ");
+            annot.push(' ');
             annot.push_str(&msg);
         }
         // How long should line numbers be?

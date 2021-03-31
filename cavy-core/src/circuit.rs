@@ -10,6 +10,7 @@ use Gate::*;
 pub type VirtAddr = usize;
 
 /// These are gates from which most ordinary circuits will be built
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
     X(VirtAddr),

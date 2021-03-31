@@ -180,10 +180,7 @@ impl Type {
     }
 
     pub fn is_ord(&self, _ctx: &Context) -> bool {
-        match self {
-            Type::Ord => true,
-            _ => false,
-        }
+        matches!(self, Type::Ord)
     }
 }
 

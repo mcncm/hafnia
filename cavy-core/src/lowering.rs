@@ -401,7 +401,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let right = self.operand_of(r_place);
 
         let stmt = mir::Stmt {
-            span: span.clone(), // FIXME actually a different span
+            span, // FIXME actually a different span
             kind: mir::StmtKind::Assn(
                 place,
                 Rvalue {
@@ -433,7 +433,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         };
 
         let stmt = mir::Stmt {
-            span: span.clone(), // FIXME actually a different span
+            span, // FIXME actually a different span
             kind: mir::StmtKind::Assn(place, rhs),
         };
         self.push_stmt(stmt);
@@ -632,7 +632,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // value and passing by reference, which for the time being isn't respected.
     //
     // Also, we probably want the callee to be an expression rather than a function name.
-    fn lower_into_call(&mut self, callee: &Ident, args: &Vec<Expr>, span: Span) -> Maybe<()> {
+    fn lower_into_call(&mut self, callee: &Ident, args: &[Expr], span: Span) -> Maybe<()> {
         // FIXME Note that we're resolving every function twice, which suggests
         // that this could be pulled up to an earlier stage, and that it's a
         // potential source of errors.
@@ -648,7 +648,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             })
             .collect();
 
-        for (arg, operand) in args.into_iter().zip(arg_locals.iter()) {
+        for (arg, operand) in args.iter().zip(arg_locals.iter()) {
             if let Operand::Copy(loc) | Operand::Move(loc) = operand {
                 self.lower_into(loc, arg)?;
             }
@@ -752,7 +752,7 @@ mod typing {
                 ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
                 ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
                 ExprKind::Assn { .. } => self.ctx.common.unit,
-                ExprKind::Literal(lit) => self.type_literal(lit)?,
+                ExprKind::Literal(lit) => self.type_literal(lit),
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field { .. } => todo!(),
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
@@ -871,8 +871,8 @@ mod typing {
             }
         }
 
-        fn type_literal(&mut self, lit: &Literal) -> Maybe<TyId> {
-            let ty = match &lit.data {
+        fn type_literal(&mut self, lit: &Literal) -> TyId {
+            match &lit.data {
                 LiteralKind::True => self.ctx.common.bool,
                 LiteralKind::False => self.ctx.common.bool,
                 LiteralKind::Nat(_, Some(Uint::U2)) => todo!(),
@@ -882,8 +882,7 @@ mod typing {
                 LiteralKind::Nat(_, Some(Uint::U32)) => self.ctx.common.u32,
                 LiteralKind::Nat(_, None) => self.ctx.common.u32,
                 LiteralKind::Ord => self.ctx.common.ord,
-            };
-            Ok(ty)
+            }
         }
 
         fn type_block(&mut self, block: &Block) -> Maybe<TyId> {
@@ -986,24 +985,28 @@ mod typing {
         Ok(ty)
     }
 
+    // Can remove this attribute after implementing the rest of the function
+    #[allow(clippy::unnecessary_wraps)]
     fn resolve_annot_question(ctx: &mut Context, inner: TyId) -> Maybe<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
             Bool => Q_Bool,
             Uint(u) => Q_Uint(u),
-            _ => unimplemented!(),
+            _ => todo!(),
         };
         Ok(ctx.types.intern(ty))
     }
 
+    // Can remove this attribute after implementing the rest of the function
+    #[allow(clippy::unnecessary_wraps)]
     fn resolve_annot_bang(ctx: &mut Context, inner: TyId) -> Maybe<TyId> {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
             Q_Bool => Bool,
             Q_Uint(u) => Uint(u),
-            _ => unimplemented!(),
+            _ => todo!(),
         };
         Ok(ctx.types.intern(ty))
     }

@@ -246,11 +246,7 @@ pub struct Stmt {
 impl Stmt {
     pub fn is_nop(&self) -> bool {
         // Or, could just derive `Eq`
-        if let StmtKind::Nop = self.kind {
-            true
-        } else {
-            false
-        }
+        matches!(self.kind, StmtKind::Nop)
     }
 }
 

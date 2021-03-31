@@ -169,6 +169,7 @@ impl<'a> SubCondChecker<'a> {
 
     /// Gets the properties of a single function. Mutually recursive with `compute_props`.
     fn props(&mut self, func: FnId) -> &FuncProps {
+        #![allow(clippy::map_entry)]
         // FIXME this does *three* hash table lookups, but in principle only
         // requires one. How can I use the `Entry` API to solve this and still
         // satisfy the borrow checker?

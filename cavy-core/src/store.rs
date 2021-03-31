@@ -20,7 +20,7 @@ use std::{
 /// A trait automatically implemented by index types
 pub trait Index: Default + Clone + Copy + Eq {
     fn new(u: u32) -> Self;
-    fn into_usize(&self) -> usize;
+    fn into_usize(self) -> usize;
 }
 
 /// An index counter, which you might want to make independently of a store or
@@ -75,7 +75,7 @@ macro_rules! index_type {
                 Self(u)
             }
 
-            fn into_usize(&self) -> usize {
+            fn into_usize(self) -> usize {
                 self.0 as usize
             }
         }
