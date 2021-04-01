@@ -575,7 +575,23 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
         match expr {
             Some(expr) => self.lower_into(&place, expr),
-            None => Ok(()),
+            None => {
+                // FIXME This would be better if we made an artifical AST
+                // node containing the return value, then just called
+                // `lower_into` on it.
+                //
+                // In any case, this block is a mess that needs to be cleaned up.
+                let ty_expected = self.gr.type_of(&place, self.ctx);
+                let mut span = *span;
+                span.start = span.end; // Just get the closing bracket
+                self.expect_type(&[ty_expected], self.ctx.common.unit, span)?;
+                let rhs = Rvalue {
+                    data: RvalueKind::Use(Operand::Const(Value::Unit)),
+                    span,
+                };
+                self.assn_stmt(place, rhs);
+                Ok(())
+            }
         }
     }
 
