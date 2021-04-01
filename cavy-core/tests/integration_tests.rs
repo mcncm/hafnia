@@ -57,6 +57,10 @@ test_compiles! {
         fn main() {}
     }
 
+    main_returns fail [Typecheck] {
+        fn main() { true }
+    }
+
     function_call {
         fn f() { }
         fn main() { f() }
@@ -80,6 +84,11 @@ test_compiles! {
         }
     }
 
+    return_empty_wrong_type fail [Typecheck] {
+        fn main() { }
+        fn f() -> bool { }
+    }
+
     double_move fail [Analysis] {
         fn main() {
             let x = ?false;
@@ -93,6 +102,14 @@ test_compiles! {
             let y = ?false;
             y = y;
             y = y;
+        }
+    }
+
+    move_from_tuple_fine_grained [Analysis] {
+        fn main() {
+            let pair = (?true, ?true);
+            let x = pair.0;
+            let y = pair.1;
         }
     }
 

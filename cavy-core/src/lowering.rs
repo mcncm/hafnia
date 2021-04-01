@@ -342,7 +342,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Assn { lhs, rhs } => self.lower_into_assn(place, lhs, rhs),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
-            ExprKind::Field { .. } => todo!(),
+            ExprKind::Field(root, field) => self.lower_into_field(place, root, field),
             ExprKind::Tuple(elems) => self.lower_into_tuple(place, elems),
             ExprKind::Struct { .. } => todo!(),
             ExprKind::IntArr { item, reps } => {
@@ -440,6 +440,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    /// Lower an assignment *expression*, as on the rhs of `let x = (y = 2);`.
     fn lower_into_assn(&mut self, place: Place, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
@@ -526,6 +527,20 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     name: ident.data,
                 });
             }
+        };
+        self.assn_stmt(place, rhs);
+        Ok(())
+    }
+
+    fn lower_into_field(&mut self, place: Place, root: &Expr, field: &Field) -> Maybe<()> {
+        let root_ty = self.type_expr(root)?;
+        let root_place = self.gr.auto_place(root_ty);
+        self.lower_into(&root_place, root)?;
+        let field_ty = self.type_field(root, field)?;
+        let field_place = self.gr.auto_place(field_ty);
+        let rhs = Rvalue {
+            span: Span::default(), // FIXME manifestly incorrect
+            data: RvalueKind::Use(self.operand_of(field_place)),
         };
         self.assn_stmt(place, rhs);
         Ok(())
@@ -788,43 +803,31 @@ mod typing {
             Ok(ty)
         }
 
-        fn type_field(&mut self, root: &Expr, field: &Field) -> Maybe<TyId> {
+        pub fn type_field(&mut self, root: &Expr, field: &Field) -> Maybe<TyId> {
             let root = self.type_expr(root)?;
-            let ty = match (&self.ctx.types[root], &field.data) {
+            match self.field_of(root, field) {
+                Some(ty) => Ok(ty),
+                None => Err(self.errors.push(errors::NoSuchField {
+                    span: field.span,
+                    ty: root,
+                    field: field.data.clone(),
+                })),
+            }
+        }
+
+        pub fn field_of(&self, root: TyId, field: &Field) -> Option<TyId> {
+            match (&self.ctx.types[root], &field.data) {
                 (Type::Tuple(tys), FieldKind::Num(n)) => {
-                    // NOTE: maybe I should change these `u32`s for `usize`s?
                     let n = *n as usize;
                     if n < tys.len() {
-                        tys[n]
+                        Some(tys[n])
                     } else {
-                        return Err(self.errors.push(errors::TupleOutOfBounds {
-                            span: field.span,
-                            len: tys.len(),
-                            attempt: n,
-                        }));
+                        None
                     }
                 }
-                // NOTE This arm can be simplified when `if let` guards are stabilized!
-                (Type::UserType(udt), FieldKind::Ident(ident)) => {
-                    if let Some((_, ty)) = udt.fields.iter().find(|(symb, _)| symb == ident) {
-                        *ty
-                    } else {
-                        return Err(self.errors.push(errors::NoSuchField {
-                            span: field.span,
-                            ty: root,
-                            field: FieldKind::Ident(*ident),
-                        }));
-                    }
-                }
-                (_, kind) => {
-                    return Err(self.errors.push(errors::NoSuchField {
-                        span: field.span,
-                        ty: root,
-                        field: kind.clone(),
-                    }))
-                }
-            };
-            Ok(ty)
+                (Type::UserType(_udt), FieldKind::Ident(_ident)) => todo!(),
+                _ => None,
+            }
         }
 
         fn type_binop(&mut self, left: &Expr, op: &ast::BinOp, right: &Expr) -> Maybe<TyId> {
