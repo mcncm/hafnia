@@ -7,7 +7,7 @@ use crate::{
     source::Span,
     store::Index,
     store::Store,
-    types::{TyId, Type},
+    types::{TyId, Type, UserType},
     values::Value,
 };
 use std::collections::HashMap;
@@ -49,15 +49,38 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         }
     }
 
+    /// Turn an AST struct definition into a concrete type
+    fn resolve_struct(&mut self, struct_: &Struct, table: &Table) -> Maybe<TyId> {
+        let mut fields = Vec::with_capacity(struct_.fields.len());
+        for field in struct_.fields.iter() {
+            let name = field.name.data;
+            let ty = self.resolve_type(&field.ty, table)?;
+            fields.push((name, ty));
+        }
+
+        let udt = UserType {
+            def_name: struct_.name.data,
+            fields,
+            tag: None,
+        };
+
+        let ty = self.ctx.types.intern(Type::UserType(udt));
+        Ok(ty)
+    }
+
     /// Resolve things stored in global tables: function type signatures,
     /// user-defined types, and so on.
     fn resolve_global(&mut self) -> Result<(), ()> {
         // Resolve user-defined types
         for (id, udt) in self.ast.udts.idx_enumerate() {
+            let table = &self.ast.tables[udt.table];
             match &udt.kind {
-                UdtKind::Struct(struct_) => todo!(),
+                UdtKind::Struct(struct_) => {
+                    if let Ok(ty) = self.resolve_struct(struct_, table) {
+                        self.udt_tys.insert(id, ty);
+                    }
+                }
                 UdtKind::Alias(annot) => {
-                    let table = &self.ast.tables[udt.table];
                     if let Ok(ty) = self.resolve_type(annot, table) {
                         self.udt_tys.insert(id, ty);
                     }
