@@ -220,7 +220,7 @@ pub enum LocalKind {
 
 /// As in rustc, a `Place` where data can be stored is a path rooted at a local
 /// variable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Place {
     pub root: LocalId,
     pub path: Vec<usize>,

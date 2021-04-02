@@ -1,22 +1,170 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use super::common::{Analysis, Forward, Lattice};
 use crate::{
-    mir::{self, BlockData, BlockKind, LocalId, Operand, RvalueKind},
+    mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
     source::Span,
 };
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum MoveKind {
+    /// A field of this data was moved
+    Partial,
+    /// This whole object was moved
+    Full,
+}
+
+/// A case of a variable being moved
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Move {
+    pub kind: MoveKind,
+    pub site: Span,
+}
+
+impl Move {
+    fn full(site: Span) -> Self {
+        Self {
+            kind: MoveKind::Full,
+            site,
+        }
+    }
+
+    fn partial(site: Span) -> Self {
+        Self {
+            kind: MoveKind::Partial,
+            site,
+        }
+    }
+}
+
+// This kind of pointer tree is going to be terrible for the cache. Should I
+// replace it with a flat array?
+/// The spans where a path and its fields have been (first) moved.
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct MoveTree {
+    /// Site of the first move
+    mov: Option<Move>,
+    /// Fields of the data
+    fields: Vec<MoveTree>,
+}
+
+impl MoveTree {
+    // TODO This requires searching the whole tree, probably making a bunch of
+    // cache misses. These trees are small, so it's not the end of the world,
+    // but do keep in the back of your mind that you should be looking for
+    // better data structures here.
+    /// Get the first moved child, if there is one.
+    fn moved_child(&self) -> Option<&Move> {
+        for chld in self.fields.iter() {
+            if chld.mov.is_some() {
+                return chld.mov.as_ref();
+            } else {
+                return chld.moved_child();
+            }
+        }
+        None
+    }
+
+    /// Make sure that there are at least `n` fields
+    fn ensure_fields(&mut self, n: usize) {
+        let len = self.fields.len();
+        let extra = n.saturating_sub(len);
+        self.fields
+            .extend(std::iter::repeat(MoveTree::default()).take(extra));
+    }
+
+    /// Do a mutating tree merge between this and another `MoveTree`, with
+    /// left-precedence. This is called `extend` to match the api of
+    /// `std::collections::HashMap`.
+    ///
+    /// Invariant: `self` and `other` refer to the same path
+    fn extend(&mut self, other: &MoveTree) {
+        if let (None, m @ Some(_)) = (&mut self.mov, &other.mov) {
+            self.mov = m.clone()
+        };
+        // Before we finish the merge, there must be at least as many fields in
+        // `self` as in `other`.
+        self.ensure_fields(other.fields.len());
+        // Finally, recurse on the subtrees
+        for (fl, fr) in self.fields.iter_mut().zip(other.fields.iter()) {
+            fl.extend(fr);
+        }
+    }
+
+    /// Add a move at this point, and return a pair of moves if this is a new
+    /// double-move.
+    fn update(&mut self, mov: Move) -> Option<(Move, Move)> {
+        use MoveKind::*;
+        match (&self.mov, &mov.kind) {
+            (None, Full) => self.mov = Some(mov),
+            (Some(m), _) => return Some((m.clone(), mov)),
+            _ => {}
+        }
+        None
+    }
+}
+
+struct DoubleMove {
+    fst: Span,
+    snd: Span,
+}
+
 /// Counts how many times a local has been moved.
-///
-/// NOTE Could use some kind of bit vector for this; it would save a lot of
-/// space and time.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct MoveState {
     /// This map points to the location of the first move of each local that is
     /// not currently live.
-    pub moved: HashMap<LocalId, Span>,
-    /// This map points to the second move, if any, of each local
-    pub double_moved: HashMap<LocalId, (Span, Span)>,
+    pub moves: HashMap<LocalId, MoveTree>,
+    pub double_moves: HashMap<Place, (Move, Move)>,
+}
+
+impl MoveState {
+    fn get_mut(&mut self, place: &Place) -> Option<&mut MoveTree> {
+        self.moves.get_mut(&place.root).map(|mut node| {
+            for elem in place.path.iter().copied() {
+                node = &mut node.fields[elem];
+            }
+            node
+        })
+    }
+
+    /// Insert a move at the *end* of a path
+    fn insert_move(&mut self, place: &Place, site: Span) {
+        let MoveState {
+            ref mut moves,
+            ref mut double_moves,
+        } = self;
+
+        let mut node = moves.entry(place.root).or_insert(MoveTree::default());
+
+        for elem in place.path.iter() {
+            // Then this with an intermediate ('partial move')
+            if let Some(moves) = node.update(Move::partial(site)) {
+                double_moves.insert(place.clone(), moves);
+            }
+            // Make sure there are enough fields in the tree to take the next step
+            node.ensure_fields(*elem + 1);
+            node = &mut node.fields[*elem];
+        }
+        // Update the final path element ('full move')
+        if let Some(moves) = node.update(Move::full(site)) {
+            double_moves.insert(place.clone(), moves);
+        }
+    }
+
+    /// Update the move state with a new operand use, adding anything linear to
+    /// the moved list.
+    fn move_from(&mut self, arg: &Operand, span: Span) {
+        if let Operand::Move(place) = arg {
+            self.insert_move(place, span);
+        }
+    }
+
+    /// Update a variable into which a value has been moved by taking it off the
+    /// moved list.
+    fn move_into(&mut self, place: &Place) {
+        self.get_mut(place).map(|node| node.mov = None);
+    }
 }
 
 impl Lattice for MoveState {
@@ -25,48 +173,44 @@ impl Lattice for MoveState {
         // might be in there. That's ok: if we're merging from two paths, we
         // only care if at least one of them has moved something.
         //
-        // Note as above, the clone might be too expensive.
-        let mut moved = self.moved.clone();
-        moved.extend(&other.moved);
+        // Note as above, all the clones might be expensive.
+        let mut moved = self.moves.clone();
+        // Extend the move-sites maps by merging the trees
+        for (&local, other) in &other.moves {
+            match moved.entry(local) {
+                Entry::Occupied(mut e) => e.get_mut().extend(other),
+                Entry::Vacant(e) => {
+                    e.insert(other.clone());
+                }
+            }
+        }
 
-        let mut double_moved = self.double_moved.clone();
-        double_moved.extend(&other.double_moved);
+        // TODO it's an important condition to check that the `double_moves`
+        // join operation is consistent with the `moves` join operation. They
+        // might not be!
+        let mut double_moves = self.double_moves.clone();
+        // We can't just use the `extend` API because `Place` is not `Copy`. We
+        // could of course derive it, but I want to be careful about not copying
+        // too many of them.
+        for (place, moves) in &other.double_moves {
+            // FIXME Ach, two lookups. This can be done with `raw_entry_mut`,
+            // which is an unstable library feature.
+            if double_moves.get(place).is_none() {
+                double_moves.insert(place.clone(), moves.clone());
+            }
+        }
 
         Self {
-            moved,
-            double_moved,
+            moves: moved,
+            double_moves,
         }
     }
 
     fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
         Self {
-            moved: HashMap::new(),
-            double_moved: HashMap::new(),
+            moves: HashMap::new(),
+            double_moves: HashMap::new(),
         }
-    }
-}
-
-impl MoveState {
-    /// Update the move state with a new operand use, adding anything linear to
-    /// the moved list.
-    fn move_from(&mut self, arg: &Operand, span: Span) {
-        if let Operand::Move(place) = arg {
-            match self.moved.entry(place.root) {
-                Entry::Occupied(entry) => {
-                    let fst_move = *entry.get();
-                    self.double_moved.insert(place.root, (fst_move, span));
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(span);
-                }
-            }
-        }
-    }
-
-    /// Update a variable into which a value has been moved by taking it off the
-    /// moved list.
-    fn move_into(&mut self, place: &LocalId) {
-        self.moved.remove(place);
     }
 }
 
@@ -97,7 +241,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
             RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
             RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
         }
-        state.move_into(&place.root);
+        state.move_into(&place);
     }
 
     fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {

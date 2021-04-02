@@ -532,18 +532,35 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    fn lower_into_field(&mut self, place: Place, root: &Expr, field: &Field) -> Maybe<()> {
-        let root_ty = self.type_expr(root)?;
-        let root_place = self.gr.auto_place(root_ty);
-        self.lower_into(&root_place, root)?;
-        let field_ty = self.type_field(root, field)?;
-        let field_place = self.gr.auto_place(field_ty);
+    fn lower_into_field(&mut self, place: Place, head: &Expr, field: &Field) -> Maybe<()> {
+        let rhs = self.unroll_fields(head, field)?;
         let rhs = Rvalue {
             span: Span::default(), // FIXME manifestly incorrect
-            data: RvalueKind::Use(self.operand_of(field_place)),
+            data: RvalueKind::Use(self.operand_of(rhs)),
         };
         self.assn_stmt(place, rhs);
         Ok(())
+    }
+
+    /// An odd method, different from all the others of this struct. The
+    /// goal is to unroll a linked-list-like sequence of field accesses into a single path
+    fn unroll_fields(&mut self, head: &Expr, field: &Field) -> Maybe<Place> {
+        let head_ty = self.type_expr(head)?;
+        let mut place = match &head.data {
+            ExprKind::Ident(ident) => {
+                let id = self.st.get(&ident.data).unwrap();
+                (*id).into()
+            }
+            ExprKind::Field(head, field) => self.unroll_fields(head, &field)?,
+            _ => {
+                let head_place = self.gr.auto_place(head_ty);
+                self.lower_into(&head_place, head)?;
+                head_place
+            }
+        };
+        let (field, _) = self.field_of(head_ty, field).unwrap();
+        place.path.push(field);
+        Ok(place)
     }
 
     fn lower_into_tuple(&mut self, place: Place, elems: &[Expr]) -> Maybe<()> {
@@ -822,7 +839,7 @@ mod typing {
         pub fn type_field(&mut self, root: &Expr, field: &Field) -> Maybe<TyId> {
             let root = self.type_expr(root)?;
             match self.field_of(root, field) {
-                Some(ty) => Ok(ty),
+                Some((_, ty)) => Ok(ty),
                 None => Err(self.errors.push(errors::NoSuchField {
                     span: field.span,
                     ty: root,
@@ -831,12 +848,13 @@ mod typing {
             }
         }
 
-        pub fn field_of(&self, root: TyId, field: &Field) -> Option<TyId> {
+        /// Resolves a field to its index position and type, if it exists
+        pub fn field_of(&self, root: TyId, field: &Field) -> Option<(usize, TyId)> {
             match (&self.ctx.types[root], &field.data) {
                 (Type::Tuple(tys), FieldKind::Num(n)) => {
                     let n = *n as usize;
                     if n < tys.len() {
-                        Some(tys[n])
+                        Some((n, tys[n]))
                     } else {
                         None
                     }

@@ -180,8 +180,8 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             Use(val) => match val {
                 Operand::Const(_) => {}
                 Operand::Copy(rplace) | Operand::Move(rplace) => {
-                    // FIXME This is currently failing integration test
-                    // `return_assigned`, but that's probably ok.
+                    //  FIXME [TESTFAIL: return_assigned] This is currently
+                    //  failing an integration test but that's probably ok.
                     let bits = self.bindings.get(&rplace.root).unwrap().clone();
                     self.bindings.insert(lplace.root, bits);
                 }
