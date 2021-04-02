@@ -284,11 +284,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Parse a type alias item
     fn type_item(&mut self) -> Maybe<()> {
-        let _name = self.consume_ident()?;
+        let name = self.consume_ident()?;
         self.consume(Lexeme::Equal)?;
-        let _ty = self.type_annotation()?;
+        let annot = self.type_annotation()?;
         self.consume(Lexeme::Semicolon)?;
-        todo!()
+        self.insert_udt(name, annot)
     }
 
     /// Parse a struct item; intern the type and insert the name in a symbol table
@@ -300,8 +300,21 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             fields,
         };
 
+        self.insert_udt(name, struct_)
+    }
+
+    /// Put a user-defined type into the symbol table. Not a parsing method!
+    fn insert_udt<T>(&mut self, name: ast::Ident, udt: T) -> Maybe<()>
+    where
+        T: Into<UdtKind>,
+    {
+        let kind = udt.into();
+        let udt = Udt {
+            table: self.table_id,
+            kind,
+        };
         // Insert the struct into the AST's collection of user-defined types
-        let udt_id = self.ast.udts.insert(struct_.into());
+        let udt_id = self.ast.udts.insert(udt);
 
         // Finally, insert the user-defined type id into the local symbol table.
         match self.ast.insert_udt(self.table_id, name.data, udt_id) {

@@ -11,7 +11,6 @@ use crate::{
     values::Value,
 };
 use std::collections::HashMap;
-use std::rc::{Rc, Weak};
 
 /// Main entry point for the semantic analysis phase.
 pub fn lower(ast: Ast, ctx: &mut Context) -> Result<Mir, ErrorBuf> {
@@ -21,6 +20,9 @@ pub fn lower(ast: Ast, ctx: &mut Context) -> Result<Mir, ErrorBuf> {
 /// This struct handles lowering from the Ast to the Mir.
 pub struct MirBuilder<'mir, 'ctx> {
     ast: &'mir Ast,
+    /// Translation table for user-defined types, whose `UdtId` are erased in
+    /// the MIR.
+    udt_tys: HashMap<UdtId, TyId>,
     /// The context must be mutable to add types to its interner. If type
     /// checking and inference becomes a separate, earlier phase, this will no
     /// longer be necessary.
@@ -36,8 +38,10 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     pub fn new(ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
         let mir = Mir::new(&ast);
         let sigs = Store::with_capacity(ast.funcs.len());
+        let udt_tys = HashMap::new();
         Self {
             ast,
+            udt_tys,
             ctx,
             mir,
             sigs,
@@ -45,16 +49,40 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         }
     }
 
-    /// Typecheck all functions in the AST, enter the lowered functions in the cfg
-    pub fn lower(mut self) -> Result<Mir, ErrorBuf> {
-        // First compute all of the function signatures...
+    /// Resolve things stored in global tables: function type signatures,
+    /// user-defined types, and so on.
+    fn resolve_global(&mut self) -> Result<(), ()> {
+        // Resolve user-defined types
+        for (id, udt) in self.ast.udts.idx_enumerate() {
+            match &udt.kind {
+                UdtKind::Struct(struct_) => todo!(),
+                UdtKind::Alias(annot) => {
+                    let table = &self.ast.tables[udt.table];
+                    if let Ok(ty) = self.resolve_type(annot, table) {
+                        self.udt_tys.insert(id, ty);
+                    }
+                }
+            }
+        }
+
+        // Then compute all of the function signatures...
         for func in self.ast.funcs.iter() {
-            if let Ok(sig) = self.type_sig(&func.sig, &func.table) {
+            let table = &self.ast.tables[func.table];
+            if let Ok(sig) = self.type_sig(&func.sig, table) {
                 self.sigs.insert(sig);
             }
         }
 
         if !self.errors.is_empty() {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Typecheck all functions in the AST, enter the lowered functions in the cfg
+    pub fn lower(mut self) -> Result<Mir, ErrorBuf> {
+        if let Err(_) = self.resolve_global() {
             return Err(self.errors);
         }
 
@@ -62,7 +90,8 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         // signatures of called functions must be available during lowering.
         for (fn_id, func) in self.ast.funcs.idx_enumerate() {
             // The table argument serves to pass in the function's environment.
-            let builder = GraphBuilder::new(self.ctx, &self.sigs, &self.ast, fn_id, func);
+            let builder =
+                GraphBuilder::new(self.ctx, &self.sigs, &self.ast, &self.udt_tys, fn_id, func);
             let graph = match builder.lower() {
                 Ok(gr) => gr,
                 Err((gr, mut errs)) => {
@@ -85,18 +114,18 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     }
 
     /// Resolve the types in a function signature
-    pub fn type_sig(&mut self, sig: &Sig, tab: &TableId) -> Maybe<TypedSig> {
+    pub fn type_sig(&mut self, sig: &Sig, tab: &Table) -> Maybe<TypedSig> {
         let params = sig
             .params
             .iter()
             .map(|p| {
-                let ty = typing::resolve_type(&p.ty, tab, &mut self.ctx);
+                let ty = self.resolve_type(&p.ty, tab);
                 Ok((p.name.data, ty?))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let output = match &sig.output {
             None => self.ctx.types.intern(Type::unit()),
-            Some(annot) => typing::resolve_type(annot, tab, &mut self.ctx)?,
+            Some(annot) => self.resolve_type(annot, tab)?,
         };
         let sig = TypedSig {
             params,
@@ -104,6 +133,12 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             span: sig.span,
         };
         Ok(sig)
+    }
+
+    // FIXME this convenience method just wraps `typing::resolve_type` to supply
+    // its bevy of arguments.
+    fn resolve_type(&mut self, ty: &Annot, tab: &Table) -> Maybe<TyId> {
+        typing::resolve_type(ty, tab, &self.udt_tys, &mut self.errors, &mut self.ctx)
     }
 }
 
@@ -173,11 +208,13 @@ pub struct GraphBuilder<'mir, 'ctx> {
     body: &'mir Expr,
     /// The MIR representation of this function
     gr: Graph,
+    /// User-defined type translation table
+    udt_tys: &'mir HashMap<UdtId, TyId>,
     /// A stack of locals tables
     st: SymbolTable,
     /// The currently active items table
     table: TableId,
-    /// The AST tables
+    /// The AST items tables
     tables: &'mir TableStore,
     /// A "typing context" of types assigned to each expression node
     gamma: HashMap<NodeId, TyId>,
@@ -193,6 +230,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         ctx: &'mir mut Context<'ctx>,
         sigs: &'mir Store<FnId, TypedSig>,
         ast: &'mir Ast,
+        udt_tys: &'mir HashMap<UdtId, TyId>,
         id: FnId,
         func: &'mir Func,
     ) -> Self {
@@ -223,6 +261,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ctx,
             body,
             gr,
+            udt_tys,
             st,
             table,
             tables,
@@ -754,7 +793,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     name: lhs_data,
                 }))
             }
-            (Some(ty), _) => typing::resolve_type(ty, &self.table, self.ctx)?,
+            (Some(ty), _) => self.resolve_type(ty)?,
             (_, Some(rhs)) => self.type_inner(rhs)?,
         };
         let place = self.gr.user_place(ty);
@@ -768,6 +807,18 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn resolve_function(&self, func: &SymbolId) -> Option<FnId> {
         let tab = &self.tables[self.table];
         tab.funcs.get(func).copied()
+    }
+
+    // FIXME this convenience method just wraps `typing::resolve_type` to supply
+    // its bevy of arguments.
+    fn resolve_type(&mut self, ty: &Annot) -> Maybe<TyId> {
+        typing::resolve_type(
+            ty,
+            &self.tables[self.table],
+            &self.udt_tys,
+            &mut self.errors,
+            &mut self.ctx,
+        )
     }
 }
 
@@ -1015,10 +1066,31 @@ mod typing {
         }
     }
 
+    /*
+    FIXME This type signature is *ridiculous*. There's a lot of context
+    (including a `Context`) explicitly passed in. We need a table. `errs` is
+    an error buffer passed in in order to be able to get 'no-such-types
+    errors out. So, why not make this function a method of `MirBuilder` or
+    `GraphBuilder`? Well, because it has to be used by both of them! If
+    there's a better way to make it available to both, and have a simpler
+    signature, I'd love to know it.
+
+    Come to think of it, this bit of ugliness could be cleaned up by using
+    another IR between the AST and MIR, mut like Rust does, in which names
+    and types are all resolved, but no further lowering has taken place.
+    */
+
     /// Resolve an annotation to a type, given a table (scope) in which it
     /// should appear. This should eventually be farmed out to a type inference
-    /// module/crate, and/or appear earlier in the compilaton process. For now it doesn't hurt to include here.
-    pub fn resolve_type<'a>(annot: &Annot, tab: &TableId, ctx: &mut Context<'a>) -> Maybe<TyId> {
+    /// module/crate, and/or appear earlier in the compilaton process. For now
+    /// it doesn't hurt to include here.
+    pub fn resolve_type(
+        annot: &Annot,
+        tab: &Table,
+        udt_tys: &HashMap<UdtId, TyId>,
+        errs: &mut ErrorBuf,
+        ctx: &mut Context,
+    ) -> Maybe<TyId> {
         let ty = match &annot.data {
             AnnotKind::Bool => ctx.common.bool,
             AnnotKind::Uint(u) => match u {
@@ -1031,31 +1103,37 @@ mod typing {
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
-                    .map(|ann| resolve_type(ann, tab, ctx))
+                    .map(|ann| resolve_type(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
                 ctx.types.intern(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
-                let inner = resolve_type(inner, tab, ctx)?;
+                let inner = resolve_type(inner, tab, udt_tys, errs, ctx)?;
                 ctx.types.intern(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
-                let ty = resolve_type(inner, tab, ctx)?;
+                let ty = resolve_type(inner, tab, udt_tys, errs, ctx)?;
                 resolve_annot_question(ctx, ty)?
             }
             AnnotKind::Bang(inner) => {
-                let ty = resolve_type(inner, tab, ctx)?;
+                let ty = resolve_type(inner, tab, udt_tys, errs, ctx)?;
                 resolve_annot_bang(ctx, ty)?
             }
-            AnnotKind::Ident(_) => {
-                todo!();
-            }
+            AnnotKind::Ident(ident) => match tab.udts.get(&ident.data) {
+                Some(udt_id) => *udt_tys.get(udt_id).unwrap(),
+                None => {
+                    return Err(errs.push(errors::NoSuchType {
+                        span: ident.span,
+                        name: ident.data,
+                    }));
+                }
+            },
             AnnotKind::Func(params, ret) => {
                 let param_tys = params
                     .iter()
-                    .map(|ann| resolve_type(ann, tab, ctx))
+                    .map(|ann| resolve_type(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
-                let ret_ty = resolve_type(ret, tab, ctx)?;
+                let ret_ty = resolve_type(ret, tab, udt_tys, errs, ctx)?;
                 ctx.types.intern(Type::Func(param_tys, ret_ty))
             }
             AnnotKind::Ord => ctx.common.ord,
@@ -1245,5 +1323,14 @@ mod errors {
         pub ty: TyId,
         #[ctx]
         pub field: FieldKind,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "type `{name}` can't be found in this scope"]
+    pub struct NoSuchType {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub name: SymbolId,
     }
 }

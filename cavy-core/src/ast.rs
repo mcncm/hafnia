@@ -26,7 +26,7 @@ use std::fmt;
 // analysis pass.
 store_type! { FnStore : FnId -> Func }
 store_type! { BodyStore : BodyId -> Expr }
-store_type! { UdtStore : UdtId -> UserDefinedType }
+store_type! { UdtStore : UdtId -> Udt }
 store_type! { TableStore : TableId -> Table }
 index_type! { NodeId }
 
@@ -603,14 +603,29 @@ pub enum AnnotKind {
     Ord,
 }
 
+/// A user-defined type
 #[derive(Debug)]
-pub enum UserDefinedType {
-    Struct(Struct),
+pub struct Udt {
+    /// The table in which this type is defined
+    pub table: TableId,
+    pub kind: UdtKind,
 }
 
-impl From<Struct> for UserDefinedType {
+#[derive(Debug)]
+pub enum UdtKind {
+    Struct(Struct),
+    Alias(Annot),
+}
+
+impl From<Struct> for UdtKind {
     fn from(s: Struct) -> Self {
         Self::Struct(s)
+    }
+}
+
+impl From<Annot> for UdtKind {
+    fn from(a: Annot) -> Self {
+        Self::Alias(a)
     }
 }
 
