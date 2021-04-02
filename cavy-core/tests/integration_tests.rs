@@ -137,6 +137,22 @@ test_compiles! {
         }
     }
 
+    partial_move_tuple_nested fail [Analysis] {
+        fn main() {
+            let pair = (?true, (?true, ?false));
+            let x = pair.1;
+            let y = pair;
+        }
+    }
+
+    partial_move_tuple_nested_2 fail [Analysis] {
+        fn main() {
+            let pair = (?true, (?true, ?false));
+            let x = pair.1.1;
+            let y = pair;
+        }
+    }
+
     chained_move [Analysis] {
         fn main() {
             let x = ?false;

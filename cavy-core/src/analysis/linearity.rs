@@ -55,14 +55,11 @@ impl MoveTree {
     // better data structures here.
     /// Get the first moved child, if there is one.
     fn moved_child(&self) -> Option<&Move> {
-        for chld in self.fields.iter() {
-            if chld.mov.is_some() {
-                return chld.mov.as_ref();
-            } else {
-                return chld.moved_child();
-            }
-        }
-        None
+        self.fields
+            .iter()
+            .map(|f| f.mov.as_ref().or_else(|| f.moved_child()))
+            .find(|e| e.is_some())
+            .flatten()
     }
 
     /// Make sure that there are at least `n` fields
