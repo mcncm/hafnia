@@ -113,6 +113,30 @@ test_compiles! {
         }
     }
 
+    prev_partial_move_tuple fail [Analysis] {
+        fn main() {
+            let pair = (?true, ?true);
+            let x = pair.0;
+            let y = pair;
+        }
+    }
+
+    prev_classical_partial_move_tuple [Analysis] {
+        fn main() {
+            let pair = (true, ?true);
+            let x = pair.0;
+            let y = pair;
+        }
+    }
+
+    later_partial_move_tuple fail [Analysis] {
+        fn main() {
+            let pair = (?true, ?true);
+            let y = pair;
+            let x = pair.0;
+        }
+    }
+
     chained_move [Analysis] {
         fn main() {
             let x = ?false;

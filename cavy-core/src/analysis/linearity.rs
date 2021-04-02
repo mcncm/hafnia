@@ -96,7 +96,12 @@ impl MoveTree {
     fn update(&mut self, mov: Move) -> Option<(Move, Move)> {
         use MoveKind::*;
         match (&self.mov, &mov.kind) {
-            (None, Full) => self.mov = Some(mov),
+            (None, Full) => {
+                if let Some(m) = self.moved_child() {
+                    return Some((m.clone(), mov));
+                }
+                self.mov = Some(mov);
+            }
             (Some(m), _) => return Some((m.clone(), mov)),
             _ => {}
         }

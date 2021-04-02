@@ -261,7 +261,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     /// Push an assignment statement into the current basic block
     fn assn_stmt(&mut self, place: Place, rhs: Rvalue) {
         let stmt = mir::Stmt {
-            span: Span::default(), // FIXME this is always wrong
+            span: rhs.span,
             kind: mir::StmtKind::Assn(place, rhs),
         };
         self.push_stmt(stmt);
@@ -535,7 +535,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_into_field(&mut self, place: Place, head: &Expr, field: &Field) -> Maybe<()> {
         let rhs = self.unroll_fields(head, field)?;
         let rhs = Rvalue {
-            span: Span::default(), // FIXME manifestly incorrect
+            // FIXME Throughout this module, there are a lot of places where I
+            // should be propagating spans downward, but I end up dropping,
+            // approximating, or reconstructing them (as here).
+            span: head.span.join(&field.span).unwrap(),
             data: RvalueKind::Use(self.operand_of(rhs)),
         };
         self.assn_stmt(place, rhs);
