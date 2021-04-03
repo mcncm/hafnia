@@ -656,7 +656,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     fn expression_inner(&mut self) -> Maybe<Expr> {
         // The head or root of the expression
-        let mut expr = match self.peek_lexeme() {
+        let expr = match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::For) => self.for_expr(),
             Some(Lexeme::LBrace) => self.block_expr(),
@@ -666,14 +666,6 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             None => Err(self.errors.push(UnexpectedEof { span: self.loc })),
         }?;
-        // Field accesses against this expression
-        while let Some(Dot) = self.peek_lexeme() {
-            self.tokens.next();
-            let field = self.field()?;
-            let span = expr.span.join(&field.span).unwrap();
-            let kind = ExprKind::Field(Box::new(expr), field);
-            expr = self.node(kind, span);
-        }
         Ok(expr)
     }
 
@@ -893,7 +885,16 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
                 // Just an identifier
                 let span = ident.span;
-                Ok(self.node(ExprKind::Ident(ident), span))
+                // Field accesses against this expression
+                let mut expr = self.node(ExprKind::Ident(ident), span);
+                while let Some(Dot) = self.peek_lexeme() {
+                    self.tokens.next();
+                    let field = self.field()?;
+                    let span = expr.span.join(&field.span).unwrap();
+                    let kind = ExprKind::Field(Box::new(expr), field);
+                    expr = self.node(kind, span);
+                }
+                Ok(expr)
             }
             LParen => self.finish_group(token.span),
 

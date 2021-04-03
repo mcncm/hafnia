@@ -105,6 +105,13 @@ test_compiles! {
         }
     }
 
+    field_access_binds_tightly [Analysis] {
+        fn main() {
+            let x = (4u8, 111u8);
+            let y: ?u8 = ?x.0;
+        }
+    }
+
     move_from_tuple_fine_grained [Analysis] {
         fn main() {
             let pair = (?true, ?true);
