@@ -72,7 +72,7 @@ impl CtxDisplay for SpanReport {
             annot.push_str(&msg);
         }
         // How long should line numbers be?
-        let digits = util::count_digits(line.linum);
+        let digits = util::count_digits(line.linum.into());
         // Reported code with annotations. This is a little ad-hoc, and should
         // really be some kind of "join" over reported lines.
         write!(

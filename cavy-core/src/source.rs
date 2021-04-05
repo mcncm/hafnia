@@ -12,9 +12,13 @@ use std::{collections::HashMap, str::Chars};
 store_type! { SrcStore : SrcId -> SrcObject }
 
 pub struct SrcLine<'a> {
+    /// The substring of the line in question
     pub code: &'a str,
-    pub linum: usize,
+    /// 1-indexed line number
+    pub linum: std::num::NonZeroUsize,
+    /// Start byte position
     pub start: usize,
+    /// End byte position
     pub end: usize,
 }
 
@@ -36,7 +40,8 @@ pub struct SrcObject {
 }
 
 impl SrcObject {
-    pub fn get_linum(&self, pos: SrcPoint) -> usize {
+    /// Get the zero-indexed line number
+    pub fn line_index(&self, pos: SrcPoint) -> usize {
         // Pointing to a newline character shouldn't happen; actual spans
         // shouldn't point *at* newlines, but they might cross them.
         self.newlines
@@ -57,20 +62,22 @@ impl SrcObject {
     ///
     ///  ```
     pub fn get_line(&self, pos: SrcPoint) -> SrcLine<'_> {
-        let linum = self.get_linum(pos);
+        let line_idx = self.line_index(pos);
         // line start: inclusive if pointing to first line, exclusive
         // otherwise (to exclude newline character)
-        let start = match linum {
+        let start = match line_idx {
             0 => 0,
             n => self.newlines[n - 1] + 1,
         };
 
         // line end
-        let end = if linum == self.newlines.len() {
+        let end = if line_idx == self.newlines.len() {
             self.code.len()
         } else {
-            self.newlines[linum]
+            self.newlines[line_idx]
         };
+
+        let linum = std::num::NonZeroUsize::new(line_idx + 1).unwrap();
 
         SrcLine {
             code: &self.code[start..end],
