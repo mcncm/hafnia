@@ -996,7 +996,18 @@ mod typing {
                         None
                     }
                 }
-                (Type::UserType(_udt), FieldKind::Ident(_ident)) => todo!(),
+                (Type::UserType(udt), FieldKind::Ident(ident)) => {
+                    // NOTE This is an O(n) lookup. Maybe we should store both the
+                    // Vec of fields (for ordering) and the hashmap (for random
+                    // lookup) in the udt.
+                    udt.fields.iter().enumerate().find_map(|(n, (field, ty))| {
+                        if field == ident {
+                            Some((n, *ty))
+                        } else {
+                            None
+                        }
+                    })
+                }
                 _ => None,
             }
         }
