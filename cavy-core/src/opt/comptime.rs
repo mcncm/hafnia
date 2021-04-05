@@ -11,8 +11,11 @@
 //! NOTE This currently works under the assumption that there are no infinite
 //! loops or recursion. It's one of the points of failure when that eventually
 //! changes.
+//!
+//! TODO There is a *lot* of allocation happening in here. It might be faster to
+//! allocate a single `Vec` once for each local, instead of building trees.
 
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{context::Context, mir::*, values::Value};
 
@@ -41,7 +44,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
 
     match &mut blk.kind {
         BlockKind::Goto(_) => {}
-        BlockKind::Switch { cond, ref mut blks } => match interp.value_of(cond) {
+        BlockKind::Switch { cond, ref mut blks } => match interp.env.get(cond) {
             Some(&Value::Bool(false)) => blk.kind = BlockKind::Goto(blks[0]),
             Some(&Value::Bool(true)) => blk.kind = BlockKind::Goto(blks[1]),
             _ => {}
@@ -55,7 +58,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
             // Replace args with compile-time evaluated ones
             for arg in args.iter_mut() {
                 if let Operand::Copy(place) | Operand::Move(place) = arg {
-                    if let Some(c) = interp.value_of(&place) {
+                    if let Some(c) = interp.env.get(&place) {
                         *arg = Operand::Const(c.clone());
                     }
                 }
@@ -73,7 +76,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
 fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
     match &mut stmt.kind {
         StmtKind::Assn(place, ref mut rhs) => {
-            if let Evaluated::Yes = interp.exec(place.clone(), rhs) {
+            if let Evaluated::Yes = interp.exec(place, rhs) {
                 stmt.kind = StmtKind::Nop;
             }
         }
@@ -88,34 +91,62 @@ enum Evaluated {
     No,
 }
 
+struct Environment {
+    backing_store: HashMap<LocalId, Value>,
+}
+
+impl Environment {
+    fn new() -> Self {
+        Self {
+            backing_store: HashMap::new(),
+        }
+    }
+
+    fn get(&self, place: &Place) -> Option<&Value> {
+        self.backing_store
+            .get(&place.root)
+            .and_then(|value| Some(value.follow(&place.path)))
+    }
+
+    fn insert(&mut self, place: &Place, value: Value) {
+        match self.backing_store.entry(place.root) {
+            Entry::Occupied(mut e) => {
+                let old = e.get_mut().follow_mut(&place.path);
+                *old = value;
+            }
+            Entry::Vacant(e) => {
+                let mut root = Value::Unit;
+                let slot = root.follow_mut(&place.path);
+                *slot = value;
+                e.insert(root);
+            }
+        };
+    }
+}
+
 struct Interpreter {
-    env: HashMap<LocalId, Value>,
+    env: Environment,
 }
 
 /// A graph-local interpreter for classical computations
 impl Interpreter {
     fn new() -> Self {
         Self {
-            env: HashMap::new(),
+            env: Environment::new(),
         }
-    }
-
-    fn value_of(&self, place: &Place) -> Option<&Value> {
-        self.env.get(&place.root)
     }
 
     fn operand_value(&self, operand: &Operand) -> Option<Value> {
         match operand {
             Operand::Const(v) => Some(v.clone()),
-            Operand::Copy(place) | Operand::Move(place) => self.env.get(&place.root).cloned(),
+            Operand::Copy(place) | Operand::Move(place) => self.env.get(place).cloned(),
         }
     }
 
     /// If possible, evaluate the right-hand side, and store the result in the
     /// left-hand-side. It's possible to evaluate the rhs iff everything
     /// appearing in it is const.
-    fn exec(&mut self, place: Place, rhs: &mut Rvalue) -> Evaluated {
-        let place = place.root; // FIXME
+    fn exec(&mut self, place: &Place, rhs: &mut Rvalue) -> Evaluated {
         use Operand::*;
         match &mut rhs.data {
             RvalueKind::BinOp(op, u, v) => {
@@ -136,7 +167,7 @@ impl Interpreter {
 
             RvalueKind::UnOp(UnOp::Linear, Copy(rplace))
             | RvalueKind::UnOp(UnOp::Linear, Move(rplace)) => {
-                if let Some(c) = self.env.get(&rplace.root) {
+                if let Some(c) = self.env.get(rplace) {
                     rhs.data = RvalueKind::UnOp(UnOp::Linear, Const(c.clone()));
                 }
                 Evaluated::No
@@ -144,7 +175,7 @@ impl Interpreter {
 
             RvalueKind::UnOp(UnOp::Not, Copy(rplace))
             | RvalueKind::UnOp(UnOp::Not, Move(rplace)) => {
-                if let Some(c) = self.env.get(&rplace.root).cloned() {
+                if let Some(c) = self.env.get(rplace).cloned() {
                     self.env.insert(place, self.eval_not(c));
                     return Evaluated::Yes;
                 }
@@ -155,7 +186,7 @@ impl Interpreter {
 
             RvalueKind::Use(val) => match val {
                 Move(rplace) | Copy(rplace) => {
-                    if let Some(c) = self.env.get(&rplace.root).cloned() {
+                    if let Some(c) = self.env.get(rplace).cloned() {
                         self.env.insert(place, c);
                         return Evaluated::Yes;
                     }

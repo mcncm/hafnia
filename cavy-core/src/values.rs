@@ -17,10 +17,8 @@ pub enum Value {
     U16(u16),
     U32(u32),
 
-    // Composite types
-    Tuple(Vec<Value>),
-
-    Array(Vec<Value>),
+    // All composite types are to be represented as lists
+    List(Vec<Value>),
 
     // Provisional, experimental type
     Ord,
@@ -34,15 +32,52 @@ impl Value {
         }
     }
 
-    pub fn make_range<T>(lower: T, upper: T) -> Self
-    where
-        std::ops::Range<T>: IntoIterator,
-        // This is pretty verbose. Why doesn’t a simple `T: Into<Self>` or
-        // `Self: From<T>` bound work?
-        Self: From<<std::ops::Range<T> as IntoIterator>::Item>,
-    {
-        let values = (lower..upper).into_iter().map(|val| val.into()).collect();
-        Value::Array(values)
+    /// Get the path positions held by this value
+    pub fn slot(&self, elem: usize) -> &Value {
+        match self {
+            Value::List(factors) => &factors[elem],
+            // Invariant enforced by type checker
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn slot_mut(&mut self, elem: usize) -> &mut Value {
+        if let Value::Unit = self {
+            let factors = std::iter::repeat(Value::Unit).take(elem).collect();
+            *self = Value::List(factors);
+        }
+
+        match self {
+            Value::List(factors) => {
+                if elem >= factors.len() {
+                    let diff = 1 + elem - factors.len();
+                    factors.extend(std::iter::repeat(Value::Unit).take(diff));
+                }
+                &mut factors[elem]
+            }
+            // Invariant enforced by type checker
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    /// Follow a path to its end from this value
+    pub fn follow(&self, path: &[usize]) -> &Value {
+        let mut node = self;
+        for elem in path {
+            node = node.slot(*elem);
+        }
+        node
+    }
+
+    /// Follow a path to its end from this value, mutably
+    pub fn follow_mut(&mut self, path: &[usize]) -> &mut Value {
+        let mut node = self;
+        for elem in path {
+            node = node.slot_mut(*elem);
+        }
+        node
     }
 }
 
@@ -72,7 +107,7 @@ impl From<u32> for Value {
 
 impl From<()> for Value {
     fn from((): ()) -> Value {
-        Value::Tuple(vec![])
+        Value::List(vec![])
     }
 }
 
@@ -89,16 +124,7 @@ impl fmt::Display for Value {
             U16(x) =>      write!(f, "{}", x),
             U32(x) =>      write!(f, "{}", x),
 
-            Array(data) => {
-                let repr = data
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "[{}]", repr)
-            }
-
-            Tuple(data) => {
+            List(data) => {
                 let repr = data
                     .iter()
                     .map(|x| format!("{}", x))

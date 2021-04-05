@@ -446,7 +446,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
-        let ty = self.gr.locals[place.root].ty;
+        let ty = self.gr.type_of(&place, self.ctx);
         // Let's assume for now that all the binops take the same two types, in
         // both arguments. This won't be true, but it's a convenient simplifying
         // assumption.

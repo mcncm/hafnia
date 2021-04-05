@@ -270,6 +270,12 @@ test_compiles! {
         }
     }
 
+    create_tuple_binop [Typecheck] {
+        fn main() {
+            let t = (true, 1 + 2);
+        }
+    }
+
     // TODO we have a ways to go: this doesn’t lower yet!
     create_struct [Parse] {
         struct A {
