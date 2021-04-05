@@ -59,14 +59,26 @@ impl Ast {
 
     /// Try to insert a function into a table.
     /// TODO make this a method of Table
-    pub fn insert_fn(&mut self, tab: TableId, symb: SymbolId, func: FnId) -> Option<FnId> {
-        self.tables[tab].funcs.insert(symb, func)
+    pub fn insert_fn(
+        &mut self,
+        tab: TableId,
+        symb: SymbolId,
+        span: Span,
+        func: FnId,
+    ) -> Option<(FnId, Span)> {
+        self.tables[tab].funcs.insert(symb, (func, span))
     }
 
     /// Try to insert a user-defined type into a table.
     /// TODO ibid
-    pub fn insert_udt(&mut self, tab: TableId, symb: SymbolId, udt: UdtId) -> Option<UdtId> {
-        self.tables[tab].udts.insert(symb, udt)
+    pub fn insert_udt(
+        &mut self,
+        tab: TableId,
+        symb: SymbolId,
+        span: Span,
+        udt: UdtId,
+    ) -> Option<(UdtId, Span)> {
+        self.tables[tab].udts.insert(symb, (udt, span))
     }
 
     /// Create a new table without parent
@@ -92,9 +104,12 @@ pub struct Table {
     /// "shadow" functions, and it will one day be possible to define lambda
     /// expressions, this table contains those functions defined with the `fn`
     /// keyword. They must be unique.
-    pub funcs: HashMap<SymbolId, FnId>,
-    /// User-defined types visible in this scope.
-    pub udts: HashMap<SymbolId, UdtId>,
+    ///
+    /// Function ids are stored with their definition site.
+    pub funcs: HashMap<SymbolId, (FnId, Span)>,
+    /// User-defined types visible in this scope. User-defined type ids are
+    /// stored with their definition site.
+    pub udts: HashMap<SymbolId, (UdtId, Span)>,
 }
 
 impl Table {

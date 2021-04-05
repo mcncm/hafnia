@@ -317,12 +317,16 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let udt_id = self.ast.udts.insert(udt);
 
         // Finally, insert the user-defined type id into the local symbol table.
-        match self.ast.insert_udt(self.table_id, name.data, udt_id) {
+        match self
+            .ast
+            .insert_udt(self.table_id, name.data, name.span, udt_id)
+        {
             None => Ok(()),
             // A struct with this name was already in the local symbol table
-            Some(_) => Err(self
-                .errors
-                .push(errors::MultipleDefinitions { span: name.span })),
+            Some((_, fst)) => Err(self.errors.push(errors::MultipleDefinitions {
+                fst,
+                snd: name.span,
+            })),
         }
     }
 
@@ -376,13 +380,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
 
         // Finally, insert the function id into the local symbol table.
-        match self.ast.insert_fn(self.table_id, name.data, func_id) {
+        match self
+            .ast
+            .insert_fn(self.table_id, name.data, name.span, func_id)
+        {
             // No other function with this name
             None => Ok(()),
             // A function with this name was already in the local symbol table
-            Some(_) => Err(self
-                .errors
-                .push(errors::MultipleDefinitions { span: name.span })),
+            Some((_, fst)) => Err(self.errors.push(errors::MultipleDefinitions {
+                fst,
+                snd: name.span,
+            })),
         }
     }
 
@@ -1090,10 +1098,12 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    #[msg = "multiple definitions of function in this scope"]
+    #[msg = "multiple definitions of item in this scope"]
     pub struct MultipleDefinitions {
-        #[span]
-        pub span: Span,
+        #[span(msg = "this item was first defined here...")]
+        pub fst: Span,
+        #[span(msg = "...and defined again here")]
+        pub snd: Span,
     }
 
     #[derive(Diagnostic)]

@@ -54,7 +54,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         let mut fields = Vec::with_capacity(struct_.fields.len());
         for field in struct_.fields.iter() {
             let name = field.name.data;
-            let ty = self.resolve_type(&field.ty, table)?;
+            let ty = self.resolve_annot(&field.ty, table)?;
             fields.push((name, ty));
         }
 
@@ -81,7 +81,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
                     }
                 }
                 UdtKind::Alias(annot) => {
-                    if let Ok(ty) = self.resolve_type(annot, table) {
+                    if let Ok(ty) = self.resolve_annot(annot, table) {
                         self.udt_tys.insert(id, ty);
                     }
                 }
@@ -142,13 +142,13 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             .params
             .iter()
             .map(|p| {
-                let ty = self.resolve_type(&p.ty, tab);
+                let ty = self.resolve_annot(&p.ty, tab);
                 Ok((p.name.data, ty?))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let output = match &sig.output {
             None => self.ctx.types.intern(Type::unit()),
-            Some(annot) => self.resolve_type(annot, tab)?,
+            Some(annot) => self.resolve_annot(annot, tab)?,
         };
         let sig = TypedSig {
             params,
@@ -160,8 +160,8 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
     // FIXME this convenience method just wraps `typing::resolve_type` to supply
     // its bevy of arguments.
-    fn resolve_type(&mut self, ty: &Annot, tab: &Table) -> Maybe<TyId> {
-        typing::resolve_type(ty, tab, &self.udt_tys, &mut self.errors, &mut self.ctx)
+    fn resolve_annot(&mut self, ty: &Annot, tab: &Table) -> Maybe<TyId> {
+        typing::resolve_annot(ty, tab, &self.udt_tys, &mut self.errors, &mut self.ctx)
     }
 }
 
@@ -406,7 +406,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Field(root, field) => self.lower_into_field(place, root, field),
             ExprKind::Tuple(elems) => self.lower_into_tuple(place, elems),
-            ExprKind::Struct { .. } => todo!(),
+            ExprKind::Struct { ty, fields } => self.lower_into_struct(place, ty, fields),
             ExprKind::IntArr { item, reps } => {
                 todo!()
             }
@@ -637,6 +637,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    fn lower_into_struct(
+        &mut self,
+        _place: Place,
+        _ty: &Ident,
+        _fields: &[(Ident, Expr)],
+    ) -> Maybe<()> {
+        todo!();
+    }
+
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: Place, block: &Block) -> Maybe<()> {
         #![allow(unused_variables)]
@@ -816,7 +825,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     name: lhs_data,
                 }))
             }
-            (Some(ty), _) => self.resolve_type(ty)?,
+            (Some(ty), _) => self.resolve_annot(ty)?,
             (_, Some(rhs)) => self.type_inner(rhs)?,
         };
         let place = self.gr.user_place(ty);
@@ -827,15 +836,26 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    /// Resolve a function from a local name
     fn resolve_function(&self, func: &SymbolId) -> Option<FnId> {
         let tab = &self.tables[self.table];
-        tab.funcs.get(func).copied()
+        tab.funcs.get(func).map(|(fn_id, _)| *fn_id)
     }
 
-    // FIXME this convenience method just wraps `typing::resolve_type` to supply
+    /// Resolve a type from a local name
+    fn resolve_type(&self, ty: &SymbolId) -> Option<TyId> {
+        let tab = &self.tables[self.table];
+        tab.udts
+            .get(ty)
+            .map(|(udt, _)| self.udt_tys.get(udt))
+            .flatten()
+            .copied()
+    }
+
+    // FIXME this convenience method just wraps `typing::resolve_annot` to supply
     // its bevy of arguments.
-    fn resolve_type(&mut self, ty: &Annot) -> Maybe<TyId> {
-        typing::resolve_type(
+    fn resolve_annot(&mut self, ty: &Annot) -> Maybe<TyId> {
+        typing::resolve_annot(
             ty,
             &self.tables[self.table],
             &self.udt_tys,
@@ -881,7 +901,7 @@ mod typing {
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
-                ExprKind::Struct { ty, .. } => todo!(),
+                ExprKind::Struct { ty, .. } => self.type_struct(ty)?,
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
@@ -1087,6 +1107,16 @@ mod typing {
             let ty = self.ctx.types.intern(Type::Tuple(tys));
             Ok(ty)
         }
+
+        fn type_struct(&mut self, ty: &Ident) -> Maybe<TyId> {
+            match self.resolve_type(&ty.data) {
+                Some(ty) => Ok(ty),
+                None => Err(self.errors.push(errors::NoSuchType {
+                    span: ty.span,
+                    name: ty.data,
+                })),
+            }
+        }
     }
 
     /*
@@ -1107,7 +1137,7 @@ mod typing {
     /// should appear. This should eventually be farmed out to a type inference
     /// module/crate, and/or appear earlier in the compilaton process. For now
     /// it doesn't hurt to include here.
-    pub fn resolve_type(
+    pub fn resolve_annot(
         annot: &Annot,
         tab: &Table,
         udt_tys: &HashMap<UdtId, TyId>,
@@ -1126,24 +1156,24 @@ mod typing {
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
-                    .map(|ann| resolve_type(ann, tab, udt_tys, errs, ctx))
+                    .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
                 ctx.types.intern(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
-                let inner = resolve_type(inner, tab, udt_tys, errs, ctx)?;
+                let inner = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
                 ctx.types.intern(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
-                let ty = resolve_type(inner, tab, udt_tys, errs, ctx)?;
+                let ty = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
                 resolve_annot_question(ctx, ty)?
             }
             AnnotKind::Bang(inner) => {
-                let ty = resolve_type(inner, tab, udt_tys, errs, ctx)?;
+                let ty = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
                 resolve_annot_bang(ctx, ty)?
             }
             AnnotKind::Ident(ident) => match tab.udts.get(&ident.data) {
-                Some(udt_id) => *udt_tys.get(udt_id).unwrap(),
+                Some((udt_id, _)) => *udt_tys.get(udt_id).unwrap(),
                 None => {
                     return Err(errs.push(errors::NoSuchType {
                         span: ident.span,
@@ -1154,9 +1184,9 @@ mod typing {
             AnnotKind::Func(params, ret) => {
                 let param_tys = params
                     .iter()
-                    .map(|ann| resolve_type(ann, tab, udt_tys, errs, ctx))
+                    .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
-                let ret_ty = resolve_type(ret, tab, udt_tys, errs, ctx)?;
+                let ret_ty = resolve_annot(ret, tab, udt_tys, errs, ctx)?;
                 ctx.types.intern(Type::Func(param_tys, ret_ty))
             }
             AnnotKind::Ord => ctx.common.ord,
