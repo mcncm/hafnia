@@ -639,11 +639,47 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     fn lower_into_struct(
         &mut self,
-        _place: Place,
-        _ty: &Ident,
-        _fields: &[(Ident, Expr)],
+        place: Place,
+        name: &Ident,
+        fields: &[(Ident, Expr)],
     ) -> Maybe<()> {
-        todo!();
+        let ty = self.resolve_type(&name.data).unwrap();
+        // We have to fully-resolve the type again, but this time *just* to get
+        // the fields into the right order.
+        let udt = match &self.ctx.types[ty] {
+            Type::UserType(udt) => udt,
+            _ => unreachable!(),
+        };
+        let fields: HashMap<SymbolId, &Expr> = fields.iter().map(|(k, v)| (k.data, v)).collect();
+        // FIXME Horror! A completely unnecessary clone. The trouble here is
+        // that we're immutably borrowing &self up above, in order to get the
+        // struct specification in the first place. Down below, we're calling
+        // `lower_into`, which requires a `&mut self`. And, you know what, the
+        // borrow checker is correct: the `udt` reference could be invalidated
+        // during `lower_into`, since it might well insert new types into the
+        // `Context`. I wonder if there's *any* reasonable way around this
+        // clone.
+        //
+        // I'm giving up performance left and right for the sake of getting this
+        // working, but it's a problem for another day.
+        let udt_fields = udt.fields.clone();
+
+        for (n, (field, _)) in udt_fields.iter().enumerate() {
+            let expr = match fields.get(field) {
+                Some(expr) => expr,
+                None => {
+                    return Err(self.errors.push(errors::MissingStructField {
+                        span: name.span,
+                        name: name.data,
+                        field: *field,
+                    }))
+                }
+            };
+            let mut place = place.clone();
+            place.path.push(n);
+            self.lower_into(&place, expr)?;
+        }
+        Ok(())
     }
 
     /// Lower an AST block and store its value in the given location.
@@ -829,10 +865,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             (_, Some(rhs)) => self.type_inner(rhs)?,
         };
         let place = self.gr.user_place(ty);
+        // NOTE It’s unfortunate that there is no way to insert this binding
+        // *before* types are resolved. This can create a spurioius "unbound
+        // name" error for each reference to a variable whose declaration is
+        // broken.
+        self.st.insert(lhs_data, place.root);
         if let Some(rhs) = rhs {
             self.lower_into(&place, rhs)?;
         }
-        self.st.insert(lhs_data, place.root);
         Ok(())
     }
 
@@ -901,7 +941,7 @@ mod typing {
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
-                ExprKind::Struct { ty, .. } => self.type_struct(ty)?,
+                ExprKind::Struct { ty, fields } => self.type_struct(ty, fields)?,
                 ExprKind::IntArr { item, reps } => todo!(),
                 ExprKind::ExtArr(_) => todo!(),
                 ExprKind::Block(block) => self.type_block(block)?,
@@ -1108,14 +1148,57 @@ mod typing {
             Ok(ty)
         }
 
-        fn type_struct(&mut self, ty: &Ident) -> Maybe<TyId> {
-            match self.resolve_type(&ty.data) {
-                Some(ty) => Ok(ty),
-                None => Err(self.errors.push(errors::NoSuchType {
-                    span: ty.span,
-                    name: ty.data,
-                })),
+        fn type_struct(&mut self, name: &Ident, fields: &[(Ident, Expr)]) -> Maybe<TyId> {
+            let ty = match self.resolve_type(&name.data) {
+                Some(ty) => ty,
+                None => {
+                    return Err(self.errors.push(errors::NoSuchType {
+                        span: name.span,
+                        name: name.data,
+                    }))
+                }
+            };
+
+            let udt = match &self.ctx.types[ty] {
+                Type::UserType(udt) => udt,
+                _ => unreachable!(),
+            };
+
+            // Now we want to check that the fields all have the right names and
+            // types. The crux here is an efficient symmetric set difference,
+            // which isn't all that hard, but you've got to do it.
+
+            // First, compare everything in the received fields to the expected
+            // fields.
+            //
+            // FIXME For now we'll collect the expected fields in a hashset
+            // here, but this will do many more allocations than necessary and
+            // recompute this set many times. It should be stored with the
+            // data structure itself.
+            let expected: HashMap<SymbolId, TyId> =
+                udt.fields.iter().map(|(s, t)| (*s, *t)).collect();
+            for (name, _) in fields.iter() {
+                match expected.get(&name.data) {
+                    // Don't need to check here if if a field's type is actually
+                    // correct! That will be happen when lowering the field.
+                    Some(_) => {}
+                    None => {
+                        return Err(self.errors.push(errors::NoSuchField {
+                            span: name.span,
+                            ty,
+                            field: name.data.into(),
+                        }))
+                    }
+                };
             }
+
+            // Now we should go the other way, doing the same thing. But! This
+            // would mean allocating for another `HashMap`. In fact, we'll be
+            // doing that *anyway* in the method `lower_into_struct`. So we've
+            // put that half of the set difference up there, at the cost of
+            // making this code a little more spagghetified.
+
+            Ok(ty)
         }
     }
 
@@ -1376,6 +1459,17 @@ mod errors {
         pub ty: TyId,
         #[ctx]
         pub field: FieldKind,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "missing initializer for the field `{field}` of `{name}`"]
+    pub struct MissingStructField {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub name: SymbolId,
+        #[ctx]
+        pub field: SymbolId,
     }
 
     #[derive(Diagnostic)]

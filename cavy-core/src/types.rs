@@ -132,7 +132,7 @@ impl Type {
     pub fn slot(&self, elem: usize) -> TyId {
         match self {
             Type::Tuple(tys) => tys[elem],
-            Type::UserType(_udt) => unimplemented!(),
+            Type::UserType(udt) => udt.fields[elem].1,
             _ => unreachable!(),
         }
     }

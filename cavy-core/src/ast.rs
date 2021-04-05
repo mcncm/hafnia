@@ -227,6 +227,12 @@ pub enum FieldKind {
     Num(u32),
 }
 
+impl From<SymbolId> for FieldKind {
+    fn from(s: SymbolId) -> Self {
+        Self::Ident(s)
+    }
+}
+
 // NOTE I'm not sure I really want to be implementing this on things in the AST,
 // instead of *just* the lightweight ID types. However, this is useful for
 // certain diagnostic messages (see `lowering::errors::NoSuchField`).
