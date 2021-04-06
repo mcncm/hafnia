@@ -1,13 +1,12 @@
 //! This module is home to the `Context` data structure central to the
 //! compilation process.
 
-use crate::interner_type;
-use crate::session::Config;
-use crate::session::Phase;
+use crate::session::{Config, Phase};
 use crate::source::{SrcId, SrcStore};
-use crate::types::{TyId, Type, TypeInterner};
+use crate::types::{CachedTypeInterner, TyId, Type};
 use crate::{cavy_errors::ErrorBuf, num::Uint};
-use std::fmt;
+use crate::{interner_type, types::TypeSize};
+use std::{collections::HashMap, fmt};
 
 interner_type! { SymbolInterner : SymbolId -> String }
 
@@ -38,14 +37,14 @@ pub struct Context<'ctx> {
     /// Interned symbols
     pub symbols: SymbolInterner,
     /// Interned types
-    pub types: TypeInterner,
+    pub types: CachedTypeInterner,
     /// Common types, made more conveniently accessible
     pub common: CommonTypes,
 }
 
 impl<'ctx> Context<'ctx> {
     pub fn new(conf: &'ctx Config) -> Self {
-        let mut types = TypeInterner::new();
+        let mut types = CachedTypeInterner::new();
         let common = CommonTypes {
             unit: types.intern(Type::unit()),
             bool: types.intern(Type::Bool),
@@ -71,6 +70,14 @@ impl<'ctx> Context<'ctx> {
 
     pub fn last_phase(&self) -> &Phase {
         &self.conf.phase_config.last_phase
+    }
+
+    pub fn intern_symb(&mut self, symb: String) -> SymbolId {
+        self.symbols.intern(symb)
+    }
+
+    pub fn intern_ty(&mut self, ty: Type) -> TyId {
+        self.types.intern(ty)
     }
 }
 

@@ -210,7 +210,7 @@ impl FromToken for Ident {
         use crate::token::Lexeme;
         match token.lexeme {
             Lexeme::Ident(name) => Ok(Self {
-                data: ctx.symbols.intern(name),
+                data: ctx.intern_symb(name),
                 span: token.span,
             }),
             _ => Err(()),

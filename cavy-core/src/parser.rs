@@ -755,7 +755,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             // overly verbose...
             Ident(symb) => {
-                let data = self.ctx.symbols.intern(symb);
+                let data = self.ctx.intern_symb(symb);
                 Annot {
                     span,
                     data: AnnotKind::Ident(ast::Ident { span, data }),
@@ -801,7 +801,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let span = token.span;
         let field = match token.lexeme {
             Ident(ident) => {
-                let ident = self.ctx.symbols.intern(ident);
+                let ident = self.ctx.intern_symb(ident);
                 Field {
                     span,
                     data: FieldKind::Ident(ident),

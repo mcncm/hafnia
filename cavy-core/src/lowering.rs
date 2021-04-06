@@ -64,7 +64,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             tag: None,
         };
 
-        let ty = self.ctx.types.intern(Type::UserType(udt));
+        let ty = self.ctx.intern_ty(Type::UserType(udt));
         Ok(ty)
     }
 
@@ -147,7 +147,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let output = match &sig.output {
-            None => self.ctx.types.intern(Type::unit()),
+            None => self.ctx.intern_ty(Type::unit()),
             Some(annot) => self.resolve_annot(annot, tab)?,
         };
         let sig = TypedSig {
@@ -1155,7 +1155,7 @@ mod typing {
                 .iter()
                 .map(|elem| self.type_expr(elem))
                 .collect::<Maybe<Vec<TyId>>>()?;
-            let ty = self.ctx.types.intern(Type::Tuple(tys));
+            let ty = self.ctx.intern_ty(Type::Tuple(tys));
             Ok(ty)
         }
 
@@ -1252,11 +1252,11 @@ mod typing {
                     .iter()
                     .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
-                ctx.types.intern(Type::Tuple(inner_types))
+                ctx.intern_ty(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
                 let inner = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
-                ctx.types.intern(Type::Array(inner))
+                ctx.intern_ty(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
                 let ty = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
@@ -1281,7 +1281,7 @@ mod typing {
                     .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
                 let ret_ty = resolve_annot(ret, tab, udt_tys, errs, ctx)?;
-                ctx.types.intern(Type::Func(param_tys, ret_ty))
+                ctx.intern_ty(Type::Func(param_tys, ret_ty))
             }
             AnnotKind::Ord => ctx.common.ord,
         };
@@ -1299,7 +1299,7 @@ mod typing {
             Uint(u) => Q_Uint(u),
             _ => todo!(),
         };
-        Ok(ctx.types.intern(ty))
+        Ok(ctx.intern_ty(ty))
     }
 
     // Can remove this attribute after implementing the rest of the function
@@ -1312,7 +1312,7 @@ mod typing {
             Q_Uint(u) => Uint(u),
             _ => todo!(),
         };
-        Ok(ctx.types.intern(ty))
+        Ok(ctx.intern_ty(ty))
     }
 }
 

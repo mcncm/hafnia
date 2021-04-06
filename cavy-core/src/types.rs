@@ -6,36 +6,108 @@ use crate::{
     context::{CtxDisplay, SymbolId},
     interner_type,
 };
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, ops::Index};
+use std::{fmt, ops::IndexMut};
 
 interner_type! { TypeInterner : TyId -> Type }
+
+/// A type interner that also carries some satellite data caches
+pub struct CachedTypeInterner {
+    /// The interner proper
+    interner: TypeInterner,
+    /// A cache of the sizes of each interned type, eliminating the need to
+    /// recompute sizes recursively.
+    size_cache: HashMap<TyId, TypeSize>,
+    /// A cache of the structural properties of each interned type.
+    props_cache: HashMap<TyId, StructuralDiscipline>,
+}
+
+impl CachedTypeInterner {
+    pub fn new() -> Self {
+        Self {
+            interner: TypeInterner::new(),
+            size_cache: HashMap::new(),
+            props_cache: HashMap::new(),
+        }
+    }
+
+    // NOTE This isn't quite perfect: because Types are containers for `TyId`s,
+    // not `Box<Type>`s, we'll end up making redundant hashtable lookups when
+    // caching a type.
+    pub fn intern(&mut self, ty: Type) -> TyId {
+        let sz = ty.size(self);
+        let props = StructuralDiscipline {
+            linear: ty.is_linear(self),
+            ord: ty.is_ord(self),
+        };
+        let ty = self.interner.intern(ty);
+        self.size_cache.insert(ty, sz);
+        self.props_cache.insert(ty, props);
+        ty
+    }
+
+    pub fn contains(&self, ty: &Type) -> bool {
+        self.interner.contains(ty)
+    }
+
+    /// Get the size of an interned typed
+    pub fn size_of(&self, ty: &TyId) -> &TypeSize {
+        &self.size_cache[ty]
+    }
+
+    /// Get the structural properties of an interned type
+    pub fn props_of(&self, ty: &TyId) -> &StructuralDiscipline {
+        &self.props_cache[ty]
+    }
+}
+
+impl Index<TyId> for CachedTypeInterner {
+    type Output = Type;
+
+    fn index(&self, index: TyId) -> &Self::Output {
+        &self.interner[index]
+    }
+}
+
+impl IndexMut<TyId> for CachedTypeInterner {
+    fn index_mut(&mut self, index: TyId) -> &mut Self::Output {
+        &mut self.interner[index]
+    }
+}
 
 impl TyId {
     pub fn is_uint(&self, ctx: &Context) -> bool {
         matches!(ctx.types[*self], Type::Uint(_))
     }
 
-    /// Mutually recursive with `Type::is_linear`.
+    /// Check the linearity of a type, with the help of the global context
     pub fn is_linear(&self, ctx: &Context) -> bool {
-        let ty = &ctx.types[*self];
-        ty.is_linear(ctx)
+        self.is_linear_inner(&ctx.types)
     }
 
-    /// Mutually recursive with `Type::size`.
-    pub fn size(&self, ctx: &Context) -> TypeSize {
-        let ty = &ctx.types[*self];
-        ty.size(ctx)
+    fn is_linear_inner(&self, interner: &CachedTypeInterner) -> bool {
+        interner.props_of(self).linear
     }
 
-    pub fn slot(&self, elem: usize, ctx: &Context) -> TyId {
-        ctx.types[*self].slot(elem)
+    /// Check the bit size of a type, with the help of the global context
+    pub fn size<'a>(&'a self, ctx: &'a Context) -> &'a TypeSize {
+        self.size_inner(&ctx.types)
+    }
+
+    fn size_inner<'a>(&'a self, interner: &'a CachedTypeInterner) -> &'a TypeSize {
+        interner.size_of(self)
+    }
+
+    /// Get the stype in the `n`th slot of a type, if it has one.
+    pub fn slot(&self, n: usize, ctx: &Context) -> TyId {
+        ctx.types[*self].slot(n)
     }
 }
 
 /// This struct tracks the structural properties of a given type
-struct StructuralDiscipline {
+pub struct StructuralDiscipline {
     linear: bool,
+    ord: bool,
 }
 
 /// A struct or enum
@@ -61,6 +133,7 @@ impl UserType {
 }
 
 /// The total size of a type, calculated recursively.
+#[derive(Clone, Copy)]
 pub struct TypeSize {
     /// Number of quantum bits
     pub qsize: usize,
@@ -137,8 +210,8 @@ impl Type {
         }
     }
 
-    /// Number of qubits owned by a type
-    pub fn size(&self, ctx: &Context) -> TypeSize {
+    /// Number of bits owned by a type
+    fn size(&self, interner: &CachedTypeInterner) -> TypeSize {
         match self {
             Type::Bool => TypeSize { qsize: 0, csize: 1 },
             Type::Uint(u) => TypeSize {
@@ -150,36 +223,44 @@ impl Type {
                 qsize: *u as usize,
                 csize: 0,
             },
-            Type::Tuple(elems) => elems.iter().map(|ty| ty.size(ctx)).sum(),
+            Type::Tuple(elems) => elems
+                .iter()
+                .map(|ty| ty.size_inner(interner))
+                .copied()
+                .sum(),
             Type::Array(_) => todo!(),
             Type::Func(_, _) => todo!(),
             Type::UserType(udt) => {
                 let tup = udt.as_tuple();
-                tup.size(ctx)
+                tup.size(interner)
             }
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
         }
     }
 
-    pub fn is_linear(&self, ctx: &Context) -> bool {
+    pub fn is_linear(&self, interner: &CachedTypeInterner) -> bool {
         match self {
             Type::Bool => false,
             Type::Uint(_) => false,
             Type::Q_Bool => true,
             Type::Q_Uint(_) => true,
-            Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear(ctx)),
-            Type::Array(ty) => ty.is_linear(ctx),
+            Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear_inner(interner)),
+            Type::Array(ty) => ty.is_linear_inner(interner),
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
             Type::UserType(ty) => {
-                let lin_tag = ty.tag.map_or(false, |ty| ty.is_linear(ctx));
-                lin_tag || ty.fields.iter().any(|field| field.1.is_linear(ctx))
+                let lin_tag = ty.tag.map_or(false, |ty| ty.is_linear_inner(interner));
+                lin_tag
+                    || ty
+                        .fields
+                        .iter()
+                        .any(|field| field.1.is_linear_inner(interner))
             }
             Type::Ord => true,
         }
     }
 
-    pub fn is_ord(&self, _ctx: &Context) -> bool {
+    pub fn is_ord(&self, _ctx: &CachedTypeInterner) -> bool {
         matches!(self, Type::Ord)
     }
 }
