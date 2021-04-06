@@ -37,9 +37,10 @@ fn get_phase(argmatches: &ArgMatches) -> PhaseConfig {
         Some("typecheck") => Phase::Typecheck,
         Some("analysis") => Phase::Analysis,
         Some("optimization") => Phase::Optimization,
-        Some("evaluate") => Phase::Evaluate,
+        Some("translation") => Phase::Translation,
+        Some("codegen") => Phase::CodeGen,
         Some(_) => unreachable!(),
-        None => Phase::Evaluate,
+        None => Phase::CodeGen,
     };
 
     // If we've gone on to a late-enough pass, should we do the typechecking

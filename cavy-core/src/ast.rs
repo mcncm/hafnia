@@ -202,8 +202,6 @@ pub trait FromToken {
 }
 
 /// A module. For now there's only one module per program.
-pub type Mod = Spanned<Vec<Item>>;
-
 /// Identifier node
 pub type Ident = Spanned<SymbolId>;
 
@@ -551,26 +549,6 @@ pub enum StmtKind {
         lhs: Box<Pattern>,
         ty: Option<Annot>,
         rhs: Option<Box<Expr>>,
-    },
-}
-
-/// An item. For now this wrapper doesn't do anything, but it does make this AST
-/// node more symmetric with respect to the others; future refactoring will also
-/// be easier, if more fields are added.
-pub type Item = Spanned<ItemKind>;
-
-#[derive(Debug, Clone)]
-pub enum ItemKind {
-    Fn {
-        /// Function identifier
-        name: Ident,
-        /// Function parameters consisting of name-type pairs
-        params: Vec<(Ident, Annot)>,
-        /// Return type of the function
-        typ: Option<Annot>,
-        /// Body of the function; guaranteed to be a block.
-        body: Box<Block>,
-        docstring: Option<String>,
     },
 }
 

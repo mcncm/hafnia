@@ -14,7 +14,7 @@ use crate::{
 use crate::{circuit::Gate, mir::*};
 use crate::{circuit::Lir, mir::Mir};
 
-pub fn codegen(mir: &Mir, ctx: &Context) -> Lir {
+pub fn translate(mir: &Mir, ctx: &Context) -> Lir {
     let builder = CircuitBuilder::new(mir, ctx);
     builder.build()
 }
@@ -193,6 +193,9 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         // FIXME This is incorrect, since of course no controls are applied. I
         // think, as we flesh this out, we should get the conditions on each
         // block from the analysis phase.
+        //
+        // Counterargument: we might also not! The block structure can very well
+        // change due to optimizations.
         for blk in blks {
             self.translate_block(*blk);
         }

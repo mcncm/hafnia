@@ -43,8 +43,15 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<L
         return Ok(None);
     }
 
-    let circ = crate::codegen::codegen(&mir, ctx);
-    Ok(Some(circ))
+    let lir = crate::codegen::translate(&mir, ctx);
+    if ctx.last_phase() == &Phase::Translation {
+        if ctx.conf.debug {
+            println!("{}", lir);
+        }
+        return Ok(None);
+    }
+
+    Ok(Some(lir))
 }
 
 /// Compile a program to object code by serializing a circuit representation.

@@ -50,7 +50,8 @@ args:
         - "typecheck"
         - "analysis"
         - "optimization"
-        - "evaluate"
+        - "translation"
+        - "codegen"
   - typecheck:
       long: typecheck
       about: Run the static type-checking pass

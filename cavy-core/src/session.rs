@@ -11,20 +11,21 @@ use std::path::PathBuf;
 pub enum Phase {
     Tokenize,
     Parse,
-    /// After typechecking and lowering
+    /// After typechecking and lowering to MIR
     Typecheck,
     /// After running static analysis checks
     Analysis,
     /// After applying MIR optimizations
     Optimization,
-    /// The tree-walk interpreter: this will be replaced with a `codegen` phase
-    /// or something to that effect.
-    Evaluate,
+    /// Translation from the MIR to the low-level IR
+    Translation,
+    /// The final code generation step
+    CodeGen,
 }
 
 impl Default for Phase {
     fn default() -> Self {
-        Phase::Evaluate
+        Phase::CodeGen
     }
 }
 

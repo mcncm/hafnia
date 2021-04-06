@@ -1,5 +1,5 @@
-use crate::ast::FnId;
 use crate::target::{qasm::Qasm, IntoTarget, Target};
+use crate::{ast::FnId, store::Index};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
@@ -184,5 +184,68 @@ impl<'c> Iterator for CircuitStream<'c> {
             Some(Instruction::Gate(gate)) => Some(gate),
             Some(Instruction::FnCall(_, _)) => todo!(),
         }
+    }
+}
+
+// === Formatting implementations
+
+impl std::fmt::Display for Gate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            X(q) => write!(f, "X {}", q),
+            T { tgt, conj } => {
+                let conj = if *conj { "*" } else { "" };
+                write!(f, "T{} {}", conj, tgt)
+            }
+            H(q) => write!(f, "H {}", q),
+            Z(q) => write!(f, "Z {}", q),
+            CX { tgt, ctrl } => write!(f, "CX {} {}", ctrl, tgt),
+            SWAP { fst, snd } => write!(f, "SWAP {} {}", fst, snd),
+            M(q) => write!(f, "M {}", q),
+        }
+    }
+}
+
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Instruction::Gate(g) => write!(f, "{}", g),
+            Instruction::FnCall(fn_id, args) => {
+                write!(f, "{}(", fn_id.into_usize())?;
+                let mut args = args.iter();
+                if let Some(arg) = args.next() {
+                    write!(f, "{}", arg)?;
+                    for arg in args {
+                        write!(f, ", {}", arg)?;
+                    }
+                }
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+/// Write the body of the routine
+impl std::fmt::Display for LirGraph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for inst in self.instructions.iter() {
+            writeln!(f, "\t{};", inst)?;
+        }
+        Ok(())
+    }
+}
+
+/// Write all the routines
+impl std::fmt::Display for Lir {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (fn_id, gr) in &self.graphs {
+            if *fn_id == self.entry_point {
+                f.write_str("main {\n")?;
+            } else {
+                writeln!(f, "{} {{", fn_id.into_usize())?;
+            }
+            writeln!(f, "{}}}", gr)?;
+        }
+        Ok(())
     }
 }
