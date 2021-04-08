@@ -1,4 +1,3 @@
-use crate::context::Context;
 use crate::num::Uint;
 use crate::source::{Span, SrcId, SrcObject, SrcPoint, SrcStore};
 use crate::token::Lexeme::{Ident, Nat};
@@ -6,6 +5,7 @@ use crate::{
     cavy_errors::ErrorBuf,
     token::{Lexeme, Token, Unsigned},
 };
+use crate::{context::Context, token::Delim};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -58,12 +58,12 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         '?' => Lexeme::Question,
         ';' => Lexeme::Semicolon,
         ':' => Lexeme::Colon,
-        '[' => Lexeme::LBracket,
-        ']' => Lexeme::RBracket,
-        '(' => Lexeme::LParen,
-        ')' => Lexeme::RParen,
-        '{' => Lexeme::LBrace,
-        '}' => Lexeme::RBrace,
+        '[' => Lexeme::LDelim(Delim::Bracket),
+        ']' => Lexeme::RDelim(Delim::Bracket),
+        '(' => Lexeme::LDelim(Delim::Paren),
+        ')' => Lexeme::RDelim(Delim::Paren),
+        '{' => Lexeme::LDelim(Delim::Brace),
+        '}' => Lexeme::RDelim(Delim::Brace),
         '<' => Lexeme::LAngle,
         '>' => Lexeme::RAngle,
         _ => return None,
@@ -496,9 +496,12 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn single_character_tokens() {
+        use crate::token::Delim::*;
         lex_test!("+ * ~ , . ! ? ; [ ] ( ) { }";
                   Plus, Star, Tilde, Comma, Dot, Bang, Question, Semicolon,
-                  LBracket, RBracket, LParen, RParen, LBrace, RBrace);
+                  LDelim(Bracket), RDelim(Bracket),
+                  LDelim(Paren), RDelim(Paren),
+                  LDelim(Brace), RDelim(Brace));
     }
 
     #[test]

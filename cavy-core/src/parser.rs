@@ -20,6 +20,7 @@ use crate::{
     source::Span,
     store::Counter,
     token::{
+        Delim::{self, *},
         Lexeme::{self, *},
         Token,
     },
@@ -27,10 +28,10 @@ use crate::{
     types::Type,
 };
 use errors::*;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
+use std::{collections::HashMap, process::Command};
 use std::{mem, vec::IntoIter};
 
 /// Main entry point for parsing: consumes a token stream and produces a module.
@@ -176,9 +177,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Check for a lexeme and, if it matches, advance.
-    fn match_lexeme(&mut self, lexeme: Lexeme) -> bool {
+    fn match_lexeme(&mut self, lexeme: &Lexeme) -> bool {
         if let Some(actual) = self.tokens.peek() {
-            if actual.lexeme == lexeme {
+            if &actual.lexeme == lexeme {
                 self.next();
                 true
             } else {
@@ -247,6 +248,50 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }))
     }
 
+    fn ldelim(&mut self, delim: Delim) -> Maybe<Token> {
+        self.consume(Lexeme::LDelim(delim))
+    }
+
+    fn rdelim(&mut self, delim: Delim) -> Maybe<Token> {
+        self.consume(Lexeme::RDelim(delim))
+    }
+
+    /// Collect a delimited list of AST elements given a function for parsing
+    /// them, a terminating delimiter (e.g. `}`), and a separator (e.g. `,`).
+    /// Can optionally allow a final separator.
+    fn delimited_list<T>(
+        &mut self,
+        delim: Delim,
+        sep: Lexeme,
+        final_allowed: bool,
+        f: impl std::ops::Fn(&mut Self) -> Maybe<T>,
+    ) -> Maybe<(Vec<T>, Span)> {
+        let opening = self.consume(Lexeme::LDelim(delim))?.span;
+        let mut elems = Vec::new();
+        // NOTE Is it possible to do this more succinctly without the branch?
+        if final_allowed {
+            while self.peek_lexeme() != Some(&RDelim(delim)) {
+                elems.push(f(self)?);
+                if !self.match_lexeme(&sep) {
+                    break;
+                }
+            }
+        } else {
+            // empty case handled separatedly
+            if self.peek_lexeme() != Some(&RDelim(delim)) {
+                loop {
+                    elems.push(f(self)?);
+                    if !self.match_lexeme(&sep) {
+                        break;
+                    }
+                }
+            }
+        }
+        let closing = self.consume(Lexeme::RDelim(delim))?.span;
+        let span = opening.join(&closing).unwrap();
+        Ok((elems, span))
+    }
+
     /// Because identifiers have a parameter, we can’t use the regular `consume`
     /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
     fn consume_ident(&mut self) -> Maybe<ast::Ident> {
@@ -279,7 +324,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             // under a match that catches the item keywords.
             Some(_) => {
                 let expr = Box::new(self.expression()?);
-                if expr.data.requires_semicolon() & self.match_lexeme(Semicolon) {
+                if expr.data.requires_semicolon() & self.match_lexeme(&Semicolon) {
                     Ok(StmtKind::ExprSemi(expr).into())
                 } else {
                     Ok(StmtKind::Expr(expr).into())
@@ -300,7 +345,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         self.insert_udt(name, annot)
     }
 
-    /// Parse a struct item; intern the type and insert the name in a symbol table
+    /// Parse a struct item and insert the name in a symbol table
     fn struct_item(&mut self) -> Maybe<()> {
         let name = self.consume_ident()?;
         let fields = self.struct_fields()?;
@@ -340,15 +385,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn struct_fields(&mut self) -> Maybe<Vec<StructField>> {
-        self.consume(Lexeme::LBrace)?;
-        let mut fields = Vec::new();
-        while self.peek_lexeme() != Some(&RBrace) {
-            fields.push(self.struct_field()?);
-            if !self.match_lexeme(Comma) {
-                break;
-            }
-        }
-        self.consume(Lexeme::RBrace)?;
+        let (fields, _) = self.delimited_list(Brace, Comma, true, Self::struct_field)?;
         Ok(fields)
     }
 
@@ -423,30 +460,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Collect a function signature
     fn function_sig(&mut self) -> Maybe<Sig> {
-        let opening = self.consume(Lexeme::LParen)?.span;
-
-        // Get the parameters
-        let mut params;
-        let mut closing;
-        if let Some(RParen) = self.peek_lexeme() {
-            params = vec![];
-            closing = self.next().unwrap().span;
-        } else {
-            // There's at least one parameter
-            params = vec![self.function_param()?];
-            while self.match_lexeme(Comma) {
-                params.push(self.function_param()?);
-            }
-            closing = self.consume(RParen)?.span;
-        }
-
+        let (params, mut span) = self.delimited_list(Paren, Comma, false, Self::function_param)?;
         let output = self.function_return_type()?;
-
         if let Some(annot) = &output {
-            closing = annot.span;
+            span = span.join(&annot.span).unwrap();
         }
-
-        let span = opening.join(&closing).unwrap();
 
         let sig = Sig {
             params,
@@ -468,7 +486,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn function_return_type(&mut self) -> Maybe<Option<Annot>> {
-        if self.match_lexeme(MinusRAngle) {
+        if self.match_lexeme(&MinusRAngle) {
             return Ok(Some(self.type_annotation()?));
         }
         Ok(None)
@@ -482,13 +500,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let opening = self.next().unwrap().span;
         // For now, only admit symbols on the lhs.
         let lhs = Box::new(self.consume_ident()?.into());
-        let ty = if self.match_lexeme(Colon) {
+        let ty = if self.match_lexeme(&Colon) {
             Some(self.type_annotation()?)
         } else {
             None
         };
 
-        let rhs = if self.match_lexeme(Equal) {
+        let rhs = if self.match_lexeme(&Equal) {
             Some(Box::new(self.expression()?))
         } else {
             None
@@ -510,7 +528,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let token = self.token()?;
         // TODO should check that all names are unique
         match token.lexeme {
-            Lexeme::Ident(_) => {
+            Ident(_) => {
                 let ident = ast::Ident::from_token(token, self.ctx).unwrap();
                 let lvalue = LValue {
                     span: ident.span,
@@ -518,7 +536,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 };
                 Ok(lvalue)
             }
-            LParen => self.finish_lvalue_tuple(token.span),
+            LDelim(Paren) => self.finish_lvalue_tuple(token.span),
             _ => todo!(),
         }
     }
@@ -534,7 +552,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     #[inline(always)]
     fn finish_lvalue_tuple(&mut self, opening: Span) -> Maybe<LValue> {
         // Finish right away if the next token is a close-paren
-        if let Some(&Lexeme::RParen) = self.peek_lexeme() {
+        if let Some(&LDelim(Paren)) = self.peek_lexeme() {
             let closing = self.next().unwrap().span;
             let span = opening.join(&closing).unwrap();
             let lvalue = LValue {
@@ -549,9 +567,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             // Tuples with one element should have a single trailing comma to
             // disambiguate from groups.
             let mut items = vec![head];
-            while self.match_lexeme(Comma) {
+            while self.match_lexeme(&Comma) {
                 items.push(self.lvalue()?);
-                if let Some(&RParen) = &self.peek_lexeme() {
+                if let Some(&RDelim(Paren)) = &self.peek_lexeme() {
                     break;
                 }
             }
@@ -563,7 +581,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             head
         };
         // Now fix up the span
-        let closing = self.consume(RParen)?;
+        let closing = self.consume(LDelim(Paren))?;
         let span = opening.join(&closing.span).unwrap();
         lvalue.span = span;
         Ok(lvalue)
@@ -585,7 +603,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
         let mut else_branch = None;
         let span;
-        if self.match_lexeme(Lexeme::Else) {
+        if self.match_lexeme(&Lexeme::Else) {
             let block = self.block()?;
             span = opening.join(&block.span).unwrap();
             else_branch = Some(Box::new(block));
@@ -606,20 +624,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // Call `expression_inner` because we must parse the scrutinee
         // expression without first resetting the condition flag.
         let scr = self.with_excl_struct_lit(true, Self::expression_inner)?;
-        self.consume(Lexeme::LBrace)?;
-        let mut arms = Vec::new();
-        while self.peek_lexeme() != Some(&RBrace) {
-            arms.push(self.match_arm()?);
-            if !self.match_lexeme(Comma) {
-                break;
-            }
-        }
-        let closing = self.consume(Lexeme::RBrace)?.span;
-        let span = opening.join(&closing).unwrap();
+        let (arms, span) = self.delimited_list(Brace, Lexeme::Comma, true, Self::match_arm)?;
         let kind = ExprKind::Match {
             scr: Box::new(scr),
             arms,
         };
+        let span = opening.join(&span).unwrap();
         Ok(self.node(kind, span))
     }
 
@@ -648,13 +658,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn block(&mut self) -> Maybe<Block> {
-        let opening = self.consume(Lexeme::LBrace)?.span;
+        let opening = self.ldelim(Brace)?.span;
         // Start collecting the contents of the block
         let (mut stmts, table) = self.with_table(|prsr| {
             let mut stmts: Vec<Stmt> = vec![];
             while let Some(lexeme) = prsr.peek_lexeme() {
                 match lexeme {
-                    Lexeme::RBrace => {
+                    RDelim(Brace) => {
                         break;
                     }
                     Lexeme::Fn | Lexeme::Struct | Lexeme::Type => prsr.item()?,
@@ -663,7 +673,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             Ok(stmts)
         })?;
-        let closing = self.consume(Lexeme::RBrace)?.span;
+        let closing = self.rdelim(Brace)?.span;
         let span = opening.join(&closing).unwrap();
 
         // Set the `expr` field: if the last statement is a nonterminated
@@ -706,7 +716,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::Match) => self.match_expr(),
             Some(Lexeme::For) => self.for_expr(),
-            Some(Lexeme::LBrace) => self.block_expr(),
+            Some(Lexeme::LDelim(Brace)) => self.block_expr(),
             Some(_) => {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)
@@ -727,7 +737,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 right: Box::new(right),
             };
             return Ok(self.node(kind, span));
-        } else if let Some(LBracket) = self.peek_lexeme() {
+        } else if let Some(LDelim(Bracket)) = self.peek_lexeme() {
             let opening = self.token()?.span;
             return self.finish_array(opening);
         }
@@ -736,7 +746,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     fn finish_array(&mut self, opening: Span) -> Maybe<Expr> {
         // Empty array:
-        if let Some(RBracket) = self.peek_lexeme() {
+        if let Some(RDelim(Bracket)) = self.peek_lexeme() {
             let closing = self.token().unwrap().span;
             let span = opening.join(&closing).unwrap();
             return Ok(self.node(ExprKind::ExtArr(vec![]), span));
@@ -744,21 +754,21 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
         // Otherwise, there is at least one item:
         let item = self.expression()?;
-        let arr = if self.match_lexeme(Semicolon) {
+        let arr = if self.match_lexeme(&Semicolon) {
             let item = Box::new(item);
             let reps = Box::new(self.expression()?);
             ExprKind::IntArr { item, reps }
         } else {
             let mut items = vec![item];
             loop {
-                if !self.match_lexeme(Comma) {
+                if !self.match_lexeme(&Comma) {
                     break;
                 }
                 items.push(self.expression()?);
             }
             ExprKind::ExtArr(items)
         };
-        let closing = self.consume(RBracket)?.span;
+        let closing = self.rdelim(Bracket)?.span;
         let span = opening.join(&closing).unwrap();
         Ok(self.node(arr, span))
     }
@@ -783,8 +793,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 span,
                 data: AnnotKind::Ord,
             },
-            LBracket => self.finish_array_type(span)?,
-            LParen => self.finish_tuple_type(span)?,
+            LDelim(Bracket) => self.finish_array_type(span)?,
+            LDelim(Paren) => self.finish_tuple_type(span)?,
             Question => {
                 let ty_inner = self.type_annotation()?;
                 Annot {
@@ -810,7 +820,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Finish parsing an array type.
     fn finish_array_type(&mut self, opening: Span) -> Maybe<Annot> {
         let ty = Box::new(self.type_annotation()?);
-        let closing = self.consume(RBracket)?;
+        let closing = self.rdelim(Bracket)?;
         let span = opening.join(&closing.span).unwrap();
         Ok(Annot {
             span,
@@ -821,14 +831,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Finish parsing a type that may be either a tuple or the unit type.
     fn finish_tuple_type(&mut self, opening: Span) -> Maybe<Annot> {
         let mut types = vec![];
-        if self.peek_lexeme() != Some(&RParen) {
+        if self.peek_lexeme() != Some(&RDelim(Paren)) {
             types.push(self.type_annotation()?);
-            while self.peek_lexeme() != Some(&RParen) {
+            while self.peek_lexeme() != Some(&RDelim(Paren)) {
                 self.consume(Comma)?;
                 types.push(self.type_annotation()?);
             }
         }
-        let closing = self.consume(RParen)?;
+        let closing = self.rdelim(Paren)?;
         let span = opening.join(&closing.span).unwrap();
         let kind = AnnotKind::Tuple(types);
         Ok(Annot { span, data: kind })
@@ -861,7 +871,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let mut expr = self.primary()?;
 
         // This is a function call
-        if self.match_lexeme(LParen) {
+        if let Some(LDelim(Paren)) = self.peek_lexeme() {
             if let ExprKind::Ident(ident @ ast::Ident { .. }) = expr.data {
                 return self.finish_call(ident);
             } else {
@@ -872,7 +882,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // Otherwise, this is either a bunch of nested index operations, or it's
         // just a primary token. Build up indexing operations as long as there
         // are open-brackets to consume.
-        while self.match_lexeme(Lexeme::LBracket) {
+        while self.match_lexeme(&LDelim(Bracket)) {
             expr = self.finish_index(expr)?;
         }
 
@@ -882,17 +892,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     // Inline(always) because there is only one call site.
     #[inline(always)]
     fn finish_call(&mut self, callee: ast::Ident) -> Maybe<Expr> {
-        let mut args = vec![];
-        if self.peek_lexeme() != Some(&RParen) {
-            loop {
-                args.push(self.expression()?);
-                if !self.match_lexeme(Comma) {
-                    break;
-                }
-            }
-        }
-        let closing = self.consume(RParen)?.span;
-        let span = callee.span.join(&closing).unwrap();
+        let (args, span) = self.delimited_list(Paren, Comma, false, Self::expression)?;
+        let span = callee.span.join(&span).unwrap();
         let kind = ExprKind::Call { callee, args };
         Ok(self.node(kind, span))
     }
@@ -901,7 +902,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn finish_index(&mut self, head: Expr) -> Maybe<Expr> {
         let head = Box::new(head);
         let index = Box::new(self.expression()?);
-        let bracket = self.consume(RBracket)?.span;
+        let bracket = self.consume(RDelim(Bracket))?.span;
         let span = head.span.join(&bracket).unwrap();
         let kind = ExprKind::Index { head, index };
         Ok(self.node(kind, span))
@@ -921,13 +922,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 // where a `{` is expected to follow an expression, as in an
                 // `if` expression, we must not parse a struct literal. So, we
                 // should include an escape hatch against doing this.
-                if matches!(self.peek_lexeme(), Some(LBrace)) & !self.excl_struct_lit {
+                if matches!(self.peek_lexeme(), Some(LDelim(Brace))) & !self.excl_struct_lit {
                     // This should be a struct literal, like `A { a: x, b: true }`
                     //
                     // NOTE it feels a little wrong to have this under a
                     // production called "primary", since it's actually a nonterminal rule.
                     // But this does seem to be the right place for it to live.
-                    self.tokens.next();
                     return self.finish_struct_literal(ident);
                 }
                 // Just an identifier
@@ -943,7 +943,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
                 Ok(expr)
             }
-            LParen => self.finish_group(token.span),
+            LDelim(Paren) => self.finish_group(token.span),
 
             lexeme => Err(self.errors.push(ExpectedPrimaryToken {
                 // Guaranteed not to be EOF!
@@ -954,18 +954,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn finish_struct_literal(&mut self, ty: ast::Ident) -> Maybe<Expr> {
-        let mut fields = Vec::new();
-        while self.peek_lexeme() != Some(&RBrace) {
-            let name = self.consume_ident()?;
-            self.consume(Colon)?;
-            let value = self.expression()?;
-            fields.push((name, value));
-            if !self.match_lexeme(Comma) {
-                break;
-            }
-        }
-        let close = self.consume(RBrace)?;
-        let span = ty.span.join(&close.span).unwrap();
+        let (fields, span) = self.delimited_list(Brace, Comma, true, |this: &mut Self| {
+            let name = this.consume_ident()?;
+            this.consume(Colon)?;
+            let value = this.expression()?;
+            Ok((name, value))
+        })?;
+        let span = ty.span.join(&span).unwrap();
         let expr = ExprKind::Struct { ty, fields };
         Ok(self.node(expr, span))
     }
@@ -974,7 +969,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// either a group or a sequence.
     fn finish_group(&mut self, opening: Span) -> Maybe<Expr> {
         // `()` shall be an empty sequence, and evaluate to an empty tuple.
-        if let Some(RParen) = self.peek_lexeme() {
+        if let Some(RDelim(Paren)) = self.peek_lexeme() {
             let span = opening.join(&self.token().unwrap().span).unwrap();
             return Ok(self.node(ExprKind::Tuple(vec![]), span));
         }
@@ -983,9 +978,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let kind = if let Some(&Lexeme::Comma) = self.peek_lexeme() {
             // Tuples with one element should have a single trailing comma to
             // disambiguate from groups.
+            //
+            // FIXME can this case use `delimited_list`? It's a little bit
+            // different because of the terminal comma in the single-element
+            // case.
             let mut items = vec![head];
-            while self.match_lexeme(Lexeme::Comma) {
-                if let Some(&Lexeme::RParen) = &self.peek_lexeme() {
+            while self.match_lexeme(&Lexeme::Comma) {
+                if let Some(&RDelim(Paren)) = &self.peek_lexeme() {
                     break;
                 }
                 items.push(self.expression()?);
@@ -997,7 +996,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             // and unwrap it, so we can give it the correct span.
             head.data
         };
-        let span = opening.join(&self.consume(RParen)?.span).unwrap();
+        let span = opening.join(&self.rdelim(Paren)?.span).unwrap();
         Ok(self.node(kind, span))
     }
 

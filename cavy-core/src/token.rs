@@ -22,15 +22,24 @@ pub enum Lexeme {
     DotDot, EqualEqual, TildeEqual, MinusRAngle, EqualRAngle,
 
     // single-character token types
-    Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde, Comma, Semicolon,
-    Colon,
+    Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde,
+    Comma, Semicolon, Colon, LAngle, RAngle,
 
     // delimiters
-    LBracket, RBracket, LParen, RParen, LBrace, RBrace, LAngle, RAngle,
+    LDelim(Delim), RDelim(Delim),
+}
+
+/// Kinds of delimiters: `(`/`)`, `[`/`]`, `{`/`}`
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum Delim {
+    Paren,
+    Bracket,
+    Brace,
 }
 
 impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Delim::*;
         use Lexeme::*;
         let s = match self {
             Ident(s) => return write!(f, "{}", s),
@@ -65,12 +74,12 @@ impl fmt::Display for Lexeme {
             Comma => ",",
             Semicolon => ";",
             Colon => ":",
-            LParen => "(",
-            RParen => ")",
-            LBracket => "[",
-            RBracket => "]",
-            LBrace => "{",
-            RBrace => "}",
+            LDelim(Paren) => "(",
+            RDelim(Paren) => ")",
+            LDelim(Bracket) => "[",
+            RDelim(Bracket) => "]",
+            LDelim(Brace) => "{",
+            RDelim(Brace) => "}",
             LAngle => "<",
             RAngle => ">",
             If => "if",
