@@ -105,7 +105,7 @@ impl Environment {
     fn get(&self, place: &Place) -> Option<&Value> {
         self.backing_store
             .get(&place.root)
-            .and_then(|value| Some(value.follow(&place.path)))
+            .and_then(|value| value.follow(&place.path))
     }
 
     fn insert(&mut self, place: &Place, value: Value) {

@@ -298,4 +298,19 @@ test_compiles! {
             if A {} {}
         }
     }
+
+    const_prop_linear_struct_field [Optimization] {
+        struct MyStruct {
+            a: u32,
+            b: ?bool,
+        }
+
+        fn main() {
+            let x = MyStruct {
+                a: 14,
+                b: ?true,
+            };
+            let q = x.b;
+        }
+    }
 }

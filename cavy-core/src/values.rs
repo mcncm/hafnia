@@ -9,6 +9,8 @@ use std::fmt;
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
+    // NOTE Here the unit value isn't equal to the empty tuple value, although
+    // the types are equal. Is that a problem?
     Unit,
 
     // Base types
@@ -33,14 +35,22 @@ impl Value {
     }
 
     /// Get the path positions held by this value
-    pub fn slot(&self, elem: usize) -> &Value {
+    pub fn slot(&self, elem: usize) -> Option<&Value> {
         match self {
-            Value::List(factors) => &factors[elem],
+            Value::List(factors) => {
+                if elem < factors.len() {
+                    Some(&factors[elem])
+                } else {
+                    None
+                }
+            }
             // Invariant enforced by type checker
             _ => unreachable!(),
         }
     }
 
+    /// Get a mutable reference to a slot, whether or not there was a value
+    /// there before. If there was not, put a unit value into it.
     pub fn slot_mut(&mut self, elem: usize) -> &mut Value {
         if let Value::Unit = self {
             let factors = std::iter::repeat(Value::Unit).take(elem).collect();
@@ -63,15 +73,20 @@ impl Value {
     }
 
     /// Follow a path to its end from this value
-    pub fn follow(&self, path: &[usize]) -> &Value {
-        let mut node = self;
+    pub fn follow(&self, path: &[usize]) -> Option<&Value> {
+        let mut node = Some(self);
         for elem in path {
-            node = node.slot(*elem);
+            node = match node {
+                Some(node) => node.slot(*elem),
+                None => return None,
+            }
         }
         node
     }
 
-    /// Follow a path to its end from this value, mutably
+    // NOTE Is it a "problem" that the `follow` and `follow_mut` APIs aren't
+    // symmetric?
+    /// Follow a path to its end from this value, mutably:
     pub fn follow_mut(&mut self, path: &[usize]) -> &mut Value {
         let mut node = self;
         for elem in path {

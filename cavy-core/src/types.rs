@@ -171,7 +171,7 @@ pub enum Type {
     /// A linear boolean, like `?false`
     Q_Bool,
 
-    /// A linear unsigned integer, like `?7`
+    /// A linear unsigned integer, like `?7: ?u8`
     Q_Uint(Uint),
 
     /// Tuples
