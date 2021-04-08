@@ -260,6 +260,15 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
+    fn pattern(&mut self) -> Maybe<Pattern> {
+        // For now, this will only capture an identifier, the only kind of
+        // pattern currently in the AST.
+        let ident = self.consume_ident()?;
+        let span = ident.span;
+        let data = PatternKind::Ident(ident.data);
+        Ok(Pattern { data, span })
+    }
+
     /// Produces a statement
     pub fn statement(&mut self) -> Maybe<Stmt> {
         match self.peek_lexeme() {
@@ -592,6 +601,35 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
+    fn match_expr(&mut self) -> Maybe<Expr> {
+        let opening = self.token()?.span;
+        // Call `expression_inner` because we must parse the scrutinee
+        // expression without first resetting the condition flag.
+        let scr = self.with_excl_struct_lit(true, Self::expression_inner)?;
+        self.consume(Lexeme::LBrace)?;
+        let mut arms = Vec::new();
+        while self.peek_lexeme() != Some(&RBrace) {
+            arms.push(self.match_arm()?);
+            if !self.match_lexeme(Comma) {
+                break;
+            }
+        }
+        let closing = self.consume(Lexeme::RBrace)?.span;
+        let span = opening.join(&closing).unwrap();
+        let kind = ExprKind::Match {
+            scr: Box::new(scr),
+            arms,
+        };
+        Ok(self.node(kind, span))
+    }
+
+    fn match_arm(&mut self) -> Maybe<MatchArm> {
+        let pat = self.pattern()?;
+        self.consume(Lexeme::EqualRAngle)?;
+        let expr = Box::new(self.expression()?);
+        Ok(MatchArm { pat, expr })
+    }
+
     fn for_expr(&mut self) -> Maybe<Expr> {
         let opening = self.token()?.span;
         let bind = Box::new(self.lvalue()?);
@@ -666,6 +704,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // The head or root of the expression
         let expr = match self.peek_lexeme() {
             Some(Lexeme::If) => self.if_expr(),
+            Some(Lexeme::Match) => self.match_expr(),
             Some(Lexeme::For) => self.for_expr(),
             Some(Lexeme::LBrace) => self.block_expr(),
             Some(_) => {

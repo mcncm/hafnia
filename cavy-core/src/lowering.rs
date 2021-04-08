@@ -415,6 +415,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             }
             ExprKind::Block(block) => self.lower_into_block(place, block),
             ExprKind::If { cond, tru, fls } => self.lower_into_if(place, cond, tru, fls),
+            ExprKind::Match { .. } => todo!(),
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
@@ -950,6 +951,7 @@ mod typing {
                     tru: dir,
                     fls: ind,
                 } => self.type_if(cond, dir, ind)?,
+                ExprKind::Match { scr, arms } => self.type_match(scr, arms)?,
                 ExprKind::For { bind, iter, body } => self.ctx.common.unit,
                 // FIXME note that here we are resolving this function a *second*
                 // time (the other is in the lowering method). This suggests
@@ -1134,6 +1136,10 @@ mod typing {
                     ind: ty_ind,
                 }))
             }
+        }
+
+        fn type_match(&mut self, _scr: &Expr, _arms: &[MatchArm]) -> Maybe<TyId> {
+            todo!()
         }
 
         fn type_ident(&mut self, ident: &Ident) -> Maybe<TyId> {

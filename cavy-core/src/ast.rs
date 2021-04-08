@@ -462,6 +462,11 @@ pub enum ExprKind {
         /// Falsy branch
         fls: Option<Box<Block>>,
     },
+    Match {
+        /// The match expression scrutinee
+        scr: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
     For {
         bind: Box<LValue>,
         iter: Box<Expr>,
@@ -497,11 +502,18 @@ impl ExprKind {
             ExtArr(_) => true,
             Block(_) => false,
             If { .. } => false,
+            Match { .. } => false,
             For { .. } => false,
             Call { .. } => true,
             Index { .. } => true,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pat: Pattern,
+    pub expr: Box<Expr>,
 }
 
 /// A brace-delimited code block

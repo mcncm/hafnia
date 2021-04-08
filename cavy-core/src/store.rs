@@ -60,8 +60,14 @@ impl<I: Index> Counter<I> {
 #[macro_export]
 macro_rules! index_type {
     ($index:ident) => {
-        #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
         pub struct $index(u32);
+
+        impl ::std::fmt::Debug for $index {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
 
         /// Seems to be required by some other part of my code
         impl Default for $index {

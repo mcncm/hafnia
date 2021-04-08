@@ -22,6 +22,7 @@ pub fn tokenize(src_id: SrcId, ctx: &mut Context) -> Result<Vec<Token>, ErrorBuf
 fn keyword(kw: &str) -> Option<Lexeme> {
     let lexeme = match kw {
         "if" => Lexeme::If,
+        "match" => Lexeme::Match,
         "else" => Lexeme::Else,
         "for" => Lexeme::For,
         "let" => Lexeme::Let,
@@ -76,6 +77,7 @@ fn tctokens(chars: (char, char)) -> Option<Lexeme> {
         ('=', '=') => Lexeme::EqualEqual,
         ('~', '=') => Lexeme::TildeEqual,
         ('-', '>') => Lexeme::MinusRAngle,
+        ('=', '>') => Lexeme::EqualRAngle,
         _ => return None,
     };
     Some(lexeme)
