@@ -313,4 +313,11 @@ test_compiles! {
             let q = x.b;
         }
     }
+
+    parse_enum_simple [Parse] {
+        enum MyEnum {
+            A,
+            B,
+        }
+    }
 }

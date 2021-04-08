@@ -29,6 +29,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "in" => Lexeme::In,
         "fn" => Lexeme::Fn,
         "struct" => Lexeme::Struct,
+        "enum" => Lexeme::Enum,
         "type" => Lexeme::Type,
         "print" => Lexeme::Print,
         "true" => Lexeme::True,

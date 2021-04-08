@@ -625,12 +625,19 @@ pub struct Udt {
 #[derive(Debug)]
 pub enum UdtKind {
     Struct(Struct),
+    Enum(Enum),
     Alias(Annot),
 }
 
 impl From<Struct> for UdtKind {
     fn from(s: Struct) -> Self {
         Self::Struct(s)
+    }
+}
+
+impl From<Enum> for UdtKind {
+    fn from(e: Enum) -> Self {
+        Self::Enum(e)
     }
 }
 
@@ -650,6 +657,17 @@ pub struct Struct {
 pub struct StructField {
     pub name: Ident,
     pub ty: Annot,
+}
+
+#[derive(Debug)]
+pub struct Enum {
+    pub name: Ident,
+    pub alternatives: Vec<EnumAlternative>,
+}
+
+#[derive(Debug)]
+pub struct EnumAlternative {
+    pub name: Ident,
 }
 
 #[derive(Debug)]

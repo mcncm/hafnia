@@ -51,12 +51,15 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
     /// Turn an AST struct definition into a concrete type
     fn resolve_struct(&mut self, struct_: &Struct, table: &Table) -> Maybe<TyId> {
-        let mut fields = Vec::with_capacity(struct_.fields.len());
-        for field in struct_.fields.iter() {
-            let name = field.name.data;
-            let ty = self.resolve_annot(&field.ty, table)?;
-            fields.push((name, ty));
-        }
+        let fields: Vec<_> = struct_
+            .fields
+            .iter()
+            .map(|field| {
+                let name = field.name.data;
+                let ty = self.resolve_annot(&field.ty, table)?;
+                Ok((name, ty))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let udt = UserType {
             def_name: struct_.name.data,
@@ -68,6 +71,10 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         Ok(ty)
     }
 
+    fn resolve_enum(&mut self, _enum_: &Enum, _table: &Table) -> Maybe<TyId> {
+        todo!()
+    }
+
     /// Resolve things stored in global tables: function type signatures,
     /// user-defined types, and so on.
     fn resolve_global(&mut self) -> Result<(), ()> {
@@ -77,6 +84,11 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             match &udt.kind {
                 UdtKind::Struct(struct_) => {
                     if let Ok(ty) = self.resolve_struct(struct_, table) {
+                        self.udt_tys.insert(id, ty);
+                    }
+                }
+                UdtKind::Enum(enum_) => {
+                    if let Ok(ty) = self.resolve_enum(enum_, table) {
                         self.udt_tys.insert(id, ty);
                     }
                 }

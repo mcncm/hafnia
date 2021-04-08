@@ -225,6 +225,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         match lexeme {
             Lexeme::Fn => self.fn_item(span),
             Lexeme::Struct => self.struct_item(),
+            Lexeme::Enum => self.enum_item(),
             Lexeme::Type => self.type_item(),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
@@ -336,27 +337,6 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
-    /// Parse a type alias item
-    fn type_item(&mut self) -> Maybe<()> {
-        let name = self.consume_ident()?;
-        self.consume(Lexeme::Equal)?;
-        let annot = self.type_annotation()?;
-        self.consume(Lexeme::Semicolon)?;
-        self.insert_udt(name, annot)
-    }
-
-    /// Parse a struct item and insert the name in a symbol table
-    fn struct_item(&mut self) -> Maybe<()> {
-        let name = self.consume_ident()?;
-        let fields = self.struct_fields()?;
-        let struct_ = ast::Struct {
-            name: name.clone(),
-            fields,
-        };
-
-        self.insert_udt(name, struct_)
-    }
-
     /// Put a user-defined type into the symbol table. Not a parsing method!
     fn insert_udt<T>(&mut self, name: ast::Ident, udt: T) -> Maybe<()>
     where
@@ -384,9 +364,25 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
-    fn struct_fields(&mut self) -> Maybe<Vec<StructField>> {
+    /// Parse a type alias item
+    fn type_item(&mut self) -> Maybe<()> {
+        let name = self.consume_ident()?;
+        self.consume(Lexeme::Equal)?;
+        let annot = self.type_annotation()?;
+        self.consume(Lexeme::Semicolon)?;
+        self.insert_udt(name, annot)
+    }
+
+    /// Parse a struct item and insert the name in a symbol table
+    fn struct_item(&mut self) -> Maybe<()> {
+        let name = self.consume_ident()?;
         let (fields, _) = self.delimited_list(Brace, Comma, true, Self::struct_field)?;
-        Ok(fields)
+        let struct_ = ast::Struct {
+            name: name.clone(),
+            fields,
+        };
+
+        self.insert_udt(name, struct_)
     }
 
     fn struct_field(&mut self) -> Maybe<StructField> {
@@ -395,6 +391,24 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let ty = self.type_annotation()?;
         let field = StructField { name, ty };
         Ok(field)
+    }
+
+    /// Parse an item and insert the name in a symbol table
+    fn enum_item(&mut self) -> Maybe<()> {
+        let name = self.consume_ident()?;
+        let (alternatives, _) = self.delimited_list(Brace, Comma, true, Self::enum_alternative)?;
+        let enum_ = ast::Enum {
+            name: name.clone(),
+            alternatives,
+        };
+
+        self.insert_udt(name, enum_)
+    }
+
+    // For the time being, accept only identifiers
+    fn enum_alternative(&mut self) -> Maybe<EnumAlternative> {
+        let name = self.consume_ident()?;
+        Ok(EnumAlternative { name })
     }
 
     /// Parse a function item and insert it in the functions table
