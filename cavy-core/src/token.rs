@@ -20,6 +20,7 @@ pub enum Lexeme {
 
     // two-character token types
     DotDot, EqualEqual, TildeEqual, MinusRAngle, EqualRAngle,
+    ColonColon,
 
     // single-character token types
     Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde,
@@ -64,6 +65,7 @@ impl fmt::Display for Lexeme {
             TildeEqual => "~=",
             MinusRAngle => "->",
             EqualRAngle => "=>",
+            ColonColon => "::",
             Equal => "=",
             Plus => "+",
             Minus => "-",

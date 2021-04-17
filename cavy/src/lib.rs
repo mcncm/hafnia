@@ -1,4 +1,4 @@
-pub use cavy_core::{arch, circuit, compile, context, session};
+pub use cavy_core::{arch, cavy_errors, circuit, compile, context, session, target};
 
 /// Compiles inline Cavy code at Rust compile time. Cavy programs that fail to
 /// compile will fail Rust compilation. With a nightly compiler and the

@@ -80,6 +80,20 @@ impl TyId {
         matches!(ctx.types[*self], Type::Uint(_))
     }
 
+    /// A type will be said to be "classical" if none of the data it points to
+    /// is quantum.
+    pub fn is_classical(&self, ctx: &Context) -> bool {
+        let sz = self.size(ctx);
+        sz.qsize == 0
+    }
+
+    /// A type will be said to be "coherent" if all of its data is quantum; if
+    /// it points to no classical data at all.
+    pub fn is_coherent(&self, ctx: &Context) -> bool {
+        let sz = self.size(ctx);
+        sz.csize == 0
+    }
+
     /// Check the linearity of a type, with the help of the global context
     pub fn is_linear(&self, ctx: &Context) -> bool {
         self.is_linear_inner(&ctx.types)

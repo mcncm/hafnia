@@ -946,6 +946,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
                 // Just an identifier
                 let span = ident.span;
+
                 // Field accesses against this expression
                 let mut expr = self.node(ExprKind::Ident(ident), span);
                 while let Some(Dot) = self.peek_lexeme() {

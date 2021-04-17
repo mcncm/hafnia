@@ -79,6 +79,7 @@ fn tctokens(chars: (char, char)) -> Option<Lexeme> {
         ('~', '=') => Lexeme::TildeEqual,
         ('-', '>') => Lexeme::MinusRAngle,
         ('=', '>') => Lexeme::EqualRAngle,
+        (':', ':') => Lexeme::ColonColon,
         _ => return None,
     };
     Some(lexeme)
