@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::BinOpKind,
     ast::{FnId, UnOpKind},
-    circuit::{Instruction, LirGraph, OwnedBits, VirtAddr},
+    circuit::{BitSet, Instruction, LirGraph, VirtAddr},
     context::Context,
     mir,
     store::Counter,
@@ -28,6 +28,9 @@ struct CircuitBuilder<'mir, 'ctx> {
 impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
     fn new(mir: &'mir Mir, ctx: &'mir Context<'ctx>) -> Self {
         // Missing entry point caught by previous analysis
+        //
+        // FIXME: [BUG] Invariant not upheld. Missing main function is not
+        // caught earlier.
         let entry_point = mir.entry_point.unwrap();
         let circ = Lir {
             entry_point,
@@ -49,7 +52,7 @@ struct LirBuilder<'mir, 'ctx> {
     gr: &'mir Graph,
     ctx: &'mir Context<'ctx>,
     lir: LirGraph,
-    bindings: HashMap<LocalId, OwnedBits>,
+    bindings: HashMap<LocalId, BitSet>,
     qcounter: std::ops::RangeFrom<usize>,
     ccounter: std::ops::RangeFrom<usize>,
 }
@@ -57,8 +60,10 @@ struct LirBuilder<'mir, 'ctx> {
 impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     fn new(gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
         let lir = LirGraph {
-            args: 0,
-            ancillae: 0,
+            qlocals: 0,
+            clocals: 0,
+            freed: Vec::new(),
+            returned: BitSet::new(),
             instructions: Vec::new(),
         };
         let bindings = HashMap::new();
@@ -82,25 +87,27 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     /// store these ranges of consecutive numbers.
     fn qalloc(&mut self, n: usize) -> Vec<usize> {
         // FIXME Ok, why does't this work with just `self.counter`?
+        self.lir.qlocals += n;
         (&mut self.qcounter).take(n).collect()
     }
 
     /// FIXME regrettable name; has nothing to do with C `calloc`
     fn calloc(&mut self, n: usize) -> Vec<usize> {
+        self.lir.clocals += n;
         (&mut self.ccounter).take(n).collect()
     }
 
     /// Allocate space for a given type
-    fn alloc_for(&mut self, ty: TyId) -> OwnedBits {
+    fn alloc_for(&mut self, ty: TyId) -> BitSet {
         let sz = ty.size(self.ctx);
-        OwnedBits {
+        BitSet {
             qbits: self.qalloc(sz.qsize),
             cbits: self.calloc(sz.csize),
         }
     }
 
     /// Get a sub-allocation at a place (by cloning)
-    fn allocation_at(&self, place: &Place) -> OwnedBits {
+    fn allocation_at(&self, place: &Place) -> BitSet {
         let mut ty = self.gr.type_of(place, self.ctx);
         // traverse the allocation
         let (mut qi, mut ci) = (0, 0);
@@ -123,11 +130,11 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             ty = ty.slot(*elem, self.ctx);
         }
         let sz = ty.size(self.ctx);
-        let (qf, cf) = (qi + sz.qsize, ci + sz.qsize);
+        let (qf, cf) = (qi + sz.qsize, ci + sz.csize);
 
         // return a new `OwnedBits` from the terminal place
         let allocation = self.bindings.get(&place.root).unwrap();
-        OwnedBits {
+        BitSet {
             qbits: allocation.qbits[qi..qf].to_owned(),
             cbits: allocation.cbits[ci..cf].to_owned(),
         }
@@ -230,7 +237,13 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     }
 
     fn translate_call(&mut self, callee: FnId, args: &[Operand], blk: BlockId) {
-        let args = args.iter().map(|arg| self.translate_arg(arg)).collect();
+        let args =
+            args.iter()
+                .map(|arg| self.translate_arg(arg))
+                .fold(BitSet::new(), |mut acc, mut b| {
+                    acc.append(&mut b);
+                    acc
+                });
         self.lir
             .instructions
             .push(Instruction::FnCall(callee, args));
@@ -246,7 +259,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     // before passing a constant, we will allocate new bits for it, and hand
     // those off to the function call. This is a pretty major compromise, but
     // now I have a deadline and I'm making compromises.
-    fn translate_arg(&mut self, arg: &Operand) -> OwnedBits {
+    fn translate_arg(&mut self, arg: &Operand) -> BitSet {
         use Operand::*;
         match arg {
             Const(value) => {
@@ -255,7 +268,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                 // TODO: When quantum types are allowed to be const, this
                 // allocation will become more complicated: we'll actually need
                 // to know the precise type of the value.
-                let allocation = OwnedBits {
+                let allocation = BitSet {
                     qbits: vec![],
                     cbits: self.calloc(value.size()),
                 };

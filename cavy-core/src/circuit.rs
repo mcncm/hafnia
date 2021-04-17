@@ -9,6 +9,8 @@ use Gate::*;
 /// This type alias identifies qubits with their numerical indices
 pub type VirtAddr = usize;
 
+pub type PhysAddr = usize;
+
 /// These are gates from which most ordinary circuits will be built
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,10 +110,24 @@ impl IntoTarget<Qasm> for Gate {
 }
 
 /// An allocation of locally indexed virtual addresses
-#[derive(Debug, Clone)]
-pub struct OwnedBits {
+#[derive(Debug, Clone, Default)]
+pub struct BitSet {
     pub qbits: Vec<VirtAddr>,
     pub cbits: Vec<VirtAddr>,
+}
+
+impl BitSet {
+    pub fn new() -> Self {
+        Self {
+            qbits: Vec::new(),
+            cbits: Vec::new(),
+        }
+    }
+
+    pub fn append(&mut self, other: &mut BitSet) {
+        self.qbits.append(&mut other.qbits);
+        self.cbits.append(&mut other.cbits);
+    }
 }
 
 /// A terrible name that will be fixed later: each of the "things" that take
@@ -119,7 +135,7 @@ pub struct OwnedBits {
 #[derive(Debug)]
 pub enum Instruction {
     Gate(Gate),
-    FnCall(FnId, Vec<OwnedBits>),
+    FnCall(FnId, BitSet),
 }
 
 /// The type of a single procedure in the low-level circuit IR. For now, these
@@ -129,15 +145,14 @@ pub enum Instruction {
 /// FIXME Also, this is not a great name for this struct, and it's likely to change.
 #[derive(Default, Debug)]
 pub struct LirGraph {
-    /// The number of qubits used in calling this procedure. This may one day be
-    /// split into `qargs` and `cargs` or something like this, essentially
-    /// typing the parameters.
-    ///
-    /// For now, we're assuming this to be finite.
-    pub args: usize,
-    /// The number of other qubits used by the procedure. The circuit width of
-    /// the procedure, ignoring subroutines, is then `args + ancillae`.
-    pub ancillae: usize,
+    /// number of quantum local bits
+    pub qlocals: usize,
+    /// number of classical local bits
+    pub clocals: usize,
+    /// The local qubits that are free at the end of the procedure
+    pub freed: Vec<usize>,
+    /// The local bits that are returned by the procedure
+    pub returned: BitSet,
     /// All the instructions of the compiled subroutine. Note that this is, for
     /// now, a finite structure. That is likely to change.
     pub instructions: Vec<Instruction>,
@@ -162,23 +177,99 @@ impl Lir {
     }
 }
 
+/// The qubit allocator structure that *maybe* shouldn't be a black box. But
+/// this will do for now.
+///
+/// As a matter of fact, we should maybe use the *exact same* struct for
+/// allocation within a function.
+struct GlobalAllocator {
+    pub qctr: std::ops::RangeFrom<usize>,
+    pub cctr: std::ops::RangeFrom<usize>,
+    /// Qubits that have been returned to the allocator after being zeroed-out
+    /// or proven |0>.
+    pub free: VecDeque<PhysAddr>,
+}
+
+impl GlobalAllocator {
+    fn new() -> Self {
+        Self {
+            qctr: 0..,
+            cctr: 0..,
+            free: VecDeque::new(),
+        }
+    }
+
+    fn qalloc(&mut self, n: usize) -> Vec<PhysAddr> {
+        (&mut self.qctr).take(n).collect()
+    }
+
+    // Again, a terrible name, has nothing to do with C `calloc`
+    fn calloc(&mut self, n: usize) -> Vec<PhysAddr> {
+        (&mut self.cctr).take(n).collect()
+    }
+}
+
+/// Maybe or maybe not the right name for this data structure. Holds the
+/// instructions and address mapping table for the current function call.
+struct StackFrame<'c> {
+    insts: std::slice::Iter<'c, Instruction>,
+    // TODO: [PERF] Figure out a more efficient way to handle address
+    // translation *later*. No premature optimization right now.
+    table: BitSet,
+}
+
+impl<'c> Iterator for StackFrame<'c> {
+    type Item = &'c Instruction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.insts.next()
+    }
+}
+
 pub struct CircuitStream<'c> {
     circ: &'c Lir,
-    active: std::slice::Iter<'c, Instruction>,
+    allocator: GlobalAllocator,
+    active: StackFrame<'c>,
     // FIXME this implementation is a problem for arbitrary mutual recursion,
     // as the stack will grow indefinitely.
-    stack: Vec<std::slice::Iter<'c, Instruction>>,
+    stack: Vec<StackFrame<'c>>,
 }
 
 impl<'c> CircuitStream<'c> {
     fn new(circ: &'c Lir) -> Self {
+        let mut allocator = GlobalAllocator::new();
         let gr = &circ.graphs[&circ.entry_point];
-        let active = gr.instructions.iter();
+        let insts = gr.instructions.iter();
+        let frame = StackFrame {
+            insts,
+            table: BitSet {
+                qbits: allocator.qalloc(gr.qlocals),
+                cbits: allocator.calloc(gr.clocals),
+            },
+        };
         Self {
             circ,
-            active,
+            allocator,
+            active: frame,
             stack: vec![],
         }
+    }
+
+    fn push_stack_frame(&mut self, fn_id: FnId, bits: BitSet) {
+        let gr = &self.circ.graphs[&fn_id];
+        let insts = gr.instructions.iter();
+        let mut table = bits;
+        let qpriv = gr.qlocals - table.qbits.len();
+        let cpriv = gr.clocals - table.cbits.len();
+        table.qbits.extend((&mut self.allocator.qctr).take(qpriv));
+        table.cbits.extend((&mut self.allocator.cctr).take(cpriv));
+        let frame = StackFrame { insts, table };
+        self.stack.push(frame);
+    }
+
+    /// Contract: there is at least one frame on the stack.
+    fn pop_stack_frame(&mut self) {
+        self.active = self.stack.pop().unwrap();
     }
 }
 
@@ -187,9 +278,20 @@ impl<'c> Iterator for CircuitStream<'c> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.active.next() {
-            None => None,
+            None => {
+                if self.stack.len() > 0 {
+                    self.pop_stack_frame();
+                    self.next()
+                } else {
+                    None
+                }
+            }
             Some(Instruction::Gate(gate)) => Some(gate),
-            Some(Instruction::FnCall(_, _)) => todo!(),
+            Some(Instruction::FnCall(fn_id, bits)) => {
+                // FIXME: [PERF] probably-unnecessary clone
+                self.push_stack_frame(*fn_id, bits.clone());
+                self.next()
+            }
         }
     }
 }
@@ -219,13 +321,12 @@ impl std::fmt::Display for Instruction {
             Instruction::Gate(g) => write!(f, "{}", g),
             Instruction::FnCall(fn_id, args) => {
                 write!(f, "{}(", fn_id.into_usize())?;
-                let mut args = args.iter();
-                if let Some(_arg) = args.next() {
-                    // FIXME
-                    write!(f, "{}", "arg")?;
-                    for _arg in args {
-                        // FIXME
-                        write!(f, ", {}", "arg")?;
+                // TODO cbits too
+                let mut qbits = args.qbits.iter();
+                if let Some(arg) = qbits.next() {
+                    write!(f, "{}", arg)?;
+                    for arg in qbits {
+                        write!(f, ", {}", arg)?;
                     }
                 }
                 f.write_str(")")

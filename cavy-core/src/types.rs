@@ -147,7 +147,7 @@ impl UserType {
 }
 
 /// The total size of a type, calculated recursively.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct TypeSize {
     /// Number of quantum bits
     pub qsize: usize,
