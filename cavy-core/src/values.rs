@@ -27,6 +27,38 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn size(&self) -> usize {
+        use Value::*;
+        match self {
+            Unit => 0,
+            Bool(_) => 1,
+            U8(_) => 8,
+            U16(_) => 16,
+            U32(_) => 32,
+            List(elems) => elems.iter().map(|elem| elem.size()).sum(),
+            Ord => todo!(),
+        }
+    }
+
+    // TODO: [PERF] the (repeated) allocation here is very unsatisfying;
+    // unfortunately, it's not straightforward to do this entirely with
+    // allocation-free lazy iterators.
+    //
+    // Could *at least* use a bitvec or something
+    pub fn bits(&self) -> Vec<bool> {
+        match self {
+            Value::Unit => vec![],
+            Value::Bool(b) => vec![*b],
+            // don't bother trying to make these nice and generic (yet); it
+            // turns out to be a slight pain
+            Value::U8(n) => (0..8).map(|i| (n & (1 << i)) != 0).collect(),
+            Value::U16(n) => (0..16).map(|i| (n & (1 << i)) != 0).collect(),
+            Value::U32(n) => (0..32).map(|i| (n & (1 << i)) != 0).collect(),
+            Value::List(elems) => elems.iter().map(|e| e.bits()).flatten().collect(),
+            Value::Ord => panic!(),
+        }
+    }
+
     pub fn is_truthy(&self) -> bool {
         match self {
             Self::Bool(x) => *x,

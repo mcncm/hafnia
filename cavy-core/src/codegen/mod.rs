@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::BinOpKind,
     ast::{FnId, UnOpKind},
-    circuit::{Instruction, LirGraph, VirtAddr},
+    circuit::{Instruction, LirGraph, OwnedBits, VirtAddr},
     context::Context,
     mir,
     store::Counter,
@@ -45,17 +45,11 @@ impl<'mir, 'ctx> CircuitBuilder<'mir, 'ctx> {
     }
 }
 
-#[derive(Clone)]
-struct Allocation {
-    qbits: Vec<usize>,
-    cbits: Vec<usize>,
-}
-
 struct LirBuilder<'mir, 'ctx> {
     gr: &'mir Graph,
     ctx: &'mir Context<'ctx>,
     lir: LirGraph,
-    bindings: HashMap<LocalId, Allocation>,
+    bindings: HashMap<LocalId, OwnedBits>,
     qcounter: std::ops::RangeFrom<usize>,
     ccounter: std::ops::RangeFrom<usize>,
 }
@@ -97,11 +91,45 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     }
 
     /// Allocate space for a given type
-    fn alloc_for(&mut self, ty: TyId) -> Allocation {
+    fn alloc_for(&mut self, ty: TyId) -> OwnedBits {
         let sz = ty.size(self.ctx);
-        Allocation {
+        OwnedBits {
             qbits: self.qalloc(sz.qsize),
-            cbits: self.qalloc(sz.csize),
+            cbits: self.calloc(sz.csize),
+        }
+    }
+
+    /// Get a sub-allocation at a place (by cloning)
+    fn allocation_at(&self, place: &Place) -> OwnedBits {
+        let mut ty = self.gr.type_of(place, self.ctx);
+        // traverse the allocation
+        let (mut qi, mut ci) = (0, 0);
+        for elem in &place.path {
+            // TODO: [PERF] `ty.slot` should really return a `Slot` that also
+            // contains an offset (and size?). These could be computed *once* when
+            // the type is interned. This sort of "data about types" shouldn't
+            // be computed *here*, of all place, and certainly not on every
+            // call. In practice, it probably won't matter much, but it's really
+            // bad in principle.
+            for i in 0..*elem {
+                // Actually, there's even more work being done here, because
+                // `ty` is looked up repeatedly on *each* call to `slot`. There
+                // are a *ton* of hashes going on here.
+                let ty = ty.slot(i, self.ctx);
+                let sz = ty.size(self.ctx);
+                qi += sz.qsize;
+                ci += sz.csize;
+            }
+            ty = ty.slot(*elem, self.ctx);
+        }
+        let sz = ty.size(self.ctx);
+        let (qf, cf) = (qi + sz.qsize, ci + sz.qsize);
+
+        // return a new `OwnedBits` from the terminal place
+        let allocation = self.bindings.get(&place.root).unwrap();
+        OwnedBits {
+            qbits: allocation.qbits[qi..qf].to_owned(),
+            cbits: allocation.cbits[ci..cf].to_owned(),
         }
     }
 
@@ -202,25 +230,43 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     }
 
     fn translate_call(&mut self, callee: FnId, args: &[Operand], blk: BlockId) {
-        let args = args
-            .iter()
-            .map(|arg| self.translate_arg(arg))
-            .flatten()
-            .collect();
+        let args = args.iter().map(|arg| self.translate_arg(arg)).collect();
         self.lir
             .instructions
             .push(Instruction::FnCall(callee, args));
         self.translate_block(blk);
     }
 
-    /// are, we would need to supply a location (or more!) as well.
-    /// Get the procedure-local virtual bit addresses associated with a local.
-    ///
-    /// NOTE: this doesn't work if addresses are position-dependent. If
-    /// reassignment does the 'pre-optimization' of address reassignment, then
-    /// we would need to keep track of that information. We might be able to
-    /// avoid such a need by using SSA.
-    fn translate_arg(&self, _arg: &Operand) -> Vec<VirtAddr> {
-        todo!();
+    // NOTE: this doesn't work if addresses are position-dependent. If
+    // reassignment does the 'pre-optimization' of address reassignment, then
+    // we would need to keep track of that information. We might be able to
+    // avoid such a need by using SSA.
+    //
+    // TODO: for now we're _not_ going to pass-through constants. Instead,
+    // before passing a constant, we will allocate new bits for it, and hand
+    // those off to the function call. This is a pretty major compromise, but
+    // now I have a deadline and I'm making compromises.
+    fn translate_arg(&mut self, arg: &Operand) -> OwnedBits {
+        use Operand::*;
+        match arg {
+            Const(value) => {
+                // Get a new allocation corresponding to this value's size.
+                //
+                // TODO: When quantum types are allowed to be const, this
+                // allocation will become more complicated: we'll actually need
+                // to know the precise type of the value.
+                let allocation = OwnedBits {
+                    qbits: vec![],
+                    cbits: self.calloc(value.size()),
+                };
+
+                // generate code to assign the value in that allocation
+                let _bits = value.bits();
+                // TODO
+
+                allocation
+            }
+            Copy(place) | Move(place) => self.allocation_at(place),
+        }
     }
 }

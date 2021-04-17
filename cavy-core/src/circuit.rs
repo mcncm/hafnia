@@ -107,12 +107,19 @@ impl IntoTarget<Qasm> for Gate {
     }
 }
 
+/// An allocation of locally indexed virtual addresses
+#[derive(Debug, Clone)]
+pub struct OwnedBits {
+    pub qbits: Vec<VirtAddr>,
+    pub cbits: Vec<VirtAddr>,
+}
+
 /// A terrible name that will be fixed later: each of the "things" that take
 /// place, namely gates and procedure calls.
 #[derive(Debug)]
 pub enum Instruction {
     Gate(Gate),
-    FnCall(FnId, Vec<VirtAddr>),
+    FnCall(FnId, Vec<OwnedBits>),
 }
 
 /// The type of a single procedure in the low-level circuit IR. For now, these
@@ -213,10 +220,12 @@ impl std::fmt::Display for Instruction {
             Instruction::FnCall(fn_id, args) => {
                 write!(f, "{}(", fn_id.into_usize())?;
                 let mut args = args.iter();
-                if let Some(arg) = args.next() {
-                    write!(f, "{}", arg)?;
-                    for arg in args {
-                        write!(f, ", {}", arg)?;
+                if let Some(_arg) = args.next() {
+                    // FIXME
+                    write!(f, "{}", "arg")?;
+                    for _arg in args {
+                        // FIXME
+                        write!(f, ", {}", "arg")?;
                     }
                 }
                 f.write_str(")")
