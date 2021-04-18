@@ -174,6 +174,8 @@ impl Interpreter {
                 Evaluated::No
             }
 
+            RvalueKind::UnOp(UnOp::Linear, Const(_)) => unreachable!(),
+
             RvalueKind::UnOp(UnOp::Not, Copy(rplace))
             | RvalueKind::UnOp(UnOp::Not, Move(rplace)) => {
                 if let Some(c) = self.env.get(rplace).cloned() {
@@ -183,7 +185,11 @@ impl Interpreter {
                 Evaluated::No
             }
 
-            RvalueKind::UnOp(_, _) => todo!(),
+            RvalueKind::UnOp(UnOp::Not, Const(_)) => unreachable!(),
+
+            RvalueKind::UnOp(UnOp::Delin, _) => Evaluated::No,
+
+            RvalueKind::UnOp(UnOp::Minus, _) => todo!(),
 
             RvalueKind::Use(val) => match val {
                 Move(rplace) | Copy(rplace) => {

@@ -408,7 +408,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     // For the time being, accept only identifiers
     fn enum_alternative(&mut self) -> Maybe<EnumAlternative> {
         let name = self.consume_ident()?;
-        Ok(EnumAlternative { name })
+        let data = match self.peek_lexeme() {
+            Some(&LDelim(Paren)) => {
+                let data = self.delimited_list(Paren, Comma, false, Self::type_annotation)?;
+                Some(data)
+            }
+            _ => None,
+        };
+        Ok(EnumAlternative { name, data })
     }
 
     /// Parse a function item and insert it in the functions table
@@ -922,6 +929,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
+    // It no longer makes sense for this to be called `primary`, on account of
+    // the fields and paths, but here we are.
     fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
@@ -946,9 +955,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
                 // Just an identifier
                 let span = ident.span;
-
-                // Field accesses against this expression
                 let mut expr = self.node(ExprKind::Ident(ident), span);
+
+                // Field accesses against this identifier
+                //
+                // FIXME: [BUG] This should be elsewhere. Expressions like
+                // `(expr).a` should be valid.
                 while let Some(Dot) = self.peek_lexeme() {
                     self.tokens.next();
                     let field = self.field()?;

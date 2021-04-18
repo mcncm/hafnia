@@ -168,7 +168,7 @@ impl<'a> Repl<'a> {
     fn greet(&self) {
         println!("{}", WELCOME);
         if self.sess.config.debug {
-            println!("This interpreter is running in DEBUG mode.");
+            println!("This interpreter is running in debug mode.");
         }
         println!("{}", HELP);
     }

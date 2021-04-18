@@ -668,6 +668,7 @@ pub struct Enum {
 #[derive(Debug)]
 pub struct EnumAlternative {
     pub name: Ident,
+    pub data: Option<(Vec<Annot>, Span)>,
 }
 
 #[derive(Debug)]

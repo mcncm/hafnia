@@ -951,7 +951,12 @@ mod typing {
             let ty = match &expr.data {
                 ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
                 ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
-                ExprKind::Assn { lhs, rhs } => self.ctx.common.unit,
+                ExprKind::Assn { lhs, rhs } => {
+                    // Check the lhs and rhs, to make sure validations happen
+                    self.type_expr(lhs)?;
+                    self.type_expr(rhs)?;
+                    self.ctx.common.unit
+                }
                 ExprKind::Literal(lit) => self.type_literal(lit),
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
@@ -1436,7 +1441,7 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    #[msg = "name `{name}` is not bound"]
+    #[msg = "name `{name}` cannot be found in this scope"]
     pub struct UnboundName {
         #[span]
         pub span: Span,

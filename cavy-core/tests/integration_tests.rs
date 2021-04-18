@@ -320,4 +320,14 @@ test_compiles! {
             B,
         }
     }
+
+    nested_function {
+        fn main() {
+            let x = ?false;
+            fn f(x: ?bool) -> ?bool {
+                ~x
+            }
+            let y = f(x);
+        }
+    }
 }
