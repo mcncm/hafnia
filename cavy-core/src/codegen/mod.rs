@@ -1,18 +1,19 @@
 //! This module implements the compiler backend.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    ops,
+};
 
 use crate::{
     ast::BinOpKind,
     ast::{FnId, UnOpKind},
-    circuit::{BitSet, Instruction, LirGraph, VirtAddr},
+    circuit::{BitSet, BitSetSlice, BitSetSliceMut, Gate, Instruction, Lir, LirGraph, VirtAddr},
     context::Context,
-    mir,
+    mir::{self, *},
     store::Counter,
     types::{TyId, Type},
 };
-use crate::{circuit::Gate, mir::*};
-use crate::{circuit::Lir, mir::Mir};
 
 pub fn translate(mir: &Mir, ctx: &Context) -> Lir {
     let builder = CircuitBuilder::new(mir, ctx);
@@ -53,8 +54,8 @@ struct LirBuilder<'mir, 'ctx> {
     ctx: &'mir Context<'ctx>,
     lir: LirGraph,
     bindings: HashMap<LocalId, BitSet>,
-    qcounter: std::ops::RangeFrom<usize>,
-    ccounter: std::ops::RangeFrom<usize>,
+    qcounter: ops::RangeFrom<usize>,
+    ccounter: ops::RangeFrom<usize>,
 }
 
 impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
@@ -101,7 +102,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     }
 
     /// Allocate space for a given type
-    fn alloc_for(&mut self, ty: TyId) -> BitSet {
+    fn alloc_for_ty(&mut self, ty: TyId) -> BitSet {
         let sz = ty.size(self.ctx);
         BitSet {
             qbits: self.qalloc(sz.qsize),
@@ -109,9 +110,18 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    /// Get a sub-allocation at a place (by cloning)
-    fn allocation_at(&self, place: &Place) -> BitSet {
-        let mut ty = self.gr.type_of(place, self.ctx);
+    // Fix from here. You need to clean up `alloc_for_ty` and `alloc_for` in
+    // order for them not to over-allocate qubits.
+
+    /// Allocate space for a given place
+    fn alloc_for(&mut self, place: &Place) -> BitSet {
+        let ty = self.gr.type_of(&place, self.ctx);
+        self.alloc_for_ty(ty)
+    }
+
+    fn bitset_ranges(&self, place: &Place) -> (ops::Range<VirtAddr>, ops::Range<VirtAddr>) {
+        // start with the root type
+        let mut ty = self.gr.locals[place.root].ty;
         // traverse the allocation
         let (mut qi, mut ci) = (0, 0);
         for elem in &place.path {
@@ -132,15 +142,37 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             }
             ty = ty.slot(*elem, self.ctx);
         }
+        use crate::context::CtxDisplay;
         let sz = ty.size(self.ctx);
         let (qf, cf) = (qi + sz.qsize, ci + sz.csize);
 
-        // return a new `OwnedBits` from the terminal place
-        let allocation = self.bindings.get(&place.root).unwrap();
-        BitSet {
-            qbits: allocation.qbits[qi..qf].to_owned(),
-            cbits: allocation.cbits[ci..cf].to_owned(),
+        (qi..qf, ci..cf)
+    }
+
+    /// Get a sub-allocation at a place
+    fn bitset_at(&self, place: &Place) -> BitSetSlice {
+        let ranges = self.bitset_ranges(place);
+        // return a new `BitSet`, copying from the place
+        let bitset = self.bindings.get(&place.root).unwrap();
+        bitset.index(ranges)
+    }
+
+    fn insert_bindings(&mut self, place: &Place, bits: BitSet) {
+        // TODO: [PERF] Can this be done without a double (or triple) lookup?
+        if !self.bindings.contains_key(&place.root) {
+            let ty = self.gr.locals[place.root].ty;
+            let allocation = self.alloc_for_ty(ty);
+            self.bindings.insert(place.root, allocation);
         }
+
+        let ranges = self.bitset_ranges(&place);
+        let lbits = self
+            .bindings
+            .get_mut(&place.root)
+            .unwrap()
+            .index_mut(ranges);
+        lbits.qbits.copy_from_slice(&bits.qbits);
+        lbits.cbits.copy_from_slice(&bits.cbits);
     }
 
     /// Create the initial local bindings for arguments and return site
@@ -151,7 +183,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         // Take one for each argument, plus one for the return site
         let n = self.gr.nargs + 1;
         for (idx, Local { ty, .. }) in self.gr.locals.idx_enumerate().take(n) {
-            let allocation = self.alloc_for(*ty);
+            let allocation = self.alloc_for_ty(*ty);
             self.bindings.insert(idx, allocation);
         }
     }
@@ -185,7 +217,6 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             _ => return,
         };
 
-        let ty = self.gr.type_of(&lplace, self.ctx);
         match &rhs.data {
             BinOp(_op, _left, _right) => todo!(),
             UnOp(UnOpKind::Minus, _) => todo!(),
@@ -196,14 +227,14 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                     Operand::Copy(x) => x,
                     Operand::Move(x) => x,
                 };
-                let bits = self.bindings.get(&right.root).unwrap().clone();
+                let bits = self.bitset_at(right).to_owned();
                 for addr in &bits.qbits {
                     self.push_gate(Gate::X(*addr));
                 }
-                self.bindings.insert(lplace.root, bits);
+                self.insert_bindings(&lplace, bits);
             }
             UnOp(UnOpKind::Linear, right) => {
-                let allocation = self.alloc_for(ty);
+                let allocation = self.alloc_for(&lplace);
                 match right {
                     Operand::Const(value) => {
                         for (i, b) in value.bits().iter().enumerate() {
@@ -220,19 +251,20 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                         // TODO
                     }
                 }
-                self.bindings.insert(lplace.root, allocation);
+                self.insert_bindings(&lplace, allocation);
             }
             UnOp(UnOpKind::Delin, _) => {
-                let allocation = self.alloc_for(ty);
-                self.bindings.insert(lplace.root, allocation);
+                let allocation = self.alloc_for(&lplace);
+                self.insert_bindings(&lplace, allocation);
             }
             Use(val) => match val {
                 Operand::Const(_) => {}
                 Operand::Copy(rplace) | Operand::Move(rplace) => {
                     //  FIXME [TESTFAIL: return_assigned] This is currently
                     //  failing an integration test but that's probably ok.
-                    let bits = self.bindings.get(&rplace.root).unwrap().clone();
-                    self.bindings.insert(lplace.root, bits);
+                    // `to_owned` maybe, unfortunately, necessary
+                    let rbits = self.bitset_at(rplace).to_owned();
+                    self.insert_bindings(&lplace, rbits);
                 }
             },
         }
@@ -253,11 +285,11 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
     fn translate_call(&mut self, callee: FnId, args: &[Operand], ret: &Place, blk: BlockId) {
         // FIXME we shouldn't always rebind this!
         let ret_local = &self.gr.locals[ret.root];
-        let allocation = self.alloc_for(ret_local.ty);
+        let allocation = self.alloc_for_ty(ret_local.ty);
         self.bindings.insert(ret.root, allocation);
         // At the Lir level, there's no such thing as a return value. The return
         // place is simply the first argument.
-        let args = std::iter::once(self.allocation_at(ret))
+        let args = std::iter::once(self.bitset_at(ret).to_owned())
             .chain(args.iter().map(|arg| self.translate_arg(arg)))
             .fold(BitSet::new(), |mut acc, mut b| {
                 acc.append(&mut b);
@@ -298,7 +330,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
 
                 allocation
             }
-            Copy(place) | Move(place) => self.allocation_at(place),
+            Copy(place) | Move(place) => self.bitset_at(place).to_owned(),
         }
     }
 }

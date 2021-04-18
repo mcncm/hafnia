@@ -128,6 +128,48 @@ impl BitSet {
         self.qbits.append(&mut other.qbits);
         self.cbits.append(&mut other.cbits);
     }
+
+    // NOTE I don't think this can actually be done with the Index trait without
+    // GATs.
+    pub fn index<'b: 'a, 'a>(
+        &'b self,
+        idx: (std::ops::Range<VirtAddr>, std::ops::Range<VirtAddr>),
+    ) -> BitSetSlice<'a> {
+        BitSetSlice {
+            qbits: &self.qbits[idx.0],
+            cbits: &self.cbits[idx.1],
+        }
+    }
+
+    pub fn index_mut<'b: 'a, 'a>(
+        &'b mut self,
+        idx: (std::ops::Range<VirtAddr>, std::ops::Range<VirtAddr>),
+    ) -> BitSetSliceMut<'a> {
+        BitSetSliceMut {
+            qbits: &mut self.qbits[idx.0],
+            cbits: &mut self.cbits[idx.1],
+        }
+    }
+}
+
+pub struct BitSetSlice<'a> {
+    pub qbits: &'a [VirtAddr],
+    pub cbits: &'a [VirtAddr],
+}
+
+impl BitSetSlice<'_> {
+    // NOTE should really use the ToOwned trait
+    pub fn to_owned(&self) -> BitSet {
+        BitSet {
+            qbits: self.qbits.to_owned(),
+            cbits: self.cbits.to_owned(),
+        }
+    }
+}
+
+pub struct BitSetSliceMut<'a> {
+    pub qbits: &'a mut [VirtAddr],
+    pub cbits: &'a mut [VirtAddr],
 }
 
 /// A terrible name that will be fixed later: each of the "things" that take

@@ -532,16 +532,12 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.push_stmt(stmt);
 
         let lhs = match &lhs.data {
-            ExprKind::Ident(name) => name,
+            // This unwrap *should* be safe because the name is validated during
+            // typechecking
+            ExprKind::Ident(name) => (*self.st.get(&name.data).unwrap()).into(),
+            ExprKind::Field(root, field) => self.unroll_fields(root, field)?,
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
-
-        let lhs = match self.st.get(&lhs.data) {
-            Some(local) => *local,
-            None => return Err(self.errors.push(errors::UndeclaredLhs { span: lhs.span })),
-        }
-        // FIXME we'll temporarily assume that left-hand sides are just identifiers
-        .into();
 
         self.lower_into(&lhs, rhs)
     }
@@ -608,6 +604,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_field(&mut self, place: Place, head: &Expr, field: &Field) -> Maybe<()> {
+        use crate::context::CtxDisplay;
         let rhs = self.unroll_fields(head, field)?;
         let rhs = Rvalue {
             // FIXME Throughout this module, there are a lot of places where I
@@ -626,6 +623,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let head_ty = self.type_expr(head)?;
         let mut place = match &head.data {
             ExprKind::Ident(ident) => {
+                // This unwrap is maybe safe? I'm not actually sure why. It's
+                // checked earlier somewhere.
                 let id = self.st.get(&ident.data).unwrap();
                 (*id).into()
             }
@@ -952,7 +951,7 @@ mod typing {
             let ty = match &expr.data {
                 ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
                 ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
-                ExprKind::Assn { .. } => self.ctx.common.unit,
+                ExprKind::Assn { lhs, rhs } => self.ctx.common.unit,
                 ExprKind::Literal(lit) => self.type_literal(lit),
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
