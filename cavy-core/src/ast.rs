@@ -344,6 +344,7 @@ pub type UnOp = Spanned<UnOpKind>;
 pub enum UnOpKind {
     Minus,
     Not,
+    Split, // #
     Linear,
     Delin,
 }
@@ -354,6 +355,7 @@ impl FromToken for UnOp {
         let kind = match token.lexeme {
             Minus => UnOpKind::Minus,
             Tilde => UnOpKind::Not,
+            Octothorpe => UnOpKind::Split,
             Question => UnOpKind::Linear,
             Bang => UnOpKind::Delin,
             _ => {
@@ -376,6 +378,7 @@ impl fmt::Display for UnOpKind {
         let repr = match self {
             Self::Minus => Minus,
             Self::Not => Tilde,
+            Self::Split => Octothorpe,
             Self::Linear => Question,
             Self::Delin => Bang,
         };

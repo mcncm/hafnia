@@ -222,7 +222,9 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
 
         match &rhs.data {
             BinOp(_op, _left, _right) => todo!(),
+
             UnOp(UnOpKind::Minus, _) => todo!(),
+
             UnOp(UnOpKind::Not, right) => {
                 // FIXME very much under construction
                 let right = match right {
@@ -236,6 +238,22 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                 }
                 self.insert_bindings(&lplace, bits);
             }
+
+            UnOp(UnOpKind::Split, right) => {
+                // FIXME very much under construction
+                // Also, copy of the `Not` case
+                let right = match right {
+                    Operand::Const(_) => unreachable!(),
+                    Operand::Copy(x) => x,
+                    Operand::Move(x) => x,
+                };
+                let bits = self.bitset_at(right).to_owned();
+                for addr in &bits.qbits {
+                    self.push_gate(Gate::H(*addr));
+                }
+                self.insert_bindings(&lplace, bits);
+            }
+
             UnOp(UnOpKind::Linear, right) => {
                 let allocation = self.alloc_for(&lplace);
                 match right {
@@ -256,10 +274,12 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                 }
                 self.insert_bindings(&lplace, allocation);
             }
+
             UnOp(UnOpKind::Delin, _) => {
                 let allocation = self.alloc_for(&lplace);
                 self.insert_bindings(&lplace, allocation);
             }
+
             Use(val) => match val {
                 Operand::Const(_) => {}
                 Operand::Copy(rplace) | Operand::Move(rplace) => {

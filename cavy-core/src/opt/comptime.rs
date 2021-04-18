@@ -187,6 +187,8 @@ impl Interpreter {
 
             RvalueKind::UnOp(UnOp::Not, Const(_)) => unreachable!(),
 
+            RvalueKind::UnOp(UnOp::Split, _) => Evaluated::No,
+
             RvalueKind::UnOp(UnOp::Delin, _) => Evaluated::No,
 
             RvalueKind::UnOp(UnOp::Minus, _) => todo!(),

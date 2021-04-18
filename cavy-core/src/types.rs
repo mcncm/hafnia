@@ -94,6 +94,16 @@ impl TyId {
         sz.csize == 0
     }
 
+    pub fn is_primitive(&self, ctx: &Context) -> bool {
+        match &ctx.types[*self] {
+            Type::Tuple(_) => false,
+            Type::Array(_) => false,
+            Type::Func(_, _) => false,
+            Type::UserType(_) => false,
+            _ => true,
+        }
+    }
+
     /// Check the linearity of a type, with the help of the global context
     pub fn is_linear(&self, ctx: &Context) -> bool {
         self.is_linear_inner(&ctx.types)

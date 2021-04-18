@@ -67,6 +67,7 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         '}' => Lexeme::RDelim(Delim::Brace),
         '<' => Lexeme::LAngle,
         '>' => Lexeme::RAngle,
+        '#' => Lexeme::Octothorpe,
         _ => return None,
     };
     Some(lexeme)

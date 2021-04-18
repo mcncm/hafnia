@@ -1119,6 +1119,17 @@ mod typing {
             match &op.data {
                 UnOpKind::Minus => todo!(),
                 UnOpKind::Not => Ok(right),
+                UnOpKind::Split => {
+                    if right.is_primitive(self.ctx) & right.is_coherent(self.ctx) {
+                        Ok(right)
+                    } else {
+                        Err(self.errors.push(errors::UnOpOutTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            ty: right,
+                        }))
+                    }
+                }
                 UnOpKind::Linear => {
                     if right == self.ctx.common.bool {
                         Ok(self.ctx.common.q_bool)

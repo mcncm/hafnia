@@ -748,7 +748,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn unary(&mut self) -> Maybe<Expr> {
-        if let Some(Bang) | Some(Tilde) | Some(Question) = self.peek_lexeme() {
+        if let Some(Bang) | Some(Tilde) | Some(Octothorpe) | Some(Question) = self.peek_lexeme() {
             let op = self.next().unwrap();
             let op = UnOp::from_token(op, self.ctx).unwrap();
             let right = self.unary()?;

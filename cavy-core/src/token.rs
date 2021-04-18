@@ -24,7 +24,7 @@ pub enum Lexeme {
 
     // single-character token types
     Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde,
-    Comma, Semicolon, Colon, LAngle, RAngle,
+    Comma, Semicolon, Colon, LAngle, RAngle, Octothorpe,
 
     // delimiters
     LDelim(Delim), RDelim(Delim),
@@ -73,6 +73,7 @@ impl fmt::Display for Lexeme {
             Percent => "%",
             Bang => "!",
             Tilde => "~",
+            Octothorpe => "#",
             Comma => ",",
             Semicolon => ";",
             Colon => ":",
