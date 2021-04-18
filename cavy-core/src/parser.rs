@@ -889,7 +889,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Call a function or index into an array.
     #[rustfmt::skip]
     fn call(&mut self) -> Maybe<Expr> {
-        let mut expr = self.primary()?;
+        let mut expr = self.field_access()?;
 
         // This is a function call
         if let Some(LDelim(Paren)) = self.peek_lexeme() {
@@ -929,8 +929,25 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(self.node(kind, span))
     }
 
-    // It no longer makes sense for this to be called `primary`, on account of
-    // the fields and paths, but here we are.
+    /// Field accesses can occur only primary expressions (but may still be a
+    /// type error).
+    ///
+    /// NOTE this might prove to create a parsing ambiguity if there are ever
+    /// floating-point types (is `4.2` the number 17/5, or an access to field
+    /// `2` on `4`?).
+    fn field_access(&mut self) -> Maybe<Expr> {
+        let mut expr = self.primary()?;
+
+        while let Some(Dot) = self.peek_lexeme() {
+            self.tokens.next();
+            let field = self.field()?;
+            let span = expr.span.join(&field.span).unwrap();
+            let kind = ExprKind::Field(Box::new(expr), field);
+            expr = self.node(kind, span);
+        }
+        Ok(expr)
+    }
+
     fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
@@ -953,22 +970,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     // But this does seem to be the right place for it to live.
                     return self.finish_struct_literal(ident);
                 }
-                // Just an identifier
                 let span = ident.span;
-                let mut expr = self.node(ExprKind::Ident(ident), span);
-
-                // Field accesses against this identifier
-                //
-                // FIXME: [BUG] This should be elsewhere. Expressions like
-                // `(expr).a` should be valid.
-                while let Some(Dot) = self.peek_lexeme() {
-                    self.tokens.next();
-                    let field = self.field()?;
-                    let span = expr.span.join(&field.span).unwrap();
-                    let kind = ExprKind::Field(Box::new(expr), field);
-                    expr = self.node(kind, span);
-                }
-                Ok(expr)
+                Ok(self.node(ExprKind::Ident(ident), span))
             }
             LDelim(Paren) => self.finish_group(token.span),
 
