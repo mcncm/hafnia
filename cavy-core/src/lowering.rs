@@ -1281,7 +1281,7 @@ mod typing {
             Ok(ty)
         }
 
-        fn type_int_arr(&mut self, item: &Expr, reps: &Expr) -> Maybe<TyId> {
+        fn type_int_arr(&mut self, _item: &Expr, _reps: &Expr) -> Maybe<TyId> {
             todo!()
         }
 

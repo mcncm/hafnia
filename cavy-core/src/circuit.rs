@@ -1,5 +1,8 @@
-use crate::target::{qasm::Qasm, IntoTarget, Target};
 use crate::{ast::FnId, store::Index};
+use crate::{
+    target::{qasm::Qasm, IntoTarget, Target},
+    types::TypeSize,
+};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
@@ -121,6 +124,14 @@ impl BitSet {
         Self {
             qbits: Vec::new(),
             cbits: Vec::new(),
+        }
+    }
+
+    /// Create an uninitialized set of address bindings
+    pub fn uninit(sz: &TypeSize) -> Self {
+        Self {
+            qbits: vec![0; sz.qsize],
+            cbits: vec![0; sz.csize],
         }
     }
 

@@ -110,13 +110,16 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    // Fix from here. You need to clean up `alloc_for_ty` and `alloc_for` in
-    // order for them not to over-allocate qubits.
-
     /// Allocate space for a given place
     fn alloc_for(&mut self, place: &Place) -> BitSet {
         let ty = self.gr.type_of(&place, self.ctx);
         self.alloc_for_ty(ty)
+    }
+
+    /// Create a set of uninitialized pointers sized for the given type
+    fn uninit_for_ty(&mut self, ty: TyId) -> BitSet {
+        let sz = ty.size(self.ctx);
+        BitSet::uninit(sz)
     }
 
     fn bitset_ranges(&self, place: &Place) -> (ops::Range<VirtAddr>, ops::Range<VirtAddr>) {
@@ -161,7 +164,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         // TODO: [PERF] Can this be done without a double (or triple) lookup?
         if !self.bindings.contains_key(&place.root) {
             let ty = self.gr.locals[place.root].ty;
-            let allocation = self.alloc_for_ty(ty);
+            let allocation = self.uninit_for_ty(ty);
             self.bindings.insert(place.root, allocation);
         }
 
