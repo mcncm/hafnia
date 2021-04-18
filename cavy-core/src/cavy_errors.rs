@@ -99,7 +99,7 @@ impl CtxDisplay for SpanReport {
 /// compiler passes. I'm not sure if that's "good Rust," but it seems to make
 /// for a nice design in which I only need to check *once* whether there have
 /// been any errors in a compiler pass.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CavyError;
 
 impl std::fmt::Display for CavyError {

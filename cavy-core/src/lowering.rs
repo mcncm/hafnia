@@ -1006,8 +1006,8 @@ mod typing {
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
                 ExprKind::Struct { ty, fields } => self.type_struct(ty, fields)?,
-                ExprKind::IntArr { item, reps } => todo!(),
-                ExprKind::ExtArr(_) => todo!(),
+                ExprKind::IntArr { item, reps } => self.type_int_arr(item, reps)?,
+                ExprKind::ExtArr(elems) => self.type_ext_arr(elems)?,
                 ExprKind::Block(block) => self.type_block(block)?,
                 ExprKind::If {
                     cond,
@@ -1279,6 +1279,28 @@ mod typing {
             // making this code a little more spagghetified.
 
             Ok(ty)
+        }
+
+        fn type_int_arr(&mut self, item: &Expr, reps: &Expr) -> Maybe<TyId> {
+            todo!()
+        }
+
+        fn type_ext_arr(&mut self, elems: &[Expr]) -> Maybe<TyId> {
+            let mut elems = elems.iter();
+            let fst = match elems.next().and_then(|head| Some(self.type_expr(head))) {
+                Some(ty) => ty?,
+                None => todo!(),
+            };
+
+            let incorrect_tys = elems
+                .map(|elem| self.type_expr(elem))
+                .filter(|elem| elem != &Ok(fst));
+
+            for _ty in incorrect_tys {
+                todo!();
+            }
+
+            Ok(fst)
         }
     }
 
