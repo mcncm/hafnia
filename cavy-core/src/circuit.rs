@@ -151,8 +151,6 @@ pub struct LirGraph {
     pub clocals: usize,
     /// The local qubits that are free at the end of the procedure
     pub freed: Vec<usize>,
-    /// The local bits that are returned by the procedure
-    pub returned: BitSet,
     /// All the instructions of the compiled subroutine. Note that this is, for
     /// now, a finite structure. That is likely to change.
     pub instructions: Vec<Instruction>,
@@ -271,10 +269,38 @@ impl<'c> CircuitStream<'c> {
     fn pop_stack_frame(&mut self) {
         self.active = self.stack.pop().unwrap();
     }
+
+    /// Address
+    fn qtransl(&self, bit: &VirtAddr) -> PhysAddr {
+        self.active.table.qbits[*bit]
+    }
+
+    /// Address translation to physical bits
+    fn transl_gate(&self, gate: &Gate) -> Gate {
+        match gate {
+            X(q) => X(self.qtransl(q)),
+            T { tgt, conj } => T {
+                tgt: self.qtransl(tgt),
+                conj: *conj,
+            },
+            H(q) => H(self.qtransl(q)),
+            Z(q) => Z(self.qtransl(q)),
+            CX { tgt, ctrl } => CX {
+                tgt: self.qtransl(tgt),
+                ctrl: self.qtransl(ctrl),
+            },
+            // probably shouldn't exist at this level
+            SWAP { fst, snd } => SWAP {
+                fst: self.qtransl(fst),
+                snd: self.qtransl(snd),
+            },
+            M(_) => todo!(),
+        }
+    }
 }
 
 impl<'c> Iterator for CircuitStream<'c> {
-    type Item = &'c Gate;
+    type Item = Gate;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.active.next() {
@@ -286,7 +312,7 @@ impl<'c> Iterator for CircuitStream<'c> {
                     None
                 }
             }
-            Some(Instruction::Gate(gate)) => Some(gate),
+            Some(Instruction::Gate(gate)) => Some(self.transl_gate(gate)),
             Some(Instruction::FnCall(fn_id, bits)) => {
                 // FIXME: [PERF] probably-unnecessary clone
                 self.push_stack_frame(*fn_id, bits.clone());

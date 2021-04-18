@@ -431,7 +431,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::For { bind, iter, body } => {
                 todo!()
             }
-            ExprKind::Call { callee, args } => self.lower_into_call(callee, args, expr.span),
+            ExprKind::Call { callee, args } => self.lower_into_call(place, callee, args, expr.span),
             ExprKind::Index { head, index } => {
                 todo!()
             }
@@ -803,32 +803,35 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // value and passing by reference, which for the time being isn't respected.
     //
     // Also, we probably want the callee to be an expression rather than a function name.
-    fn lower_into_call(&mut self, callee: &Ident, args: &[Expr], span: Span) -> Maybe<()> {
+    fn lower_into_call(
+        &mut self,
+        place: Place,
+        callee: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Maybe<()> {
         // FIXME Note that we're resolving every function twice, which suggests
         // that this could be pulled up to an earlier stage, and that it's a
         // potential source of errors.
         let func = self.resolve_function(&callee.data).unwrap();
         let func_sig = &self.sigs[func];
-        let arg_locals: Vec<_> = func_sig
+        let args: Vec<_> = func_sig
             .params
             .iter()
-            .map(|(_symb, ty)| {
-                let local = self.gr.auto_place(*ty);
+            .zip(args)
+            .map(|((_symb, ty), arg)| {
+                let place = self.gr.auto_place(*ty);
+                self.lower_into(&place, arg)?;
                 // Call by value!
-                self.operand_of(local)
+                Ok(self.operand_of(place))
             })
-            .collect();
-
-        for (arg, operand) in args.iter().zip(arg_locals.iter()) {
-            if let Operand::Copy(loc) | Operand::Move(loc) = operand {
-                self.lower_into(loc, arg)?;
-            }
-        }
+            .collect::<Result<Vec<_>, _>>()?;
 
         let tail_block = self.new_block();
         let call = BlockKind::Call {
             callee: func,
-            args: arg_locals,
+            args,
+            ret: place,
             blk: tail_block,
             span,
         };

@@ -196,6 +196,7 @@ pub enum BlockKind {
         /// The span of the function call
         span: Span,
         args: Vec<Operand>,
+        ret: Place,
         /// The block to which the function returns
         blk: BlockId,
     },
@@ -351,9 +352,10 @@ impl fmt::Display for BlockKind {
                 callee,
                 args,
                 blk,
+                ret,
                 span: _,
             } => {
-                write!(f, "call {:?}(", callee)?;
+                write!(f, "{} = call {:?}(", ret, callee)?;
                 args.iter().fold(true, |first, arg| {
                     if !first {
                         let _ = f.write_str(", ");

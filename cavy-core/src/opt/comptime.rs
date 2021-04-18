@@ -52,6 +52,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
         BlockKind::Call {
             callee: _,
             span: _,
+            ret: _,
             ref mut args,
             blk,
         } => {

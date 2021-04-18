@@ -63,7 +63,6 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             qlocals: 0,
             clocals: 0,
             freed: Vec::new(),
-            returned: BitSet::new(),
             instructions: Vec::new(),
         };
         let bindings = HashMap::new();
@@ -166,9 +165,10 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                 callee,
                 span: _,
                 args,
+                ret,
                 blk,
             } => {
-                self.translate_call(*callee, args, *blk);
+                self.translate_call(*callee, args, ret, *blk);
             }
             BlockKind::Ret => {}
         }
@@ -236,14 +236,19 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         }
     }
 
-    fn translate_call(&mut self, callee: FnId, args: &[Operand], blk: BlockId) {
-        let args =
-            args.iter()
-                .map(|arg| self.translate_arg(arg))
-                .fold(BitSet::new(), |mut acc, mut b| {
-                    acc.append(&mut b);
-                    acc
-                });
+    fn translate_call(&mut self, callee: FnId, args: &[Operand], ret: &Place, blk: BlockId) {
+        // FIXME we shouldn't always rebind this!
+        let ret_local = &self.gr.locals[ret.root];
+        let allocation = self.alloc_for(ret_local.ty);
+        self.bindings.insert(ret.root, allocation);
+        // At the Lir level, there's no such thing as a return value. The return
+        // place is simply the first argument.
+        let args = std::iter::once(self.allocation_at(ret))
+            .chain(args.iter().map(|arg| self.translate_arg(arg)))
+            .fold(BitSet::new(), |mut acc, mut b| {
+                acc.append(&mut b);
+                acc
+            });
         self.lir
             .instructions
             .push(Instruction::FnCall(callee, args));

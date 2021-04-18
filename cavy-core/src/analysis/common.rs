@@ -162,12 +162,7 @@ where
                 self.results.exit_state = self.results.exit_state.join(&state);
                 &[]
             }
-            BlockKind::Call {
-                span: _,
-                callee: _,
-                args: _,
-                blk,
-            } => std::slice::from_ref(blk),
+            BlockKind::Call { blk, .. } => std::slice::from_ref(blk),
         };
 
         // If the propagated state differs from that of any successor, enter it
