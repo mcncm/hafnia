@@ -125,36 +125,47 @@ impl Table {
         }
     }
 
-    /// Look up the data associated with a symbol, recursively
-    fn get<'ast>(
-        &'ast self,
-        symb: &SymbolId,
-        tables: &'ast TableStore,
-    ) -> Option<&'ast TableEntry> {
-        match self.get_inner(symb) {
+    /// Abstracts over a recursive lookup associated with a symbol. The function
+    /// pointer argument lets us use different strategies to return a function,
+    /// type, or one or the other.
+    fn get<'a, T, F>(
+        &'a self,
+        symb: &'a SymbolId,
+        tables: &'a TableStore,
+        // This argument instructs how to look up the reference within a single
+        // table
+        get_inner: F,
+    ) -> Option<&'a T>
+    where
+        F: Fn(&'a Self, &'a SymbolId) -> Option<&'a T>,
+    {
+        match get_inner(self, &symb) {
             v @ Some(_) => v,
             None => match self.parent {
                 Some(id) => {
                     let parent = &tables[id];
-                    parent.get(symb, tables)
+                    parent.get(symb, tables, get_inner)
                 }
                 None => None,
             },
         }
     }
 
-    fn get_inner(&self, _symb: &SymbolId) -> Option<&TableEntry> {
-        // We'll try this: retrieve a local, if one exists, with higher
-        // precedence; if there is none, check for a fn item.
-        // FIXME
-        None
+    pub fn get_func<'a>(
+        &'a self,
+        symb: &'a SymbolId,
+        tables: &'a TableStore,
+    ) -> Option<&'a (FnId, Span)> {
+        self.get(symb, tables, |this: &Self, symb| this.funcs.get(symb))
     }
-}
 
-#[derive(Debug)]
-pub enum TableEntry {
-    Var(Option<Annot>),
-    Func(FnId),
+    pub fn get_udt<'a>(
+        &'a self,
+        symb: &'a SymbolId,
+        tables: &'a TableStore,
+    ) -> Option<&'a (UdtId, Span)> {
+        self.get(symb, tables, |this: &Self, symb| this.udts.get(symb))
+    }
 }
 
 /// A generic type for some ast node that contains a single "thing.""
@@ -677,9 +688,10 @@ pub struct Func {
     pub sig: Sig,
     /// The id of the function body which, like in rustc, points not to a `Block`, but an `Expr`.
     pub body: BodyId,
-    /// The table where the function is defined: we must track this in order to
-    /// resolve types in its signature, and to determine what is visible from
-    /// inside it.
+    /// The table in the body of the function: we track this in order to resolve
+    /// symbols in its signature (but make sure that it's not redundant to do
+    /// so). To resolve symbols in its body, we need the `TableId` held in the
+    /// body `Block`.
     pub table: TableId,
     pub span: Span,
 }

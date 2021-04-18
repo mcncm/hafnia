@@ -1,3 +1,8 @@
+//! FIXME This module is trying to do too much. It's overly complex, and will be
+//! hard for anyone else to understand. Once again, rustc did this right: this
+//! should be divided into two passes: a first in which everything is fully
+//! resolved, and a second in which we actually lower statements.
+
 use crate::{
     ast::{self, StmtKind, *},
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
@@ -173,7 +178,14 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     // FIXME this convenience method just wraps `typing::resolve_type` to supply
     // its bevy of arguments.
     fn resolve_annot(&mut self, ty: &Annot, tab: &Table) -> Maybe<TyId> {
-        typing::resolve_annot(ty, tab, &self.udt_tys, &mut self.errors, &mut self.ctx)
+        typing::resolve_annot(
+            ty,
+            tab,
+            &self.ast.tables,
+            &self.udt_tys,
+            &mut self.errors,
+            &mut self.ctx,
+        )
     }
 }
 
@@ -213,7 +225,10 @@ impl SymbolTable {
         self.current -= 1;
     }
 
-    /// NOTE: this is actually incorrect, because of how it should interact with function scope.
+    /// NOTE: this is actually incorrect, because of how it should interact with
+    /// function scope.
+    ///
+    /// NOTE: (again) what does the comment above mean?
     fn get(&self, item: &SymbolId) -> Option<&LocalId> {
         let mut cursor = self.current;
         loop {
@@ -351,6 +366,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     fn set_terminator(&mut self, kind: BlockKind) {
         self.gr.blocks[self.cursor].kind = kind;
+    }
+
+    /// The partner of Parser::with_table at the next stage of the compilation
+    /// pipeline.
+    fn with_table<T, F>(&mut self, new: TableId, f: F) -> Maybe<T>
+    where
+        F: FnOnce(&mut Self) -> Maybe<T>,
+    {
+        let old = self.table;
+        self.table = new;
+        let restore = |this: &mut Self| {
+            this.table = old;
+            this.st.pop_table();
+        };
+        self.st.push_table();
+        let t = match f(self) {
+            Ok(t) => t,
+            Err(err) => {
+                restore(self);
+                return Err(err);
+            }
+        };
+        restore(self);
+        Ok(t)
     }
 
     /// Temporarily work within the environment of a new goto block
@@ -696,11 +735,16 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: Place, block: &Block) -> Maybe<()> {
-        #![allow(unused_variables)]
+        self.with_table(block.table, |this| {
+            Self::lower_into_block_inner(this, place, block)
+        })
+    }
+
+    fn lower_into_block_inner(&mut self, place: Place, block: &Block) -> Maybe<()> {
         let Block {
             stmts,
             expr,
-            table,
+            table: _, // already taken care of by outer function
             span,
         } = block;
 
@@ -894,14 +938,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     /// Resolve a function from a local name
     fn resolve_function(&self, func: &SymbolId) -> Option<FnId> {
         let tab = &self.tables[self.table];
-        tab.funcs.get(func).map(|(fn_id, _)| *fn_id)
+        tab.get_func(func, self.tables).map(|(fn_id, _)| *fn_id)
     }
 
     /// Resolve a type from a local name
     fn resolve_type(&self, ty: &SymbolId) -> Option<TyId> {
         let tab = &self.tables[self.table];
-        tab.udts
-            .get(ty)
+        tab.get_udt(ty, self.tables)
             .map(|(udt, _)| self.udt_tys.get(udt))
             .flatten()
             .copied()
@@ -913,6 +956,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         typing::resolve_annot(
             ty,
             &self.tables[self.table],
+            &self.tables,
             &self.udt_tys,
             &mut self.errors,
             &mut self.ctx,
@@ -1259,6 +1303,7 @@ mod typing {
     pub fn resolve_annot(
         annot: &Annot,
         tab: &Table,
+        tables: &TableStore,
         udt_tys: &HashMap<UdtId, TyId>,
         errs: &mut ErrorBuf,
         ctx: &mut Context,
@@ -1275,23 +1320,23 @@ mod typing {
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
-                    .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
+                    .map(|ann| resolve_annot(ann, tab, tables, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
                 ctx.intern_ty(Type::Tuple(inner_types))
             }
             AnnotKind::Array(inner) => {
-                let inner = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
+                let inner = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
                 ctx.intern_ty(Type::Array(inner))
             }
             AnnotKind::Question(inner) => {
-                let ty = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
+                let ty = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
                 resolve_annot_question(ctx, ty)?
             }
             AnnotKind::Bang(inner) => {
-                let ty = resolve_annot(inner, tab, udt_tys, errs, ctx)?;
+                let ty = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
                 resolve_annot_bang(ctx, ty)?
             }
-            AnnotKind::Ident(ident) => match tab.udts.get(&ident.data) {
+            AnnotKind::Ident(ident) => match tab.get_udt(&ident.data, tables) {
                 Some((udt_id, _)) => *udt_tys.get(udt_id).unwrap(),
                 None => {
                     return Err(errs.push(errors::NoSuchType {
@@ -1303,9 +1348,9 @@ mod typing {
             AnnotKind::Func(params, ret) => {
                 let param_tys = params
                     .iter()
-                    .map(|ann| resolve_annot(ann, tab, udt_tys, errs, ctx))
+                    .map(|ann| resolve_annot(ann, tab, tables, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
-                let ret_ty = resolve_annot(ret, tab, udt_tys, errs, ctx)?;
+                let ret_ty = resolve_annot(ret, tab, tables, udt_tys, errs, ctx)?;
                 ctx.intern_ty(Type::Func(param_tys, ret_ty))
             }
             AnnotKind::Ord => ctx.common.ord,
@@ -1509,7 +1554,7 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    #[msg = "type `{name}` can't be found in this scope"]
+    #[msg = "type `{name}` cannot be found in this scope"]
     pub struct NoSuchType {
         #[span]
         pub span: Span,
