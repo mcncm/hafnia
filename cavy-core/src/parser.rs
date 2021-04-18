@@ -227,6 +227,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             Lexeme::Struct => self.struct_item(),
             Lexeme::Enum => self.enum_item(),
             Lexeme::Type => self.type_item(),
+            Lexeme::Impl => self.impl_item(),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
             lexeme => Err(self.errors.push(ExpectedItem {
@@ -371,6 +372,20 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let annot = self.type_annotation()?;
         self.consume(Lexeme::Semicolon)?;
         self.insert_udt(name, annot)
+    }
+
+    // TODO: must construct another, special table for methods of a type
+    fn impl_item(&mut self) -> Maybe<()> {
+        let _ty = self.type_annotation()?;
+        self.consume(LDelim(Brace))?;
+        loop {
+            let token = self.token()?;
+            if token.lexeme == RDelim(Brace) {
+                break;
+            }
+            self.fn_item(token.span)?;
+        }
+        Ok(())
     }
 
     /// Parse a struct item and insert the name in a symbol table

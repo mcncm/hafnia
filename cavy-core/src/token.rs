@@ -12,7 +12,7 @@ pub enum Lexeme {
     Ident(String),
 
     // keywords
-    If, Else, Match, For, Let, In, Fn, Type, Struct, Enum, Print,
+    If, Else, Match, For, Let, In, Fn, Type, Struct, Enum, Impl, Print,
     True, False, Bool, U4, U8, U16, U32, Ord,
 
     // literals
@@ -91,6 +91,7 @@ impl fmt::Display for Lexeme {
             Type => "type",
             Struct => "struct",
             Enum => "enum",
+            Impl => "impl",
             Print => "print",
             True => "true",
             False => "false",

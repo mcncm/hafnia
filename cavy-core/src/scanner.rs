@@ -31,6 +31,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "struct" => Lexeme::Struct,
         "enum" => Lexeme::Enum,
         "type" => Lexeme::Type,
+        "impl" => Lexeme::Impl,
         "print" => Lexeme::Print,
         "true" => Lexeme::True,
         "false" => Lexeme::False,
