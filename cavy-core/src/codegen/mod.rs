@@ -82,6 +82,10 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         self.lir
     }
 
+    fn push_gate(&mut self, gate: Gate) {
+        let inst = Instruction::Gate(gate);
+        self.lir.instructions.push(inst);
+    }
     /// Is this the right return type? It might be unnecessarily expensive to
     /// store these ranges of consecutive numbers.
     fn qalloc(&mut self, n: usize) -> Vec<usize> {
@@ -184,33 +188,43 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         let ty = self.gr.type_of(&lplace, self.ctx);
         match &rhs.data {
             BinOp(_op, _left, _right) => todo!(),
-            UnOp(op, right) => {
-                match op {
-                    UnOpKind::Minus => todo!(),
-                    UnOpKind::Not => {
-                        // FIXME very much under construction
-                        let right = match right {
-                            Operand::Const(_) => unreachable!(),
-                            Operand::Copy(x) => x,
-                            Operand::Move(x) => x,
-                        };
-                        let bits = self.bindings.get(&right.root).unwrap().clone();
-                        for bit in &bits.qbits {
-                            let inst = Instruction::Gate(Gate::X(*bit));
-                            self.lir.instructions.push(inst);
+            UnOp(UnOpKind::Minus, _) => todo!(),
+            UnOp(UnOpKind::Not, right) => {
+                // FIXME very much under construction
+                let right = match right {
+                    Operand::Const(_) => unreachable!(),
+                    Operand::Copy(x) => x,
+                    Operand::Move(x) => x,
+                };
+                let bits = self.bindings.get(&right.root).unwrap().clone();
+                for addr in &bits.qbits {
+                    self.push_gate(Gate::X(*addr));
+                }
+                self.bindings.insert(lplace.root, bits);
+            }
+            UnOp(UnOpKind::Linear, right) => {
+                let allocation = self.alloc_for(ty);
+                match right {
+                    Operand::Const(value) => {
+                        for (i, b) in value.bits().iter().enumerate() {
+                            if *b {
+                                let addr = allocation.qbits[i];
+                                self.push_gate(Gate::X(addr));
+                            }
                         }
-                        self.bindings.insert(lplace.root, bits);
                     }
-                    UnOpKind::Linear => {
-                        let allocation = self.alloc_for(ty);
-                        self.bindings.insert(lplace.root, allocation);
+                    Operand::Copy(_) => {
+                        // TODO
                     }
-                    UnOpKind::Delin => {
-                        let allocation = self.alloc_for(ty);
-                        self.bindings.insert(lplace.root, allocation);
+                    Operand::Move(_) => {
+                        // TODO
                     }
                 }
-                // do some extra stuff
+                self.bindings.insert(lplace.root, allocation);
+            }
+            UnOp(UnOpKind::Delin, _) => {
+                let allocation = self.alloc_for(ty);
+                self.bindings.insert(lplace.root, allocation);
             }
             Use(val) => match val {
                 Operand::Const(_) => {}
