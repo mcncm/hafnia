@@ -133,6 +133,18 @@ pub mod latex {
     }
 
     impl LayoutArray {
+        /// Construct a wire in the initial state
+        fn new_wire() -> Wire<String> {
+            vec![LayoutState::Blocked, LayoutState::None]
+        }
+
+        /// Construct a wire without any gates at the current length
+        fn empty_wire(&self) -> Wire<String> {
+            let mut wire = Self::new_wire();
+            wire.extend(std::iter::repeat(LayoutState::None).take(self.len() - wire.len()));
+            wire
+        }
+
         fn new(wires: usize) -> Self {
             // Start with length at least one. It will be an invariant of this
             // data structure that there is always an empty final moment. This
@@ -145,7 +157,7 @@ pub mod latex {
             // should be enforced by `new`, although it isn't yet in a *natural* way.
             assert!(wires > 0);
             Self {
-                arr: vec![vec![LayoutState::Blocked, LayoutState::None]; wires],
+                arr: vec![Self::new_wire(); wires],
                 first_free: vec![1; wires],
             }
         }
@@ -157,6 +169,9 @@ pub mod latex {
             self.arr.len()
         }
 
+        // NOTE: Is it really necessary to maintain the invariant that all the
+        // wires are the same length at all times? We do extra work checking for
+        // empty moments on wires.
         #[inline(always)]
         fn add_moment(&mut self) {
             for wire in self.arr.iter_mut() {
@@ -166,17 +181,28 @@ pub mod latex {
 
         #[inline(always)]
         fn len(&self) -> usize {
-            // Safe because we are guaranteed to always have at least one wire.
-            unsafe { self.arr.get_unchecked(0).len() }
+            self.arr[0].len()
+        }
+
+        fn width(&self) -> usize {
+            self.arr.len()
+        }
+
+        /// Widen to the argument if the diagram is currently too narrow
+        fn widen_to(&mut self, wire: usize) {
+            let new_width = wire + 1;
+            let diff = new_width.saturating_sub(self.width());
+            self.arr.extend(vec![self.empty_wire(); diff]);
+            self.first_free.extend(std::iter::repeat(1).take(diff));
         }
 
         #[rustfmt::skip]
-        fn push_gate(&mut self, gate: &crate::circuit::Gate) {
+        fn push_gate(&mut self, gate: crate::circuit::Gate) {
             use crate::circuit::Gate::*;
             match gate {
                 X(tgt)            => self.insert_single(tgt, r"\gate{X}".to_string()),
                 T { tgt, conj }   => self.insert_single(tgt, {
-                    if *conj {
+                    if conj {
                         r"\gate{T^\dag}".to_string()
                     } else {
                         r"\gate{T}".to_string()
@@ -185,7 +211,7 @@ pub mod latex {
                 H(tgt)            => self.insert_single(tgt, r"\gate{H}".to_string()),
                 Z(tgt)            => self.insert_single(tgt, r"\gate{Z}".to_string()),
                 CX { ctrl, tgt }  => {
-                    let dist = (*tgt as isize) - (*ctrl as isize);
+                    let dist = (tgt as isize) - (ctrl as isize);
                     let ctrl_label = format!(r"\ctrl{{{}}}", dist);
                     let ctrl = (ctrl, ctrl_label);
                     let tgt = (tgt, r"\targ{}".to_string());
@@ -196,8 +222,10 @@ pub mod latex {
             }
         }
 
-        fn insert_single(&mut self, wire: &usize, gate: String) {
-            let wire = *wire;
+        fn insert_single(&mut self, wire: usize, gate: String) {
+            // Accomodate the new wire, if new allocations must be made
+            self.widen_to(wire);
+
             let mut moment = self.first_free[wire];
             self.arr[wire][moment] = LayoutState::Some(gate);
 
@@ -222,8 +250,8 @@ pub mod latex {
                 .all(|wire| wire[moment] == LayoutState::None)
         }
 
-        fn insert_multiple(&mut self, gates: Vec<(&usize, String)>) {
-            // FIXME This methos is pretty unweildy and inelegant. It still
+        fn insert_multiple(&mut self, gates: Vec<(usize, String)>) {
+            // FIXME This method is pretty unweildy and inelegant. It still
             // doesn't always find the optimal layout, and its asymptotic isn't
             // great. There's probably a lovely dynamic programming algorithm
             // that fixes everything.
@@ -231,8 +259,11 @@ pub mod latex {
             // NOTE: is there a single iterator
             // adapter in the standard library for getting both the min and max
             // in one go?
-            let min = **gates.iter().map(|(wire, _)| wire).min().unwrap();
-            let max = **gates.iter().map(|(wire, _)| wire).max().unwrap();
+            let min = *gates.iter().map(|(wire, _)| wire).min().unwrap();
+            let max = *gates.iter().map(|(wire, _)| wire).max().unwrap();
+
+            // Accomodate for the highest wire index
+            self.widen_to(max);
 
             // If the last moment isn't free, we’ll have to add another one.
             let moment = if !self.range_free(self.len() - 1, min..=max) {
@@ -256,7 +287,7 @@ pub mod latex {
                 self.add_moment()
             }
 
-            for (&wire, gate) in gates.into_iter() {
+            for (wire, gate) in gates.into_iter() {
                 self.arr[wire][moment] = LayoutState::Some(gate);
                 self.first_free[wire] = moment + 1;
             }
@@ -279,21 +310,20 @@ pub mod latex {
 
     impl IntoTarget<Latex> for LayoutArray {
         fn into_target(&self, _target: &Latex) -> String {
-            todo!()
-            // self.arr
-            //     .iter()
-            //     .map(|wire| {
-            //         wire.iter()
-            //             .map(|gate| match gate {
-            //                 LayoutState::Some(gate) => gate,
-            //                 _ => r"\qw",
-            //             })
-            //             .collect::<Vec<&str>>()
-            //             .join(" & ")
-            //     })
-            //     .collect::<Vec<String>>()
-            //     // Must not be a raw string; we really want to emit a newline!
-            //     .join(" \\\\\n")
+            self.arr
+                .iter()
+                .map(|wire| {
+                    wire.iter()
+                        .map(|gate| match gate {
+                            LayoutState::Some(gate) => gate,
+                            _ => r"\qw",
+                        })
+                        .collect::<Vec<&str>>()
+                        .join(" & ")
+                })
+                .collect::<Vec<String>>()
+                // Must not be a raw string; we really want to emit a newline!
+                .join(" \\\\\n")
         }
     }
 
@@ -310,22 +340,20 @@ pub mod latex {
 \end{document}
 ";
 
-        fn diagram(&self, _circuit: &crate::circuit::Lir) -> String {
-            todo!()
-            // let max_qubit = match circuit.max_qubit {
-            //     Some(qb) => qb,
-            //     None => {
-            //         return String::new();
-            //     }
-            // };
+        fn diagram(&self, circuit: &crate::circuit::Lir) -> String {
+            // TODO: [PERF] could track width more carefully to do all
+            // allocations at once
 
-            // let mut layout_array = LayoutArray::new(max_qubit + 1);
+            // FIXME: this data structure currently assumes that its with is
+            // *always* > 0; check the assertion in `new`. It could be nice to
+            // remove that restriction.
+            let mut layout_array = LayoutArray::new(1);
 
-            // for gate in circuit.circ_buf.iter() {
-            //     layout_array.push_gate(gate);
-            // }
+            for gate in circuit.iter() {
+                layout_array.push_gate(gate);
+            }
 
-            // layout_array.into_target(self)
+            layout_array.into_target(self)
         }
     }
 
