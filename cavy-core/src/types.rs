@@ -139,11 +139,11 @@ pub struct StructuralDiscipline {
 pub struct UserType {
     /// The name used at the struct's definition site
     pub def_name: SymbolId,
-    /// The fields of the struct / alternatives of the enum, not including its
+    /// The fields of the struct / variants of the enum, not including its
     /// tag
     pub fields: Vec<(SymbolId, TyId)>,
     /// A (possible) enum tag type
-    pub tag: Option<TyId>,
+    pub tag: Option<Discriminant>,
 }
 
 impl UserType {
@@ -151,8 +151,29 @@ impl UserType {
         self.tag.is_some()
     }
 
+    fn is_struct(&self) -> bool {
+        self.tag.is_none()
+    }
+
     fn as_tuple(&self) -> Type {
         Type::Tuple(self.fields.iter().map(|field| field.1).collect())
+    }
+}
+
+/// An enum discriminant is a small number of either cbits or qbits
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Discriminant {
+    C(usize),
+    Q(usize),
+}
+
+impl Discriminant {
+    fn is_linear(&self) -> bool {
+        if let Self::Q(_) = self {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -163,6 +184,30 @@ pub struct TypeSize {
     pub qsize: usize,
     /// Number of classical bits
     pub csize: usize,
+}
+
+impl TypeSize {
+    pub fn zero() -> Self {
+        Self { qsize: 0, csize: 0 }
+    }
+
+    /// Construct a type size of a classical type of size `n`
+    pub fn classical(n: usize) -> Self {
+        Self { qsize: n, csize: 0 }
+    }
+
+    /// Construct a type size of a "coherent" (all-quantum) type of size `n.`
+    pub fn coherent(n: usize) -> Self {
+        Self { qsize: 0, csize: n }
+    }
+
+    /// Take the componentwise maximum of two type sizes
+    pub fn join_max(&self, other: &TypeSize) -> Self {
+        Self {
+            qsize: std::cmp::max(self.qsize, other.qsize),
+            csize: std::cmp::max(self.csize, other.qsize),
+        }
+    }
 }
 
 impl std::ops::Add for TypeSize {
@@ -254,10 +299,22 @@ impl Type {
                 .sum(),
             Type::Array(_) => todo!(),
             Type::Func(_, _) => todo!(),
-            Type::UserType(udt) => {
-                let tup = udt.as_tuple();
-                tup.size(interner)
-            }
+            Type::UserType(udt) => match &udt.tag {
+                Some(tag) => {
+                    let tag_size = match tag {
+                        Discriminant::C(n) => TypeSize::classical(*n),
+                        Discriminant::Q(n) => TypeSize::coherent(*n),
+                    };
+                    udt.fields
+                        .iter()
+                        .map(|(_, ty)| ty.size_inner(interner))
+                        .fold(tag_size, |acc, sz| acc + *sz)
+                }
+                None => {
+                    let tup = udt.as_tuple();
+                    tup.size(interner)
+                }
+            },
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
         }
     }
@@ -273,7 +330,7 @@ impl Type {
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
             Type::UserType(ty) => {
-                let lin_tag = ty.tag.map_or(false, |ty| ty.is_linear_inner(interner));
+                let lin_tag = ty.tag.as_ref().map_or(false, |ty| ty.is_linear());
                 lin_tag
                     || ty
                         .fields

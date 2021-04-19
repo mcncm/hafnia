@@ -20,7 +20,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 // Each of the AST items in this module is given as a wrapper struct (possibly
-// with a single field) enclosing an internal enum listing the alternatives for
+// with a single field) enclosing an internal enum listing the variants for
 // that item. This pattern was borrowed from rustc itself, as I found that it
 // resolved the problem of a proliferation of AST types for each semantic
 // analysis pass.
@@ -676,11 +676,11 @@ pub struct StructField {
 #[derive(Debug)]
 pub struct Enum {
     pub name: Ident,
-    pub alternatives: Vec<EnumAlternative>,
+    pub variants: Vec<EnumVariant>,
 }
 
 #[derive(Debug)]
-pub struct EnumAlternative {
+pub struct EnumVariant {
     pub name: Ident,
     pub data: Option<(Vec<Annot>, Span)>,
 }

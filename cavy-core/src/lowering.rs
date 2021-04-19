@@ -12,7 +12,7 @@ use crate::{
     source::Span,
     store::Index,
     store::Store,
-    types::{TyId, Type, UserType},
+    types::{Discriminant, TyId, Type, TypeSize, UserType},
     values::Value,
 };
 use std::collections::HashMap;
@@ -76,8 +76,38 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         Ok(ty)
     }
 
-    fn resolve_enum(&mut self, _enum_: &Enum, _table: &Table) -> Maybe<TyId> {
-        todo!()
+    /// Turn an AST enum definition into a concrete type
+    fn resolve_enum(&mut self, enum_: &Enum, table: &Table) -> Maybe<TyId> {
+        let mut fields = Vec::new();
+        let mut sz = TypeSize::zero();
+        for variant in enum_.variants.iter() {
+            let name = variant.name.data;
+            let ty = match &variant.data {
+                Some((annots, _)) => {
+                    let tys = annots
+                        .iter()
+                        .map(|ty| self.resolve_annot(ty, table))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(self.ctx.intern_ty(Type::Tuple(tys)))
+                }
+                None => Ok(self.ctx.common.unit),
+            }?;
+            sz = sz.join_max(ty.size(self.ctx));
+            fields.push((name, ty));
+        }
+
+        // For now, only classical tags will be possible.
+        let tagsize = util::bitsize(fields.len());
+        let tag = Some(Discriminant::C(tagsize));
+
+        let udt = UserType {
+            def_name: enum_.name.data,
+            fields,
+            tag,
+        };
+
+        let ty = self.ctx.intern_ty(Type::UserType(udt));
+        Ok(ty)
     }
 
     /// Resolve things stored in global tables: function type signatures,
@@ -1416,6 +1446,32 @@ mod typing {
             _ => todo!(),
         };
         Ok(ctx.intern_ty(ty))
+    }
+}
+
+/// Some module-local utility functions
+mod util {
+    /// Get the number of bits to specify an element in a set of size `n`.
+    pub fn bitsize(n: usize) -> usize {
+        let mut mask = usize::MAX;
+        // to be the first place-value at which the mask no longer overlaps
+        let mut place: usize = 0;
+        while (n.saturating_sub(1) & mask) != 0 {
+            mask = mask << 1;
+            place += 1;
+        }
+        //place.saturating_sub(1)
+        place
+    }
+
+    #[test]
+    fn bitsize_correct() {
+        assert_eq!(bitsize(0), 0);
+        assert_eq!(bitsize(1), 0);
+        assert_eq!(bitsize(2), 1);
+        assert_eq!(bitsize(3), 2);
+        assert_eq!(bitsize(4), 2);
+        assert_eq!(bitsize(5), 3);
     }
 }
 

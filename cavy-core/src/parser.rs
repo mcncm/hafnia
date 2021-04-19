@@ -295,7 +295,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
-    /// method with them. Alternatively, we could use a macro, but this adds unnecessary complexity.
+    /// method with them. Variantly, we could use a macro, but this adds unnecessary complexity.
     fn consume_ident(&mut self) -> Maybe<ast::Ident> {
         let token = self.token()?;
         match token.lexeme {
@@ -411,17 +411,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Parse an item and insert the name in a symbol table
     fn enum_item(&mut self) -> Maybe<()> {
         let name = self.consume_ident()?;
-        let (alternatives, _) = self.delimited_list(Brace, Comma, true, Self::enum_alternative)?;
+        let (variants, _) = self.delimited_list(Brace, Comma, true, Self::enum_variant)?;
         let enum_ = ast::Enum {
             name: name.clone(),
-            alternatives,
+            variants,
         };
 
         self.insert_udt(name, enum_)
     }
 
     // For the time being, accept only identifiers
-    fn enum_alternative(&mut self) -> Maybe<EnumAlternative> {
+    fn enum_variant(&mut self) -> Maybe<EnumVariant> {
         let name = self.consume_ident()?;
         let data = match self.peek_lexeme() {
             Some(&LDelim(Paren)) => {
@@ -430,7 +430,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             _ => None,
         };
-        Ok(EnumAlternative { name, data })
+        Ok(EnumVariant { name, data })
     }
 
     /// Parse a function item and insert it in the functions table
