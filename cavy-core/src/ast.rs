@@ -559,7 +559,7 @@ impl From<StmtKind> for Stmt {
 /// A kind of statement: this division of kinds is basically taken from `rustc_ast`.
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    Ext(Ident, Box<Expr>),
+    Io(Box<IoStmtKind>),
     /// An expression without a semicolon.
     Expr(Box<Expr>),
     /// An expression with a semicolon.
@@ -575,6 +575,19 @@ pub enum StmtKind {
         lhs: Box<Pattern>,
         ty: Option<Annot>,
         rhs: Option<Box<Expr>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+/// There are two kinds of runtime I/O, corresponding to sending messages in
+/// (from the perspective of the coprocessor) and out (same).
+pub enum IoStmtKind {
+    /// in-I/O currently does nothing; there's no way for the parser to even
+    /// construct it.
+    In,
+    Out {
+        lhs: Box<Expr>,
+        name: Ident,
     },
 }
 

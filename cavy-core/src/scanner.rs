@@ -33,7 +33,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "enum" => Lexeme::Enum,
         "type" => Lexeme::Type,
         "impl" => Lexeme::Impl,
-        "ext" => Lexeme::Ext,
+        "io" => Lexeme::Io,
         "true" => Lexeme::True,
         "false" => Lexeme::False,
         "bool" => Lexeme::Bool,

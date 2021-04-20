@@ -256,10 +256,25 @@ pub enum StmtKind {
     /// Assign an `Rvalue` to a local. In the future, this will support more
     /// complex left-hand sides.
     Assn(Place, Rvalue),
-    /// Return a value to the host machine
-    Ext(SymbolId, Operand),
+    /// Read from or return a value to the host machine
+    Io(IoStmtKind),
     /// Handy for deleting statements in O(1) time.
     Nop,
+}
+
+/// This exactly mirrors the same-named struct in the AST
+#[derive(Debug)]
+pub enum IoStmtKind {
+    /// Input is not yet implemented
+    In,
+    Out {
+        // Must be a place: can't meaningfully do I/O with a value known at
+        // compile time. There's a reasonable case that someone could use the
+        // `io` statement with a constant to test their setup, so this really
+        // needs to work as expected.
+        place: Place,
+        symb: SymbolId,
+    },
 }
 
 #[derive(Debug)]
@@ -376,7 +391,15 @@ impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
-            StmtKind::Ext(name, rhs) => write!(f, "ext {:?}: {};", name, rhs),
+            StmtKind::Io(io) => {
+                match io {
+                    IoStmtKind::In => unimplemented!(),
+                    // Can't actually be formatted without Ctx
+                    IoStmtKind::Out { place, symb } => {
+                        write!(f, "io {:?}: {:?};", place, symb)
+                    }
+                }
+            }
             StmtKind::Nop => f.write_str("nop;"),
         }
     }

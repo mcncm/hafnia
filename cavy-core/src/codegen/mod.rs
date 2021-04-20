@@ -9,7 +9,7 @@ use crate::{
     ast::BinOpKind,
     ast::{FnId, UnOpKind},
     circuit::{BitSet, BitSetSlice, BitSetSliceMut, Gate, Instruction, Lir, LirGraph, VirtAddr},
-    context::Context,
+    context::{Context, SymbolId},
     mir::{self, *},
     store::Counter,
     types::{TyId, Type},
@@ -152,10 +152,9 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         (qi..qf, ci..cf)
     }
 
-    /// Get a sub-allocation at a place
+    /// Get a sub-allocation at a place.
     fn bitset_at(&self, place: &Place) -> BitSetSlice {
         let ranges = self.bitset_ranges(place);
-        // return a new `BitSet`, copying from the place
         let bitset = self.bindings.get(&place.root).unwrap();
         bitset.index(ranges)
     }
@@ -217,6 +216,10 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         use RvalueKind::*;
         let (lplace, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
+            mir::StmtKind::Io(io) => {
+                self.translate_io(io);
+                return;
+            }
             _ => return,
         };
 
@@ -281,7 +284,12 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
             }
 
             Use(val) => match val {
-                Operand::Const(_) => {}
+                Operand::Const(_val) => {
+                    // TODO: [IMPL] Add the gates to set an initial value for
+                    // classical bits
+                    let allocation = self.alloc_for(&lplace);
+                    self.insert_bindings(&lplace, allocation);
+                }
                 Operand::Copy(rplace) | Operand::Move(rplace) => {
                     //  FIXME [TESTFAIL: return_assigned] This is currently
                     //  failing an integration test but that's probably ok.
@@ -290,6 +298,34 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                     self.insert_bindings(&lplace, rbits);
                 }
             },
+        }
+    }
+
+    fn translate_io(&mut self, io: &IoStmtKind) {
+        match io {
+            IoStmtKind::In => {}
+            IoStmtKind::Out { place, symb } => {
+                let bits = self.bitset_at(place).to_owned();
+
+                // We should only be able to return purely classical types to
+                // the host computer.
+                debug_assert!(bits.qbits.len() == 0);
+
+                for (elem, &addr) in bits.cbits.iter().enumerate() {
+                    // NOTE Maybe this should keep propagating `SymbolId`s (this
+                    // is a very unfortunate clone inside a loop), but the
+                    // `target` API can't currently handle them, as it doesn't
+                    // have access to the context. Now is not the time to change
+                    // that.
+                    let gate = crate::circuit::IoOutGate {
+                        name: self.ctx.symbols[*symb].clone(),
+                        addr,
+                        elem,
+                    };
+                    self.push_gate(Gate::Out(Box::new(gate)));
+                }
+                return;
+            }
         }
     }
 

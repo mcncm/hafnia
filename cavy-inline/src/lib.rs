@@ -92,6 +92,17 @@ fn quote_circuit(circ: Lir) -> TokenStream {
         Gate::CX { tgt, ctrl } => quote! { ::cavy::circuit::Gate::CX { tgt: #tgt, ctrl: #ctrl } },
         Gate::SWAP { fst, snd } => quote! { ::cavy::circuit::Gate::Swap { fst: #fst, snd: #snd } },
         Gate::M(q) => quote! { ::cavy::circuit::Gate::M(#q) },
+        Gate::Out(e) => {
+            let cavy_core::circuit::IoOutGate { addr, name, elem } = *e;
+            quote! {
+                {
+                    let e = ::cavy::circuit::IoOutGate {
+                        #addr, #name, #elem
+                    };
+                    ::cavy::circuit::Gate::Ext(Box::new(e))
+                }
+            }
+        }
     });
 
     let circuit_def = quote! {

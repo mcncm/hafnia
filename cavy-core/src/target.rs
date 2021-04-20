@@ -217,8 +217,14 @@ pub mod latex {
                     let tgt = (tgt, r"\targ{}".to_string());
                     self.insert_multiple(vec![ctrl, tgt]);
                 }
-                SWAP { .. } => todo!(),
+                SWAP { .. }       => todo!(),
                 M(tgt)            => self.insert_single(tgt, r"\meter{}".to_string()),
+                Out(e)              => {
+                    // *very* provisional; this will be really ugly in practice
+                    // if there’s ever an `ext` in the middle of a circuit
+                    let label = format!("\\push{{\textt{{{}[{}]}}}}", e.name, e.elem);
+                    self.insert_single(e.addr, label)
+                }
             }
         }
 

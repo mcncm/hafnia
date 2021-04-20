@@ -915,19 +915,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
-            StmtKind::Ext(name, expr) => {
-                // ...Make something up, for now? But in fact, you'll have to do
-                // some kind of "weak"/"ad hoc" type inference to get this type.
-                let place = self.gr.auto_place(self.ctx.common.unit);
-                self.lower_into(&place, expr)?;
-                let op = self.operand_of(place);
-                let stmt = mir::Stmt {
-                    span: stmt.span,
-                    kind: mir::StmtKind::Ext(name.data, op),
-                };
-                self.push_stmt(stmt);
-                Ok(())
-            }
+            StmtKind::Io(io) => self.lower_io_stmt(io, stmt.span),
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
@@ -935,6 +923,35 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.lower_into(&place, expr)
             }
             StmtKind::Decl { lhs, ty, rhs } => self.lower_decl(lhs, ty, rhs),
+        }
+    }
+
+    fn lower_io_stmt(&mut self, io: &ast::IoStmtKind, span: Span) -> Maybe<()> {
+        match io {
+            ast::IoStmtKind::In => unimplemented!(),
+            ast::IoStmtKind::Out { lhs, name } => {
+                // ...Make something up, for now? But in fact, you'll have to do
+                // some kind of "weak"/"ad hoc" type inference to get this type.
+                let ty = match self.type_expr(lhs) {
+                    Ok(ty) => ty,
+                    Err(_) => Err(self.errors.push(errors::InferenceFailure {
+                        span: name.span,
+                        name: name.data,
+                    }))?,
+                };
+                let place = self.gr.auto_place(ty);
+                self.lower_into(&place, lhs)?;
+                let stmt = mir::IoStmtKind::Out {
+                    place,
+                    symb: name.data,
+                };
+                let stmt = mir::Stmt {
+                    span,
+                    kind: mir::StmtKind::Io(stmt),
+                };
+                self.push_stmt(stmt);
+                Ok(())
+            }
         }
     }
 

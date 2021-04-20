@@ -1,5 +1,6 @@
 use crate::{ast::FnId, store::Index};
 use crate::{
+    context::SymbolId,
     target::{qasm::Qasm, IntoTarget, Target},
     types::TypeSize,
 };
@@ -14,18 +15,42 @@ pub type VirtAddr = usize;
 
 pub type PhysAddr = usize;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IoOutGate {
+    pub addr: VirtAddr,
+    /// Name of the ext location. Maybe this could be a `SymbolId`--but that
+    /// would necessitate refactoring the `target` api, and I really don't want
+    /// to go there.
+    pub name: String,
+    /// Bit of the ext location
+    pub elem: usize,
+}
+
 /// These are gates from which most ordinary circuits will be built
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
     X(VirtAddr),
-    T { tgt: VirtAddr, conj: bool },
+    T {
+        tgt: VirtAddr,
+        conj: bool,
+    },
     H(VirtAddr),
     Z(VirtAddr),
-    CX { tgt: VirtAddr, ctrl: VirtAddr },
-    SWAP { fst: VirtAddr, snd: VirtAddr },
-    // Measurement "gate"
+    CX {
+        tgt: VirtAddr,
+        ctrl: VirtAddr,
+    },
+    SWAP {
+        fst: VirtAddr,
+        snd: VirtAddr,
+    },
+
+    // Not-really-gate gates
+    /// Measurement "gate"
     M(VirtAddr),
+    /// Output "gate"
+    Out(Box<IoOutGate>),
 }
 
 impl Gate {
@@ -38,6 +63,7 @@ impl Gate {
             CX { ctrl, tgt } => vec![*ctrl, *tgt],
             SWAP { fst, snd } => vec![*fst, *snd],
             M(tgt) => vec![*tgt],
+            Out(_) => vec![],
         }
     }
 
@@ -79,6 +105,7 @@ impl Gate {
             ],
             SWAP{ .. } => todo!(),
             M(_) => todo!(),
+            Out(_) => todo!(),
         }
     }
 
@@ -107,7 +134,8 @@ impl IntoTarget<Qasm> for Gate {
             Z(tgt)            => format!("z q[{}];", tgt),
             CX { tgt, ctrl }  => format!("cx q[{}], q[{}];", ctrl, tgt),
             SWAP { .. }       => todo!(),
-            M(tgt)            => format!("measure q[{}] -> c[{}];", tgt, tgt)
+            M(tgt)            => format!("measure q[{}] -> c[{}];", tgt, tgt),
+            Out(_)            => todo!(),
         }
     }
 }
@@ -348,6 +376,7 @@ impl<'c> CircuitStream<'c> {
                 snd: self.qtransl(snd),
             },
             M(_) => todo!(),
+            Out(_) => todo!(),
         }
     }
 }
@@ -390,6 +419,7 @@ impl std::fmt::Display for Gate {
             CX { tgt, ctrl } => write!(f, "CX {} {}", ctrl, tgt),
             SWAP { fst, snd } => write!(f, "SWAP {} {}", fst, snd),
             M(q) => write!(f, "M {}", q),
+            Out(e) => write!(f, "{} -> {:?}[{}]", e.addr, e.name, e.elem),
         }
     }
 }

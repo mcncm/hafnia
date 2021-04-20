@@ -319,7 +319,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Produces a statement
     pub fn statement(&mut self) -> Maybe<Stmt> {
         match self.peek_lexeme() {
-            Some(Ext) => Ok(self.ext_stmt()?),
+            Some(Io) => Ok(self.io_stmt()?),
             Some(Let) => Ok(self.local()?),
             // Must be an expression next! Note that it's not possible to find
             // an item in this position, since this method is *only* called
@@ -623,15 +623,16 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(lvalue)
     }
 
-    fn ext_stmt(&mut self) -> Maybe<Stmt> {
+    fn io_stmt(&mut self) -> Maybe<Stmt> {
         let span = self.next().unwrap().span;
+        let lhs = Box::new(self.expression()?);
+        self.consume(MinusRAngle)?;
         let name = self.consume_ident()?;
-        self.consume(Colon)?;
-        let expr = self.expression()?;
         let span = span.join(&self.consume(Lexeme::Semicolon)?.span).unwrap();
+        let stmt = IoStmtKind::Out { lhs, name };
         let stmt = Stmt {
             span,
-            data: StmtKind::Ext(name, Box::new(expr)).into(),
+            data: StmtKind::Io(Box::new(stmt)),
         };
         Ok(stmt)
     }

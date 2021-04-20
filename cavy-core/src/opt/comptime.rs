@@ -14,6 +14,8 @@
 //!
 //! TODO There is a *lot* of allocation happening in here. It might be faster to
 //! allocate a single `Vec` once for each local, instead of building trees.
+//!
+//! TODO Forbid erasure of const I/O. This might be a complicated analysis.
 
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -81,7 +83,7 @@ fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
                 stmt.kind = StmtKind::Nop;
             }
         }
-        StmtKind::Ext(_, _) => {}
+        StmtKind::Io(_) => {}
         StmtKind::Nop => {}
     }
 }
