@@ -5,7 +5,7 @@
 
 use crate::{
     ast::{self, Ast, FnId},
-    context::CtxDisplay,
+    context::{CtxDisplay, SymbolId},
     source::Span,
     store::Store,
     values::Value,
@@ -13,7 +13,7 @@ use crate::{
 // use crate::functions::{Func, UserFunc};
 use crate::store_type;
 use crate::{
-    context::{Context, CtxFmt, SymbolId},
+    context::{Context, CtxFmt},
     num::{self, Uint},
     types::{TyId, Type},
 };
@@ -256,6 +256,8 @@ pub enum StmtKind {
     /// Assign an `Rvalue` to a local. In the future, this will support more
     /// complex left-hand sides.
     Assn(Place, Rvalue),
+    /// Return a value to the host machine
+    Ext(SymbolId, Operand),
     /// Handy for deleting statements in O(1) time.
     Nop,
 }
@@ -374,6 +376,7 @@ impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
+            StmtKind::Ext(name, rhs) => write!(f, "ext {:?}: {};", name, rhs),
             StmtKind::Nop => f.write_str("nop;"),
         }
     }

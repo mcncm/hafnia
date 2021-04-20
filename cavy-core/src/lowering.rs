@@ -913,11 +913,20 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    #[allow(unused_variables)]
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
-            StmtKind::Print(_) => {
-                todo!()
+            StmtKind::Ext(name, expr) => {
+                // ...Make something up, for now? But in fact, you'll have to do
+                // some kind of "weak"/"ad hoc" type inference to get this type.
+                let place = self.gr.auto_place(self.ctx.common.unit);
+                self.lower_into(&place, expr)?;
+                let op = self.operand_of(place);
+                let stmt = mir::Stmt {
+                    span: stmt.span,
+                    kind: mir::StmtKind::Ext(name.data, op),
+                };
+                self.push_stmt(stmt);
+                Ok(())
             }
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
@@ -1413,7 +1422,10 @@ mod typing {
                     .iter()
                     .map(|ann| resolve_annot(ann, tab, tables, udt_tys, errs, ctx))
                     .collect::<Maybe<Vec<TyId>>>()?;
-                let ret_ty = resolve_annot(ret, tab, tables, udt_tys, errs, ctx)?;
+                let ret_ty = match ret {
+                    Some(ret) => resolve_annot(ret, tab, tables, udt_tys, errs, ctx)?,
+                    None => ctx.common.unit,
+                };
                 ctx.intern_ty(Type::Func(param_tys, ret_ty))
             }
             AnnotKind::Ord => ctx.common.ord,

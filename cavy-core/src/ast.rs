@@ -559,7 +559,7 @@ impl From<StmtKind> for Stmt {
 /// A kind of statement: this division of kinds is basically taken from `rustc_ast`.
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    Print(Box<Expr>),
+    Ext(Ident, Box<Expr>),
     /// An expression without a semicolon.
     Expr(Box<Expr>),
     /// An expression with a semicolon.
@@ -622,7 +622,7 @@ pub enum AnnotKind {
     Ident(Ident),
 
     ///Function types
-    Func(Vec<Annot>, Box<Annot>),
+    Func(Vec<Annot>, Option<Box<Annot>>),
 
     /// Provisional experimental type
     Ord,

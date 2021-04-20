@@ -12,7 +12,7 @@ pub enum Lexeme {
     Ident(String),
 
     // keywords
-    If, Else, Match, For, Let, In, Fn, Type, Struct, Enum, Impl, Print,
+    If, Else, Match, For, Let, In, Fn, FFn, Type, Struct, Enum, Impl, Ext,
     True, False, Bool, U4, U8, U16, U32, Ord,
 
     // literals
@@ -45,6 +45,7 @@ impl fmt::Display for Lexeme {
         let s = match self {
             Ident(s) => return write!(f, "{}", s),
             Fn => "fn",
+            FFn => "Fn",
             For => "for",
             Let => "let",
             In => "in",
@@ -92,7 +93,7 @@ impl fmt::Display for Lexeme {
             Struct => "struct",
             Enum => "enum",
             Impl => "impl",
-            Print => "print",
+            Ext => "ext",
             True => "true",
             False => "false",
             U4 => "u4",

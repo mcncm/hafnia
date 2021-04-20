@@ -319,7 +319,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Produces a statement
     pub fn statement(&mut self) -> Maybe<Stmt> {
         match self.peek_lexeme() {
-            Some(Print) => Ok(self.print_stmt()?),
+            Some(Ext) => Ok(self.ext_stmt()?),
             Some(Let) => Ok(self.local()?),
             // Must be an expression next! Note that it's not possible to find
             // an item in this position, since this method is *only* called
@@ -623,11 +623,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Ok(lvalue)
     }
 
-    fn print_stmt(&mut self) -> Maybe<Stmt> {
-        self.next();
+    fn ext_stmt(&mut self) -> Maybe<Stmt> {
+        let span = self.next().unwrap().span;
+        let name = self.consume_ident()?;
+        self.consume(Colon)?;
         let expr = self.expression()?;
-        self.consume(Lexeme::Semicolon)?;
-        Ok(StmtKind::Print(Box::new(expr)).into())
+        let span = span.join(&self.consume(Lexeme::Semicolon)?.span).unwrap();
+        let stmt = Stmt {
+            span,
+            data: StmtKind::Ext(name, Box::new(expr)).into(),
+        };
+        Ok(stmt)
     }
 
     fn if_expr(&mut self) -> Maybe<Expr> {
@@ -777,6 +783,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             let opening = self.token()?.span;
             return self.finish_array(opening);
         }
+
         self.call()
     }
 
@@ -836,6 +843,23 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 Annot {
                     span: span.join(&ty_inner.span).unwrap(),
                     data: AnnotKind::Question(Box::new(ty_inner)),
+                }
+            }
+            // function type, like `Fn(T, U) -> V`
+            FFn => {
+                let fn_span;
+                let args = self.delimited_list(Paren, Comma, false, Self::type_annotation)?;
+                let ret = if self.match_lexeme(&MinusRAngle) {
+                    let ret = self.type_annotation()?;
+                    fn_span = span.join(&ret.span).unwrap();
+                    Some(Box::new(self.type_annotation()?))
+                } else {
+                    fn_span = span.join(&args.1).unwrap();
+                    None
+                };
+                Annot {
+                    span: fn_span,
+                    data: AnnotKind::Func(args.0, ret),
                 }
             }
             // overly verbose...

@@ -81,6 +81,7 @@ fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
                 stmt.kind = StmtKind::Nop;
             }
         }
+        StmtKind::Ext(_, _) => {}
         StmtKind::Nop => {}
     }
 }
