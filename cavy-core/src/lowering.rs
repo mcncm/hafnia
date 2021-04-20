@@ -980,14 +980,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             (_, Some(rhs)) => self.type_inner(rhs)?,
         };
         let place = self.gr.user_place(ty);
+        if let Some(rhs) = rhs {
+            self.lower_into(&place, rhs)?;
+        }
         // NOTE It’s unfortunate that there is no way to insert this binding
         // *before* types are resolved. This can create a spurioius "unbound
         // name" error for each reference to a variable whose declaration is
         // broken.
         self.st.insert(lhs_data, place.root);
-        if let Some(rhs) = rhs {
-            self.lower_into(&place, rhs)?;
-        }
         Ok(())
     }
 
