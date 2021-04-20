@@ -269,18 +269,33 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                         }
                     }
                     Operand::Copy(_) => {
-                        // TODO
+                        unimplemented!("Classical feedback not yet implemented")
                     }
                     Operand::Move(_) => {
-                        // TODO
+                        unimplemented!("Classical feedback not yet implemented")
                     }
                 }
                 self.insert_bindings(&lplace, allocation);
             }
 
-            UnOp(UnOpKind::Delin, _) => {
-                let allocation = self.alloc_for(&lplace);
-                self.insert_bindings(&lplace, allocation);
+            UnOp(UnOpKind::Delin, right) => {
+                let rplace = match right {
+                    Operand::Const(_) => unreachable!(),
+                    Operand::Copy(_) => unreachable!(),
+                    Operand::Move(place) => place,
+                };
+                let lbits = self.alloc_for(&lplace);
+                let rbits = self.bitset_at(&rplace).to_owned();
+
+                debug_assert_eq!(rbits.cbits.len(), 0);
+                debug_assert_eq!(lbits.qbits.len(), 0);
+                debug_assert_eq!(lbits.cbits.len(), rbits.qbits.len());
+
+                for (_lbit, rbit) in lbits.cbits.iter().zip(rbits.qbits.iter()) {
+                    self.push_gate(Gate::M(*rbit));
+                }
+
+                self.insert_bindings(&lplace, lbits);
             }
 
             Use(val) => match val {

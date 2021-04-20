@@ -222,7 +222,7 @@ pub mod latex {
                 Out(e)              => {
                     // *very* provisional; this will be really ugly in practice
                     // if there’s ever an `ext` in the middle of a circuit
-                    let label = format!("\\push{{\textt{{{}[{}]}}}}", e.name, e.elem);
+                    let label = format!("\\push{{\\texttt{{{}[{}]}}}}", e.name, e.elem);
                     self.insert_single(e.addr, label)
                 }
             }

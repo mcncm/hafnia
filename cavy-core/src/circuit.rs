@@ -135,7 +135,11 @@ impl IntoTarget<Qasm> for Gate {
             CX { tgt, ctrl }  => format!("cx q[{}], q[{}];", ctrl, tgt),
             SWAP { .. }       => todo!(),
             M(tgt)            => format!("measure q[{}] -> c[{}];", tgt, tgt),
-            Out(_)            => todo!(),
+            Out(io)            => {
+                // TODO OpenQASM doesn't support this kind of operation, does it? What
+                // should we do here?
+                format!("// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
+            },
         }
     }
 }
@@ -375,8 +379,12 @@ impl<'c> CircuitStream<'c> {
                 fst: self.qtransl(fst),
                 snd: self.qtransl(snd),
             },
-            M(_) => todo!(),
-            Out(_) => todo!(),
+            M(q) => M(self.qtransl(q)),
+            Out(gate) => {
+                let mut gate = gate.clone();
+                gate.addr = self.qtransl(&gate.addr);
+                Gate::Out(gate)
+            }
         }
     }
 }
