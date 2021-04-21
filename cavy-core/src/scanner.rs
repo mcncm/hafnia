@@ -613,8 +613,8 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn ident_keywords() {
-        lex_test!("if else for let fn print true false";
-                  If, Else, For, Let, Fn, Print, True, False);
+        lex_test!("if else for let fn true false";
+                  If, Else, For, Let, Fn, True, False);
     }
 
     ///////////

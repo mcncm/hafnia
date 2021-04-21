@@ -108,6 +108,13 @@ pub mod latex {
         pub standalone: bool,
     }
 
+    impl Latex {
+        /// Escapes a string by replacing underscores with `\_`
+        fn escape(s: &str) -> String {
+            str::replace(s, "_", r"\_")
+        }
+    }
+
     /// The three cell states in a common quantum circuit: in `Some(T)`, the
     /// cell is occupied by a gate. In `None`, there is no gate or blocking
     /// element. In `Blocked` there is no gate, but the cell is obstructed, as
@@ -222,7 +229,8 @@ pub mod latex {
                 Out(e)              => {
                     // *very* provisional; this will be really ugly in practice
                     // if there’s ever an `ext` in the middle of a circuit
-                    let label = format!("\\push{{\\texttt{{{}[{}]}}}}", e.name, e.elem);
+                    let name = Latex::escape(&e.name);
+                    let label = format!("\\push{{ \\tt {}[{}] }}", name, e.elem);
                     self.insert_single(e.addr, label)
                 }
             }
@@ -337,6 +345,7 @@ pub mod latex {
         const HEADER: &'static str = r"\documentclass{standalone}
 \usepackage{tikz}
 \usetikzlibrary{quantikz}
+\usepackage[T1]{fontenc}
 \begin{document}
 \begin{quantikz}
 ";
