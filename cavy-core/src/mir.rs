@@ -48,11 +48,65 @@ pub struct TypedSig {
     pub span: Span,
 }
 
-/// A fully-resolved position within the MIR control-flow graph
+/// A precise position within the MIR control-flow graph
 #[derive(Debug)]
 pub struct GraphPosition {
     blk: BlockId,
     stmt: usize,
+}
+
+type Predecessors = Store<BlockId, Vec<BlockId>>;
+
+/// A lazily-computed CFG predecessor graph. Like many other parts of the Mir,
+/// this is basically the same as the data structure used by `rustc`. The
+/// rational for using an outside store, rather than maintaining predecessors in
+/// the blocks themselves, is that the effects of changing the out-pointers of a
+/// block are essentially as nonlocal as possible. Any other blocks could have
+/// their predecessors invalidated, but recomputing them from purely local data
+/// is *also* finicky. This is just easier.
+///
+/// The only way it's really different from the `rustc` implementation is that it never
+/// reallocates; this will use a little more space, but probably not too much,
+/// and should be (slightly) faster.
+struct PredGraph {
+    /// The current predecessors graph.
+    preds: Store<BlockId, Vec<BlockId>>,
+    /// Has the current graph been invalidated?
+    invalid: bool,
+}
+
+impl PredGraph {
+    fn new() -> Self {
+        Self {
+            preds: Store::new(),
+            invalid: true,
+        }
+    }
+
+    /// Empty the store (lazily)
+    fn invalidate(&mut self) {
+        self.invalid = true;
+    }
+
+    /// (Re)compute the predecessor graph
+    fn compute(&mut self, blocks: &BlockStore) {
+        for elem in self.preds.iter_mut() {
+            elem.clear();
+        }
+
+        for (idx, block) in blocks.idx_enumerate() {
+            for succ in block.successors() {
+                self.preds[idx].push(*succ);
+            }
+        }
+    }
+
+    fn get_preds(&mut self, blocks: &BlockStore) -> &Store<BlockId, Vec<BlockId>> {
+        if self.invalid {
+            self.compute(blocks);
+        }
+        &self.preds
+    }
 }
 
 /// The control-flow graph of a function
@@ -65,10 +119,13 @@ pub struct Graph {
     /// than this, because we can rely on the invariant that the return site and
     /// arguments are the first `nargs + 1` locals.
     pub nargs: usize,
-    /// The basic blocks of the Cfg
-    pub blocks: BlockStore,
-    /// The first block of the Cfg
+    /// The basic blocks of the CFG. Blocks can only be accessed through the
+    /// `get_blk` and `get_blk_mut` methods.
+    blocks: BlockStore,
+    /// The first block of the CFG
     pub entry_block: BlockId,
+    /// The predecessor graph
+    preds: PredGraph,
 }
 
 impl Graph {
@@ -80,9 +137,34 @@ impl Graph {
         Self {
             locals: LocalStore::new(),
             blocks,
+            preds: PredGraph::new(),
             nargs,
             entry_block,
         }
+    }
+
+    /// Get the number of basic blocks in the graph.
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BasicBlock> {
+        self.blocks.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BasicBlock> {
+        self.blocks.iter_mut()
+    }
+
+    pub fn get_preds(&mut self) -> &Predecessors {
+        self.preds.get_preds(&self.blocks)
+    }
+
+    // NOTE: The *only* call site of this method is `GraphBuilder::new_block`.
+    // That *should* use `Graph::new_block`, but it has to carry around all this
+    // extra satellite data that I don't actually want to have.
+    pub fn insert_block(&mut self, blk: BasicBlock) -> BlockId {
+        self.blocks.insert(blk)
     }
 
     pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
@@ -133,6 +215,21 @@ impl Graph {
     }
 }
 
+impl std::ops::Index<BlockId> for Graph {
+    type Output = BasicBlock;
+
+    fn index(&self, index: BlockId) -> &Self::Output {
+        &self.blocks[index]
+    }
+}
+
+impl std::ops::IndexMut<BlockId> for Graph {
+    fn index_mut(&mut self, index: BlockId) -> &mut Self::Output {
+        self.preds.invalidate();
+        &mut self.blocks[index]
+    }
+}
+
 #[derive(Debug)]
 pub struct BasicBlock {
     /// The branch-free sequence of MIR statements within the basic block
@@ -159,6 +256,15 @@ impl BasicBlock {
             stmts: vec![],
             kind: BlockKind::Goto(block),
             data: BlockData::default(),
+        }
+    }
+
+    pub fn successors(&self) -> &[BlockId] {
+        match &self.kind {
+            BlockKind::Goto(blk) => std::slice::from_ref(blk),
+            BlockKind::Switch { blks, .. } => &blks,
+            BlockKind::Call { blk, .. } => std::slice::from_ref(blk),
+            BlockKind::Ret => &[],
         }
     }
 }
@@ -305,6 +411,12 @@ pub type BinOp = ast::BinOpKind;
 pub type UnOp = ast::UnOpKind;
 
 // ====== Display and formatting ======
+
+impl fmt::Debug for PredGraph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<predecessors graph>")
+    }
+}
 
 impl fmt::Display for LocalId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

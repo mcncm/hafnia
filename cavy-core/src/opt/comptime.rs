@@ -16,6 +16,13 @@
 //! allocate a single `Vec` once for each local, instead of building trees.
 //!
 //! TODO Forbid erasure of const I/O. This might be a complicated analysis.
+//!
+//! TODO Incredibly, constant propagation currently only runs through the *first
+//! block*. Somehow I didn't finish this. Note that the problem is more
+//! complicated with branches, because you much correctly merge your knowledge
+//! at each of the parent branches. Traditionally this optimization is done in
+//! SSA, with phi-functions at each merge point. I think we can do something
+//! completely *equivalent*
 
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -39,7 +46,7 @@ fn simpl_graph(gr: &mut Graph) {
 }
 
 fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
-    let blk = &mut gr.blocks[blk];
+    let blk = &mut gr[blk];
     for stmt in blk.stmts.iter_mut() {
         simpl_stmt(stmt, interp);
     }

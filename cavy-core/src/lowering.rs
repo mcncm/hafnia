@@ -386,16 +386,18 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.push_stmt(stmt);
     }
 
+    // NOTE: This is the only call site of `Graph::insert_block`, and it's only
+    // needed to carry around this satellite data you don't want. You can get rid of both.
     /// Create a new block, inheriting the satellite data of the block currently
     /// under the cursor.
     fn new_block(&mut self) -> BlockId {
         let mut block = BasicBlock::new();
-        block.data = self.gr.blocks[self.cursor].data.clone();
-        self.gr.blocks.insert(block)
+        block.data = self.gr[self.cursor].data.clone();
+        self.gr.insert_block(block)
     }
 
     fn set_terminator(&mut self, kind: BlockKind) {
-        self.gr.blocks[self.cursor].kind = kind;
+        self.gr[self.cursor].kind = kind;
     }
 
     /// The partner of Parser::with_table at the next stage of the compilation
@@ -833,7 +835,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond = self.lower_into(&cond_place, cond);
         let tail_block = self.new_block();
 
-        let mut blk_data = self.gr.blocks[self.cursor].data.clone();
+        let mut blk_data = self.gr[self.cursor].data.clone();
         blk_data.sup_branch = Some(self.cursor);
         if cond_ty.is_linear(self.ctx) {
             blk_data.sup_lin_branch = Some(self.cursor);
@@ -841,19 +843,19 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
         // Falsy branch
         let fls = match fls {
-            Some(ind) => self.with_goto(tail_block, |self_| {
-                self_.gr.blocks[self_.cursor].data = blk_data.clone();
-                self_.lower_into_block(place.clone(), ind)?;
-                Ok(self_.cursor)
+            Some(ind) => self.with_goto(tail_block, |this| {
+                this.gr[this.cursor].data = blk_data.clone();
+                this.lower_into_block(place.clone(), ind)?;
+                Ok(this.cursor)
             }),
             None => Ok(tail_block),
         };
 
         // Truthy branch
-        let tru = self.with_goto(tail_block, |self_| {
-            self_.gr.blocks[self_.cursor].data = blk_data;
-            self_.lower_into_block(place, tru)?;
-            Ok(self_.cursor)
+        let tru = self.with_goto(tail_block, |this| {
+            this.gr[this.cursor].data = blk_data;
+            this.lower_into_block(place, tru)?;
+            Ok(this.cursor)
         });
 
         // Propagate errors from branches

@@ -14,7 +14,7 @@ out of correctness. For working scientists, it's meant to give you more powerful
 tools of abstraction than you're likely used to, and aspires to run on any
 platform you might need.
 
-You'll feel right at home here if you're familiar with Rust, but Cavy is a much
+You'll feel right at home here if you're familiar with Rust[2], but Cavy is a much
 simpler language. The compiler generates code in multiple executable and
 representational low-level circuit languages, including OpenQASM and Quantikz,
 the LaTeX quantum circuits package. You can run it as a standalone compiler, a
@@ -35,6 +35,14 @@ which it is not. Only some of these things actually work, and they’re not
 documented yet.**
 
 [1] Cavy can also be used in this way, but need not be!
+
+[2] Its syntax and semantics are *strongly* inspired by rust. As a result,
+you'll find that while its parser and backend are *de novo*, many of the IR data
+structures are very similar to those of `rustc`. This is no accident: since
+there's already a language out there that does these things, we might as well
+learn from the good decisions they've made! A consequence of this heritage is
+that reading this repository (especially its `ast.rs` and `mir.rs`) isn't a bad
+way to get the gist of how `rustc` works.
 
 # Examples
 Because Cavy is a small language, we can get the gist of it by looking at

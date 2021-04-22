@@ -39,12 +39,21 @@ pub struct PhaseConfig {
     pub last_phase: Phase,
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct OptConfig {
     /// Integer optimization level.
     pub level: u8,
     /// Perform const propagation, or compile-time evaluation of classical operations?
     pub comptime: bool,
+}
+
+impl Default for OptConfig {
+    fn default() -> Self {
+        Self {
+            level: 3,
+            comptime: true,
+        }
+    }
 }
 
 /// Configuration data for the operation of the compiler

@@ -192,7 +192,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
 
     /// Lower from the MIR, building from a given block.
     fn translate_block(&mut self, blk: BlockId) {
-        let blk = &self.gr.blocks[blk];
+        let blk = &self.gr[blk];
         for stmt in blk.stmts.iter() {
             self.translate_stmt(stmt);
         }

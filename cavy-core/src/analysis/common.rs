@@ -115,9 +115,7 @@ where
         // values. Maybe we should use either a `Store<BlockId,
         // Option<A::Domain>>` or a `HashMap<BlockId, A::Domain>`, or somehow
         // guarantee that we walk the blocks in index-order.
-        let entry_states = std::iter::repeat(bot.clone())
-            .take(gr.blocks.len())
-            .collect();
+        let entry_states = std::iter::repeat(bot.clone()).take(gr.len()).collect();
         let exit_state = bot;
         let results = AnalysisStates {
             entry_states,
@@ -151,23 +149,18 @@ where
     /// action associated with the block kind.
     fn run_inner(&mut self, block: BlockId) {
         let mut state = self.results.entry_states[block].clone();
-        let block = &self.gr.blocks[block];
+        let block = &self.gr[block];
         self.propagate(&mut state, &block);
 
         // Compute the successor blocks and do any extra block-kind-dependent work.
-        let successors = match &block.kind {
-            BlockKind::Goto(blk) => std::slice::from_ref(blk),
-            BlockKind::Switch { cond: _, blks } => blks,
-            BlockKind::Ret => {
-                self.results.exit_state = self.results.exit_state.join(&state);
-                &[]
-            }
-            BlockKind::Call { blk, .. } => std::slice::from_ref(blk),
-        };
+        let succs = block.successors();
+        if let BlockKind::Ret = block.kind {
+            self.results.exit_state = self.results.exit_state.join(&state);
+        }
 
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
-        for succ in successors {
+        for succ in succs {
             let prev_succ_state = &mut self.results.entry_states[*succ];
             let succ_state = prev_succ_state.join(&state);
             if &succ_state != prev_succ_state {
@@ -213,7 +206,7 @@ where
 
     pub fn run(self) -> A::Domain {
         let mut state = A::Domain::bottom(self.gr, self.ctx);
-        for block in self.gr.blocks.iter() {
+        for block in self.gr.iter() {
             self.propagate(&mut state, block);
         }
         state
