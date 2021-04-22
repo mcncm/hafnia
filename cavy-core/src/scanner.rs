@@ -26,6 +26,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "else" => Lexeme::Else,
         "for" => Lexeme::For,
         "let" => Lexeme::Let,
+        "mut" => Lexeme::Mut,
         "in" => Lexeme::In,
         "fn" => Lexeme::Fn,
         "Fn" => Lexeme::FFn,
@@ -70,6 +71,7 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         '<' => Lexeme::LAngle,
         '>' => Lexeme::RAngle,
         '#' => Lexeme::Octothorpe,
+        '&' => Lexeme::Ampersand,
         _ => return None,
     };
     Some(lexeme)

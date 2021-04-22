@@ -24,8 +24,6 @@ use crate::{
         Lexeme::{self, *},
         Token,
     },
-    types,
-    types::Type,
 };
 use errors::*;
 use std::convert::TryFrom;
@@ -251,7 +249,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn ldelim(&mut self, delim: Delim) -> Maybe<Token> {
-        self.consume(Lexeme::LDelim(delim))
+        self.consume(LDelim(delim))
     }
 
     fn rdelim(&mut self, delim: Delim) -> Maybe<Token> {
@@ -770,22 +768,35 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn unary(&mut self) -> Maybe<Expr> {
-        if let Some(Bang) | Some(Tilde) | Some(Octothorpe) | Some(Question) = self.peek_lexeme() {
-            let op = self.next().unwrap();
-            let op = UnOp::from_token(op, self.ctx).unwrap();
-            let right = self.unary()?;
-            let span = op.span.join(&right.span).unwrap();
-            let kind = ExprKind::UnOp {
-                op,
-                right: Box::new(right),
-            };
-            return Ok(self.node(kind, span));
-        } else if let Some(LDelim(Bracket)) = self.peek_lexeme() {
-            let opening = self.token()?.span;
-            return self.finish_array(opening);
+        match self.peek_lexeme() {
+            Some(Bang) | Some(Tilde) | Some(Octothorpe) | Some(Question) => {
+                let op = self.next().unwrap();
+                let op = UnOp::from_token(op, self.ctx).unwrap();
+                let right = self.unary()?;
+                let span = op.span.join(&right.span).unwrap();
+                let kind = ExprKind::UnOp {
+                    op,
+                    right: Box::new(right),
+                };
+                return Ok(self.node(kind, span));
+            }
+            Some(Ampersand) => {
+                let span = self.token().unwrap().span;
+                let annot = self.finish_ref_annot(span)?;
+                let right = self.unary()?;
+                let span = annot.span.join(&right.span).unwrap();
+                let kind = ExprKind::Ref {
+                    annot,
+                    expr: Box::new(right),
+                };
+                return Ok(self.node(kind, span));
+            }
+            Some(LDelim(Bracket)) => {
+                let opening = self.token()?.span;
+                return self.finish_array(opening);
+            }
+            _ => self.call(),
         }
-
-        self.call()
     }
 
     fn finish_array(&mut self, opening: Span) -> Maybe<Expr> {
@@ -871,11 +882,30 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     data: AnnotKind::Ident(ast::Ident { span, data }),
                 }
             }
+            Ampersand => {
+                let ref_annot = self.finish_ref_annot(span)?;
+                let inner = self.type_annotation()?;
+                Annot {
+                    span,
+                    data: AnnotKind::Ref(ref_annot, Box::new(inner)),
+                }
+            }
             // A non-annotation lexeme
             x => return Err(self.errors.push(ExpectedTypeAnnot { span, actual: x })),
         };
 
         Ok(ty)
+    }
+
+    fn finish_ref_annot(&mut self, mut span: Span) -> Maybe<RefAnnot> {
+        let kind = if let Some(&Mut) = self.peek_lexeme() {
+            span = span.join(&self.token().unwrap().span).unwrap();
+            RefAnnotKind::Uniq
+        } else {
+            RefAnnotKind::Shrd
+        };
+        let annot = RefAnnot { data: kind, span };
+        Ok(annot)
     }
 
     /// Finish parsing an array type.

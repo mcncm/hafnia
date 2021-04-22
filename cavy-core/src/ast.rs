@@ -497,6 +497,10 @@ pub enum ExprKind {
         head: Box<Expr>,
         index: Box<Expr>,
     },
+    Ref {
+        annot: RefAnnot,
+        expr: Box<Expr>,
+    },
 }
 
 impl ExprKind {
@@ -506,6 +510,7 @@ impl ExprKind {
         match self {
             BinOp { .. } => true,
             UnOp { .. } => true,
+            Ref { .. } => true,
             Assn { .. } => true,
             Literal(_) => true,
             Ident(_) => true,
@@ -612,6 +617,17 @@ pub enum LValueKind {
     Tuple(Vec<LValue>),
 }
 
+#[derive(Debug, Clone)]
+pub enum RefAnnotKind {
+    /// &
+    Shrd,
+    /// &mut
+    Uniq,
+}
+
+/// A reference annotation like `&` or `&mut`
+pub type RefAnnot = Spanned<RefAnnotKind>;
+
 /// Type annotations. These are distinct from, and not convertible to types. The
 /// reason is that there may be identical type annotations that resolve to
 /// different types within different scopes because of user-defined structs and
@@ -634,8 +650,11 @@ pub enum AnnotKind {
     /// User-defined types
     Ident(Ident),
 
-    ///Function types
+    /// Function types
     Func(Vec<Annot>, Option<Box<Annot>>),
+
+    /// `&T` or `&mut T`
+    Ref(RefAnnot, Box<Annot>),
 
     /// Provisional experimental type
     Ord,

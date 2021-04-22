@@ -12,8 +12,8 @@ pub enum Lexeme {
     Ident(String),
 
     // keywords
-    If, Else, Match, For, Let, In, Fn, FFn, Type, Struct, Enum, Impl, Io,
-    True, False, Bool, U4, U8, U16, U32, Ord,
+    If, Else, Match, For, Let, Mut, In, Fn, FFn, Type, Struct,
+    Enum, Impl, Io, True, False, Bool, U4, U8, U16, U32, Ord,
 
     // literals
     Nat(Unsigned, Option<Uint>),
@@ -24,7 +24,7 @@ pub enum Lexeme {
 
     // single-character token types
     Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde,
-    Comma, Semicolon, Colon, LAngle, RAngle, Octothorpe,
+    Comma, Semicolon, Colon, LAngle, RAngle, Octothorpe, Ampersand,
 
     // delimiters
     LDelim(Delim), RDelim(Delim),
@@ -48,6 +48,7 @@ impl fmt::Display for Lexeme {
             FFn => "Fn",
             For => "for",
             Let => "let",
+            Mut => "mut",
             In => "in",
             Bool => "bool",
             U8 => "u8",
@@ -75,6 +76,7 @@ impl fmt::Display for Lexeme {
             Bang => "!",
             Tilde => "~",
             Octothorpe => "#",
+            Ampersand => "&",
             Comma => ",",
             Semicolon => ";",
             Colon => ":",

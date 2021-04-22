@@ -12,7 +12,7 @@ use crate::{
     source::Span,
     store::Index,
     store::Store,
-    types::{Discriminant, TyId, Type, TypeSize, UserType},
+    types::{Discriminant, RefKind, TyId, Type, TypeSize, UserType},
     values::Value,
 };
 use std::collections::HashMap;
@@ -506,6 +506,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Index { head, index } => {
                 todo!()
             }
+            ExprKind::Ref { .. } => todo!(),
         }
     }
 
@@ -1032,6 +1033,13 @@ mod typing {
     use super::*;
     use crate::{index_type, store::Counter};
 
+    fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
+        match annot.data {
+            RefAnnotKind::Shrd => RefKind::Shrd,
+            RefAnnotKind::Uniq => RefKind::Uniq,
+        }
+    }
+
     /// We're not doing full type inference, but we do need to know what to do
     /// when we call a function and ignore its return value. Or, when we move a
     /// variable into a new binding that doesn't have an annotation. These
@@ -1091,6 +1099,11 @@ mod typing {
                     sig.output
                 }
                 ExprKind::Index { head, index } => todo!(),
+                ExprKind::Ref { annot, expr } => {
+                    let kind = resolve_ref_annot(annot);
+                    let ty = self.type_expr(expr)?;
+                    self.ctx.intern_ty(Type::Ref(kind, ty))
+                }
             };
             self.gamma.insert(expr.node, ty);
             Ok(ty)
@@ -1446,6 +1459,11 @@ mod typing {
                     None => ctx.common.unit,
                 };
                 ctx.intern_ty(Type::Func(param_tys, ret_ty))
+            }
+            AnnotKind::Ref(annot, inner) => {
+                let ty = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
+                let kind = resolve_ref_annot(annot);
+                ctx.intern_ty(Type::Ref(kind, ty))
             }
             AnnotKind::Ord => ctx.common.ord,
         };

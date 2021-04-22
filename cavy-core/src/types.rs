@@ -6,8 +6,11 @@ use crate::{
     context::{CtxDisplay, SymbolId},
     interner_type,
 };
-use std::{collections::HashMap, ops::Index};
-use std::{fmt, ops::IndexMut};
+use std::{
+    collections::HashMap,
+    fmt,
+    ops::{Index, IndexMut},
+};
 
 interner_type! { TypeInterner : TyId -> Type }
 
@@ -228,6 +231,15 @@ impl std::iter::Sum<TypeSize> for TypeSize {
     }
 }
 
+/// Kinds of reference types
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RefKind {
+    /// A shared reference
+    Shrd,
+    /// A unique reference
+    Uniq,
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -254,6 +266,9 @@ pub enum Type {
 
     /// A struct or enum
     UserType(UserType),
+
+    /// A reference
+    Ref(RefKind, TyId),
 
     /// A provisional experimental type
     Ord,
@@ -315,6 +330,7 @@ impl Type {
                     tup.size(interner)
                 }
             },
+            Type::Ref(_, ty) => *ty.size_inner(interner),
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
         }
     }
@@ -337,12 +353,24 @@ impl Type {
                         .iter()
                         .any(|field| field.1.is_linear_inner(interner))
             }
+            // It's a little unclear, actually, what this function should mean
+            // on a `Ref` type.
+            Type::Ref(_, ty) => ty.is_linear_inner(interner),
             Type::Ord => true,
         }
     }
 
     pub fn is_ord(&self, _ctx: &CachedTypeInterner) -> bool {
         matches!(self, Type::Ord)
+    }
+}
+
+impl fmt::Display for RefKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RefKind::Shrd => f.write_str("&"),
+            RefKind::Uniq => f.write_str("&mut "),
+        }
     }
 }
 
@@ -377,6 +405,7 @@ impl CtxDisplay for TyId {
                 write!(f, ") -> {}", ctx.types[*ret])
             }
             Type::UserType(ty) => write!(f, "{}", ty.def_name.fmt_with(ctx)),
+            Type::Ref(kind, ty) => write!(f, "{}{}", kind, ty.fmt_with(ctx)),
             Type::Ord => write!(f, "ord"),
         }
     }
