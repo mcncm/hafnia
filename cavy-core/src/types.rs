@@ -14,23 +14,32 @@ use std::{
 
 interner_type! { TypeInterner : TyId -> Type }
 
+/// A type properties table to be computed once and stored in the
+/// `CachedTypeInterner`.
+pub struct TypeProperties {
+    /// The number of quantum and classical bits referenced by this type
+    size: TypeSize,
+    /// True if this type is linear
+    linear: bool,
+    /// True if this type is owned
+    owned: bool,
+    ord: bool,
+}
+
 /// A type interner that also carries some satellite data caches
 pub struct CachedTypeInterner {
     /// The interner proper
     interner: TypeInterner,
-    /// A cache of the sizes of each interned type, eliminating the need to
+    /// A cache of the properties of each interned type, eliminating the need to
     /// recompute sizes recursively.
-    size_cache: HashMap<TyId, TypeSize>,
-    /// A cache of the structural properties of each interned type.
-    props_cache: HashMap<TyId, StructuralDiscipline>,
+    cache: HashMap<TyId, TypeProperties>,
 }
 
 impl CachedTypeInterner {
     pub fn new() -> Self {
         Self {
             interner: TypeInterner::new(),
-            size_cache: HashMap::new(),
-            props_cache: HashMap::new(),
+            cache: HashMap::new(),
         }
     }
 
@@ -38,29 +47,19 @@ impl CachedTypeInterner {
     // not `Box<Type>`s, we'll end up making redundant hashtable lookups when
     // caching a type.
     pub fn intern(&mut self, ty: Type) -> TyId {
-        let sz = ty.size(self);
-        let props = StructuralDiscipline {
+        let props = TypeProperties {
+            size: ty.size(self),
+            owned: ty.is_owned(self),
             linear: ty.is_linear(self),
             ord: ty.is_ord(self),
         };
         let ty = self.interner.intern(ty);
-        self.size_cache.insert(ty, sz);
-        self.props_cache.insert(ty, props);
+        self.cache.insert(ty, props);
         ty
     }
 
     pub fn contains(&self, ty: &Type) -> bool {
         self.interner.contains(ty)
-    }
-
-    /// Get the size of an interned typed
-    pub fn size_of(&self, ty: &TyId) -> &TypeSize {
-        &self.size_cache[ty]
-    }
-
-    /// Get the structural properties of an interned type
-    pub fn props_of(&self, ty: &TyId) -> &StructuralDiscipline {
-        &self.props_cache[ty]
     }
 }
 
@@ -81,6 +80,14 @@ impl IndexMut<TyId> for CachedTypeInterner {
 impl TyId {
     pub fn is_uint(&self, ctx: &Context) -> bool {
         matches!(ctx.types[*self], Type::Uint(_))
+    }
+
+    pub fn is_owned(&self, ctx: &Context) -> bool {
+        self.is_owned_inner(&ctx.types)
+    }
+
+    fn is_owned_inner(&self, interner: &CachedTypeInterner) -> bool {
+        interner.cache[self].owned
     }
 
     /// A type will be said to be "classical" if none of the data it points to
@@ -113,7 +120,7 @@ impl TyId {
     }
 
     fn is_linear_inner(&self, interner: &CachedTypeInterner) -> bool {
-        interner.props_of(self).linear
+        interner.cache[self].linear
     }
 
     /// Check the bit size of a type, with the help of the global context
@@ -122,7 +129,7 @@ impl TyId {
     }
 
     fn size_inner<'a>(&'a self, interner: &'a CachedTypeInterner) -> &'a TypeSize {
-        interner.size_of(self)
+        &interner.cache[self].size
     }
 
     /// Get the stype in the `n`th slot of a type, if it has one.
@@ -332,6 +339,17 @@ impl Type {
             },
             Type::Ref(_, ty) => *ty.size_inner(interner),
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
+        }
+    }
+
+    pub fn is_owned(&self, interner: &CachedTypeInterner) -> bool {
+        match self {
+            Type::Tuple(tys) => tys.iter().all(|ty| ty.is_owned_inner(interner)),
+            Type::Array(_ty) => todo!(),
+            Type::Func(_, _) => todo!(),
+            Type::UserType(ty) => ty.as_tuple().is_owned(interner),
+            Type::Ref(_, _) => false,
+            _ => true,
         }
     }
 
