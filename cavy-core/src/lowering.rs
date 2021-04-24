@@ -924,7 +924,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
-                let place = self.gr.auto_place(self.ctx.common.unit);
+                let ty = self.type_expr(expr)?;
+                let place = self.gr.auto_place(ty);
                 self.lower_into(&place, expr)
             }
             StmtKind::Decl { lhs, ty, rhs } => self.lower_decl(lhs, ty, rhs),
