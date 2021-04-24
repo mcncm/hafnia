@@ -565,7 +565,10 @@ impl From<StmtKind> for Stmt {
 /// A kind of statement: this division of kinds is basically taken from `rustc_ast`.
 #[derive(Debug, Clone)]
 pub enum StmtKind {
+    /// An input/output statement
     Io(Box<IoStmtKind>),
+    /// An assertion
+    Assert(Box<Expr>),
     /// An expression without a semicolon.
     Expr(Box<Expr>),
     /// An expression with a semicolon.

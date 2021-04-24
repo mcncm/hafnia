@@ -920,6 +920,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
             StmtKind::Io(io) => self.lower_io_stmt(io, stmt.span),
+            StmtKind::Assert(expr) => self.lower_assert_stmt(expr, stmt.span),
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
@@ -957,6 +958,20 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 Ok(())
             }
         }
+    }
+
+    fn lower_assert_stmt(&mut self, expr: &Expr, span: Span) -> Maybe<()> {
+        // NOTE: maybe these three statements should be broken out into a
+        // `lower_expr` (note no `into`) method
+        let ty = self.type_expr(expr)?;
+        let place = self.gr.auto_place(ty);
+        self.lower_into(&place, expr)?;
+        let stmt = mir::Stmt {
+            span,
+            kind: mir::StmtKind::Assert(place),
+        };
+        self.push_stmt(stmt);
+        Ok(())
     }
 
     fn lower_decl(

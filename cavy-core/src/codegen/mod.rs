@@ -220,6 +220,9 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                 self.translate_io(io);
                 return;
             }
+            mir::StmtKind::Assert(_place) => {
+                todo!();
+            }
             _ => return,
         };
 

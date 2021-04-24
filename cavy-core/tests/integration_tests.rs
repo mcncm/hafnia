@@ -333,7 +333,7 @@ test_compiles! {
 
     // UNSAFE
 
-    unsafe_fn_parse [Parse] {
+    unsafe_fn [Parse] {
         fn main() {
             unsafe { f(); }
         }
@@ -345,5 +345,9 @@ test_compiles! {
         fn main() {
             let y = unsafe 2;
         }
+    }
+
+    unsafe_fn_block fail [Parse] {
+        fn f() unsafe {}
     }
 }

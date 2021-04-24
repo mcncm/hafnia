@@ -321,6 +321,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     pub fn statement(&mut self) -> Maybe<Stmt> {
         match self.peek_lexeme() {
             Some(Io) => Ok(self.io_stmt()?),
+            Some(Assert) => Ok(self.assert_stmt()?),
             Some(Let) => Ok(self.local()?),
             // Must be an expression next! Note that it's not possible to find
             // an item in this position, since this method is *only* called
@@ -445,7 +446,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // body? I'm not totally sure about this.
 
         let sig = self.function_sig()?;
-        let body = Box::new(self.block(is_unsafe)?);
+        let body = Box::new(self.block(false)?);
         let body_span = body.span;
         let body = self.node(ExprKind::Block(body), body_span);
         let span = opening.join(&body.span).unwrap();
@@ -658,6 +659,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let stmt = Stmt {
             span,
             data: StmtKind::Io(Box::new(stmt)),
+        };
+        Ok(stmt)
+    }
+
+    fn assert_stmt(&mut self) -> Maybe<Stmt> {
+        let span = self.next().unwrap().span;
+        let expr = Box::new(self.expression()?);
+        let span = span.join(&self.consume(Lexeme::Semicolon)?.span).unwrap();
+        let stmt = Stmt {
+            span,
+            data: StmtKind::Assert(expr),
         };
         Ok(stmt)
     }

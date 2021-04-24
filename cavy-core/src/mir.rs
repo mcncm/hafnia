@@ -362,6 +362,8 @@ pub enum StmtKind {
     /// Assign an `Rvalue` to a local. In the future, this will support more
     /// complex left-hand sides.
     Assn(Place, Rvalue),
+    /// (Unsafely) the state of a value (...as zero only, for now)
+    Assert(Place),
     /// Read from or return a value to the host machine
     Io(IoStmtKind),
     /// Handy for deleting statements in O(1) time.
@@ -503,6 +505,7 @@ impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
+            StmtKind::Assert(place) => write!(f, "assert {};", place),
             StmtKind::Io(io) => {
                 match io {
                     IoStmtKind::In => unimplemented!(),
