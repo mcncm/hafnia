@@ -676,7 +676,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     fn if_expr(&mut self) -> Maybe<Expr> {
         let opening = self.token()?.span;
-        // Call `expression_inner` because we must parse the condition
+        // call `expression_inner` because we must parse the condition
         // expression without first resetting the condition flag.
         let cond = self.with_excl_struct_lit(true, Self::expression_inner)?;
         let then_branch = Box::new(self.block(false)?);
@@ -725,7 +725,10 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let opening = self.token()?.span;
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
-        let iter = Box::new(self.expression()?);
+        // Call `expression_inner` because we must parse the condition
+        // expression without first resetting the condition flag.
+        let iter = self.with_excl_struct_lit(true, Self::expression_inner)?;
+        let iter = Box::new(iter);
         let body = Box::new(self.block(false)?);
         let span = opening.join(&body.span).unwrap();
         let kind = ExprKind::For { bind, iter, body };
