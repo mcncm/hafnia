@@ -777,7 +777,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let Block {
             stmts,
             expr,
-            table: _, // already taken care of by outer function
+            table: _,     // already taken care of by outer function
+            is_unsafe: _, // TODO must check for any unsafe operations, etc.
             span,
         } = block;
 
@@ -1034,7 +1035,7 @@ mod typing {
     use crate::{index_type, store::Counter};
 
     fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
-        match annot.data {
+        match annot.kind {
             RefAnnotKind::Shrd => RefKind::Shrd,
             RefAnnotKind::Uniq => RefKind::Uniq,
         }

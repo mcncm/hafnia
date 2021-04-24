@@ -330,4 +330,20 @@ test_compiles! {
             let y = f(x);
         }
     }
+
+    // UNSAFE
+
+    unsafe_fn_parse [Parse] {
+        fn main() {
+            unsafe { f(); }
+        }
+
+        unsafe fn f() {}
+    }
+
+    unsafe_non_block fail [Parse] {
+        fn main() {
+            let y = unsafe 2;
+        }
+    }
 }

@@ -545,6 +545,7 @@ pub struct Block {
     /// The id of the table containing item definitions in
     /// this block scope.
     pub table: TableId,
+    pub is_unsafe: bool,
     pub span: Span,
 }
 
@@ -625,8 +626,13 @@ pub enum RefAnnotKind {
     Uniq,
 }
 
-/// A reference annotation like `&` or `&mut`
-pub type RefAnnot = Spanned<RefAnnotKind>;
+/// A reference annotation like `& 'a` or `&mut`
+#[derive(Debug, Clone)]
+pub struct RefAnnot {
+    pub kind: RefAnnotKind,
+    pub lifetime: Option<Lifetime>,
+    pub span: Span,
+}
 
 /// Type annotations. These are distinct from, and not convertible to types. The
 /// reason is that there may be identical type annotations that resolve to
@@ -730,6 +736,7 @@ pub struct Func {
     /// so). To resolve symbols in its body, we need the `TableId` held in the
     /// body `Block`.
     pub table: TableId,
+    pub is_unsafe: bool,
     pub span: Span,
 }
 
@@ -758,6 +765,15 @@ pub type GenericBinder = Spanned<GenericBinderKind>;
 
 #[derive(Debug)]
 pub enum GenericBinderKind {
-    Lifetime(SymbolId),
+    Lifetime(Lifetime),
     Type(SymbolId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Lifetime(pub SymbolId);
+
+impl Into<GenericBinderKind> for Lifetime {
+    fn into(self) -> GenericBinderKind {
+        GenericBinderKind::Lifetime(self)
+    }
 }

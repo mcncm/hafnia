@@ -219,13 +219,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn item(&mut self) -> Maybe<()> {
+        let is_unsafe = self.match_lexeme(&Unsafe);
         let Token { lexeme, span } = self.token()?;
         match lexeme {
-            Lexeme::Fn => self.fn_item(span),
+            Lexeme::Fn | Lexeme::Unsafe => self.fn_item(is_unsafe, span),
             Lexeme::Struct => self.struct_item(),
             Lexeme::Enum => self.enum_item(),
             Lexeme::Type => self.type_item(),
-            Lexeme::Impl => self.impl_item(),
+            Lexeme::Impl => self.impl_item(is_unsafe),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
             lexeme => Err(self.errors.push(ExpectedRule {
@@ -375,17 +376,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     // TODO: must construct another, special table for methods of a type
-    fn impl_item(&mut self) -> Maybe<()> {
-        let _ty = self.type_annotation()?;
-        self.consume(LDelim(Brace))?;
-        loop {
-            let token = self.token()?;
-            if token.lexeme == RDelim(Brace) {
-                break;
-            }
-            self.fn_item(token.span)?;
-        }
-        Ok(())
+    fn impl_item(&mut self, _is_unsafe: bool) -> Maybe<()> {
+        todo!();
     }
 
     /// Parse a struct item and insert the name in a symbol table
@@ -438,7 +430,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     /// Parse a function item and insert it in the functions table
-    fn fn_item(&mut self, opening: Span) -> Maybe<()> {
+    fn fn_item(&mut self, is_unsafe: bool, opening: Span) -> Maybe<()> {
         let name = self.consume_ident()?;
 
         // Generic bindings: so far, these are not used by anything, anywhere.
@@ -453,7 +445,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // body? I'm not totally sure about this.
 
         let sig = self.function_sig()?;
-        let body = Box::new(self.block()?);
+        let body = Box::new(self.block(is_unsafe)?);
         let body_span = body.span;
         let body = self.node(ExprKind::Block(body), body_span);
         let span = opening.join(&body.span).unwrap();
@@ -462,6 +454,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             generics,
             body: self.ast.bodies.insert(body),
             table: self.table_id,
+            is_unsafe,
             span,
         };
 
@@ -492,7 +485,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn generic_binder(&mut self) -> Maybe<GenericBinder> {
         let Token { lexeme, span } = self.token()?;
         let binder = match lexeme {
-            Tick(lt) => GenericBinderKind::Lifetime(lt),
+            Tick(lt) => Lifetime(lt).into(),
             Lexeme::Ident(ty) => GenericBinderKind::Type(ty),
             _ => {
                 return Err(self.errors.push(errors::ExpectedRule {
@@ -674,12 +667,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // Call `expression_inner` because we must parse the condition
         // expression without first resetting the condition flag.
         let cond = self.with_excl_struct_lit(true, Self::expression_inner)?;
-        let then_branch = Box::new(self.block()?);
+        let then_branch = Box::new(self.block(false)?);
 
         let mut else_branch = None;
         let span;
         if self.match_lexeme(&Lexeme::Else) {
-            let block = self.block()?;
+            let block = self.block(false)?;
             span = opening.join(&block.span).unwrap();
             else_branch = Some(Box::new(block));
         } else {
@@ -721,19 +714,19 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let bind = Box::new(self.lvalue()?);
         self.consume(Lexeme::In)?;
         let iter = Box::new(self.expression()?);
-        let body = Box::new(self.block()?);
+        let body = Box::new(self.block(false)?);
         let span = opening.join(&body.span).unwrap();
         let kind = ExprKind::For { bind, iter, body };
         Ok(self.node(kind, span))
     }
 
-    fn block_expr(&mut self) -> Maybe<Expr> {
-        let block = self.block()?;
+    fn block_expr(&mut self, is_unsafe: bool) -> Maybe<Expr> {
+        let block = self.block(is_unsafe)?;
         let block_span = block.span;
         Ok(self.node(ExprKind::Block(Box::new(block)), block_span))
     }
 
-    fn block(&mut self) -> Maybe<Block> {
+    fn block(&mut self, is_unsafe: bool) -> Maybe<Block> {
         let opening = self.ldelim(Brace)?.span;
         // Start collecting the contents of the block
         let (mut stmts, table) = self.with_table(|prsr| {
@@ -770,6 +763,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             stmts,
             expr,
             table,
+            is_unsafe,
             span,
         })
     }
@@ -792,7 +786,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             Some(Lexeme::If) => self.if_expr(),
             Some(Lexeme::Match) => self.match_expr(),
             Some(Lexeme::For) => self.for_expr(),
-            Some(Lexeme::LDelim(Brace)) => self.block_expr(),
+            Some(Lexeme::Unsafe) => {
+                self.next();
+                self.block_expr(true)
+            }
+            Some(Lexeme::LDelim(Brace)) => self.block_expr(false),
             Some(_) => {
                 let lhs = self.unary()?;
                 self.precedence_climb(lhs, 0)
@@ -935,13 +933,24 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     }
 
     fn finish_ref_annot(&mut self, mut span: Span) -> Maybe<RefAnnot> {
+        let lifetime = if let Some(&Tick(t)) = self.peek_lexeme() {
+            span = span.join(&self.token().unwrap().span).unwrap();
+            Some(Lifetime(t))
+        } else {
+            None
+        };
+
         let kind = if let Some(&Mut) = self.peek_lexeme() {
             span = span.join(&self.token().unwrap().span).unwrap();
             RefAnnotKind::Uniq
         } else {
             RefAnnotKind::Shrd
         };
-        let annot = RefAnnot { data: kind, span };
+        let annot = RefAnnot {
+            kind,
+            lifetime,
+            span,
+        };
         Ok(annot)
     }
 

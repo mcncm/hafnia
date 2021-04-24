@@ -48,6 +48,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "u16" => Lexeme::U16,
         "u32" => Lexeme::U32,
         "ord" => Lexeme::Ord,
+        "unsafe" => Lexeme::Unsafe,
         _ => return None,
     };
     Some(lexeme)
