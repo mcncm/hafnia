@@ -207,7 +207,7 @@ where
 /// Err(()) when the received token can't be transformed as the requested node.
 pub trait FromToken {
     #![allow(clippy::result_unit_err)]
-    fn from_token(token: Token, ctx: &mut Context) -> Result<Self, ()>
+    fn from_token(token: Token) -> Result<Self, ()>
     where
         Self: Sized;
 }
@@ -217,11 +217,11 @@ pub trait FromToken {
 pub type Ident = Spanned<SymbolId>;
 
 impl FromToken for Ident {
-    fn from_token(token: Token, ctx: &mut Context<'_>) -> Result<Self, ()> {
+    fn from_token(token: Token) -> Result<Self, ()> {
         use crate::token::Lexeme;
         match token.lexeme {
-            Lexeme::Ident(name) => Ok(Self {
-                data: ctx.intern_symb(name),
+            Lexeme::Ident(data) => Ok(Self {
+                data,
                 span: token.span,
             }),
             _ => Err(()),
@@ -292,7 +292,7 @@ pub enum BinOpKind {
 }
 
 impl FromToken for BinOp {
-    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
+    fn from_token(token: Token) -> Result<Self, ()> {
         use crate::token::Lexeme;
         use BinOpKind::*;
         let kind = match token.lexeme {
@@ -350,7 +350,7 @@ pub enum UnOpKind {
 }
 
 impl FromToken for UnOp {
-    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
+    fn from_token(token: Token) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Minus => UnOpKind::Minus,
@@ -401,7 +401,7 @@ pub enum LiteralKind {
 }
 
 impl FromToken for Literal {
-    fn from_token(token: Token, _ctx: &mut Context) -> Result<Self, ()> {
+    fn from_token(token: Token) -> Result<Self, ()> {
         use crate::token::Lexeme::*;
         let kind = match token.lexeme {
             Nat(n, sz) => LiteralKind::Nat(n, sz),
@@ -714,14 +714,16 @@ pub struct Enum {
 #[derive(Debug)]
 pub struct EnumVariant {
     pub name: Ident,
-    pub data: Option<(Vec<Annot>, Span)>,
+    pub data: Option<Spanned<Vec<Annot>>>,
 }
 
 #[derive(Debug)]
 pub struct Func {
     /// The signature of the function
     pub sig: Sig,
-    /// The id of the function body which, like in rustc, points not to a `Block`, but an `Expr`.
+    /// Any generic binders
+    pub generics: Option<Generics>,
+    /// The id of the function body which, like in rustc, points not to a `Block`, but to an `Expr`.
     pub body: BodyId,
     /// The table in the body of the function: we track this in order to resolve
     /// symbols in its signature (but make sure that it's not redundant to do
@@ -748,4 +750,14 @@ pub struct Param {
     pub name: Ident,
     pub ty: Annot,
     pub span: Span,
+}
+
+pub type Generics = Spanned<Vec<GenericBinder>>;
+
+pub type GenericBinder = Spanned<GenericBinderKind>;
+
+#[derive(Debug)]
+pub enum GenericBinderKind {
+    Lifetime(SymbolId),
+    Type(SymbolId),
 }

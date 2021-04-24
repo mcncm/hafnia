@@ -228,8 +228,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             Lexeme::Impl => self.impl_item(),
             // We anticipated an item, so if you haven't gotten one, there's
             // been a problem.
-            lexeme => Err(self.errors.push(ExpectedItem {
+            lexeme => Err(self.errors.push(ExpectedRule {
                 span,
+                expected: "item",
                 actual: lexeme,
             })),
         }
@@ -265,7 +266,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         sep: Lexeme,
         final_allowed: bool,
         f: impl std::ops::Fn(&mut Self) -> Maybe<T>,
-    ) -> Maybe<(Vec<T>, Span)> {
+    ) -> Maybe<Spanned<Vec<T>>> {
         let opening = self.consume(Lexeme::LDelim(delim))?.span;
         let mut elems = Vec::new();
         // NOTE Is it possible to do this more succinctly without the branch?
@@ -289,7 +290,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
         let closing = self.consume(Lexeme::RDelim(delim))?.span;
         let span = opening.join(&closing).unwrap();
-        Ok((elems, span))
+        Ok(Spanned { data: elems, span })
     }
 
     /// Because identifiers have a parameter, we can’t use the regular `consume`
@@ -297,10 +298,11 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn consume_ident(&mut self) -> Maybe<ast::Ident> {
         let token = self.token()?;
         match token.lexeme {
-            Lexeme::Ident(_) => Ok(ast::Ident::from_token(token, &mut self.ctx).unwrap()),
-            lexeme => Err(self.errors.push(ExpectedIdentifier {
+            Lexeme::Ident(_) => Ok(ast::Ident::from_token(token).unwrap()),
+            lexeme => Err(self.errors.push(ExpectedRule {
                 span: token.span,
                 actual: lexeme,
+                expected: "identifier",
             })),
         }
     }
@@ -389,7 +391,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Parse a struct item and insert the name in a symbol table
     fn struct_item(&mut self) -> Maybe<()> {
         let name = self.consume_ident()?;
-        let (fields, _) = self.delimited_list(Brace, Comma, true, Self::struct_field)?;
+        let fields = self
+            .delimited_list(Brace, Comma, true, Self::struct_field)?
+            .data;
         let struct_ = ast::Struct {
             name: name.clone(),
             fields,
@@ -409,7 +413,9 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Parse an item and insert the name in a symbol table
     fn enum_item(&mut self) -> Maybe<()> {
         let name = self.consume_ident()?;
-        let (variants, _) = self.delimited_list(Brace, Comma, true, Self::enum_variant)?;
+        let variants = self
+            .delimited_list(Brace, Comma, true, Self::enum_variant)?
+            .data;
         let enum_ = ast::Enum {
             name: name.clone(),
             variants,
@@ -435,6 +441,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn fn_item(&mut self, opening: Span) -> Maybe<()> {
         let name = self.consume_ident()?;
 
+        // Generic bindings: so far, these are not used by anything, anywhere.
+        let generics = if let Some(LDelim(Bracket)) = self.peek_lexeme() {
+            let gens = self.delimited_list(Bracket, Comma, false, Self::generic_binder)?;
+            Some(gens)
+        } else {
+            None
+        };
+
         // Should we create a parameters table as the parent of the function
         // body? I'm not totally sure about this.
 
@@ -445,6 +459,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let span = opening.join(&body.span).unwrap();
         let func = Func {
             sig,
+            generics,
             body: self.ast.bodies.insert(body),
             table: self.table_id,
             span,
@@ -474,6 +489,22 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         }
     }
 
+    fn generic_binder(&mut self) -> Maybe<GenericBinder> {
+        let Token { lexeme, span } = self.token()?;
+        let binder = match lexeme {
+            Tick(lt) => GenericBinderKind::Lifetime(lt),
+            Lexeme::Ident(ty) => GenericBinderKind::Type(ty),
+            _ => {
+                return Err(self.errors.push(errors::ExpectedRule {
+                    span,
+                    expected: "generic binder",
+                    actual: lexeme,
+                }))
+            }
+        };
+        Ok(GenericBinder { data: binder, span })
+    }
+
     /// Once a `main` function has been found, ensure that it's the only one,
     /// acceps no parameters, and returns no value. We'll just take an `FnId` as
     /// we hope to only call this once, so the cost of lookup should not be too great.
@@ -494,7 +525,10 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
     /// Collect a function signature
     fn function_sig(&mut self) -> Maybe<Sig> {
-        let (params, mut span) = self.delimited_list(Paren, Comma, false, Self::function_param)?;
+        let Spanned {
+            data: params,
+            mut span,
+        } = self.delimited_list(Paren, Comma, false, Self::function_param)?;
         let output = self.function_return_type()?;
         if let Some(annot) = &output {
             span = span.join(&annot.span).unwrap();
@@ -563,7 +597,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // TODO should check that all names are unique
         match token.lexeme {
             Ident(_) => {
-                let ident = ast::Ident::from_token(token, self.ctx).unwrap();
+                let ident = ast::Ident::from_token(token).unwrap();
                 let lvalue = LValue {
                     span: ident.span,
                     data: LValueKind::Ident(ident),
@@ -665,7 +699,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // Call `expression_inner` because we must parse the scrutinee
         // expression without first resetting the condition flag.
         let scr = self.with_excl_struct_lit(true, Self::expression_inner)?;
-        let (arms, span) = self.delimited_list(Brace, Lexeme::Comma, true, Self::match_arm)?;
+        let Spanned { data: arms, span } =
+            self.delimited_list(Brace, Lexeme::Comma, true, Self::match_arm)?;
         let kind = ExprKind::Match {
             scr: Box::new(scr),
             arms,
@@ -771,7 +806,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         match self.peek_lexeme() {
             Some(Bang) | Some(Tilde) | Some(Octothorpe) | Some(Question) => {
                 let op = self.next().unwrap();
-                let op = UnOp::from_token(op, self.ctx).unwrap();
+                let op = UnOp::from_token(op).unwrap();
                 let right = self.unary()?;
                 let span = op.span.join(&right.span).unwrap();
                 let kind = ExprKind::UnOp {
@@ -866,22 +901,18 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     fn_span = span.join(&ret.span).unwrap();
                     Some(Box::new(self.type_annotation()?))
                 } else {
-                    fn_span = span.join(&args.1).unwrap();
+                    fn_span = span.join(&args.span).unwrap();
                     None
                 };
                 Annot {
                     span: fn_span,
-                    data: AnnotKind::Func(args.0, ret),
+                    data: AnnotKind::Func(args.data, ret),
                 }
             }
-            // overly verbose...
-            Ident(symb) => {
-                let data = self.ctx.intern_symb(symb);
-                Annot {
-                    span,
-                    data: AnnotKind::Ident(ast::Ident { span, data }),
-                }
-            }
+            Ident(data) => Annot {
+                span,
+                data: AnnotKind::Ident(ast::Ident { span, data }),
+            },
             Ampersand => {
                 let ref_annot = self.finish_ref_annot(span)?;
                 let inner = self.type_annotation()?;
@@ -891,7 +922,13 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
             }
             // A non-annotation lexeme
-            x => return Err(self.errors.push(ExpectedTypeAnnot { span, actual: x })),
+            actual => {
+                return Err(self.errors.push(ExpectedRule {
+                    span,
+                    actual,
+                    expected: "type annotation",
+                }))
+            }
         };
 
         Ok(ty)
@@ -940,18 +977,21 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let token = self.token()?;
         let span = token.span;
         let field = match token.lexeme {
-            Ident(ident) => {
-                let ident = self.ctx.intern_symb(ident);
-                Field {
-                    span,
-                    data: FieldKind::Ident(ident),
-                }
-            }
+            Ident(ident) => Field {
+                span,
+                data: FieldKind::Ident(ident),
+            },
             Nat(n, None) => Field {
                 span,
                 data: FieldKind::Num(n),
             },
-            actual => return Err(self.errors.push(ExpectedFieldToken { span, actual })),
+            actual => {
+                return Err(self.errors.push(ExpectedRule {
+                    span,
+                    actual,
+                    expected: "identifier or numeric literal",
+                }))
+            }
         };
         Ok(field)
     }
@@ -983,7 +1023,8 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     // Inline(always) because there is only one call site.
     #[inline(always)]
     fn finish_call(&mut self, callee: ast::Ident) -> Maybe<Expr> {
-        let (args, span) = self.delimited_list(Paren, Comma, false, Self::expression)?;
+        let Spanned { data: args, span } =
+            self.delimited_list(Paren, Comma, false, Self::expression)?;
         let span = callee.span.join(&span).unwrap();
         let kind = ExprKind::Call { callee, args };
         Ok(self.node(kind, span))
@@ -1022,12 +1063,12 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let token = self.next().unwrap();
         match token.lexeme {
             Nat(_, _) | True | False | Ord => {
-                let lit = ast::Literal::from_token(token, self.ctx).unwrap();
+                let lit = ast::Literal::from_token(token).unwrap();
                 let lit_span = lit.span;
                 Ok(self.node(ExprKind::Literal(lit), lit_span))
             }
             Ident(_) => {
-                let ident = ast::Ident::from_token(token, self.ctx).unwrap();
+                let ident = ast::Ident::from_token(token).unwrap();
                 // NOTE There is a parsing ambiguity here: if we're in a context
                 // where a `{` is expected to follow an expression, as in an
                 // `if` expression, we must not parse a struct literal. So, we
@@ -1045,21 +1086,23 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             LDelim(Paren) => self.finish_group(token.span),
 
-            lexeme => Err(self.errors.push(ExpectedPrimaryToken {
+            lexeme => Err(self.errors.push(ExpectedRule {
                 // Guaranteed not to be EOF!
                 span: token.span,
+                expected: "primary token",
                 actual: lexeme,
             })),
         }
     }
 
     fn finish_struct_literal(&mut self, ty: ast::Ident) -> Maybe<Expr> {
-        let (fields, span) = self.delimited_list(Brace, Comma, true, |this: &mut Self| {
-            let name = this.consume_ident()?;
-            this.consume(Colon)?;
-            let value = this.expression()?;
-            Ok((name, value))
-        })?;
+        let Spanned { data: fields, span } =
+            self.delimited_list(Brace, Comma, true, |this: &mut Self| {
+                let name = this.consume_ident()?;
+                this.consume(Colon)?;
+                let value = this.expression()?;
+                Ok((name, value))
+            })?;
         let span = ty.span.join(&span).unwrap();
         let expr = ExprKind::Struct { ty, fields };
         Ok(self.node(expr, span))
@@ -1142,7 +1185,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 }
 
                 // Handle all other cases, which are more ordinary "BinOp"s.
-                let op = BinOp::from_token(outer, self.ctx).unwrap();
+                let op = BinOp::from_token(outer).unwrap();
                 lhs = ExprKind::BinOp {
                     op,
                     left: Box::new(self.node(lhs, span)),
@@ -1177,20 +1220,15 @@ mod errors {
         pub actual: Lexeme,
     }
 
+    /// Expected a spectific production rule, but found a token inconsistent
+    /// with it
     #[derive(Diagnostic)]
     #[msg = "expected identifier, found `{actual}`"]
-    pub struct ExpectedIdentifier {
+    pub struct ExpectedRule {
         #[span]
         pub span: Span,
-        /// The lexeme actually found
-        pub actual: Lexeme,
-    }
-
-    #[derive(Diagnostic)]
-    #[msg = "expected item, found token `{actual}`"]
-    pub struct ExpectedItem {
-        #[span]
-        pub span: Span,
+        /// The expected production rule, described
+        pub expected: &'static str,
         /// The lexeme actually found
         pub actual: Lexeme,
     }
@@ -1200,32 +1238,6 @@ mod errors {
     pub struct UnexpectedEof {
         #[span]
         pub span: Span,
-    }
-
-    #[derive(Diagnostic)]
-    #[msg = "expected primary token, found `{actual}`"]
-    pub struct ExpectedPrimaryToken {
-        #[span]
-        pub span: Span,
-        /// The lexeme actually found
-        pub actual: Lexeme,
-    }
-
-    #[derive(Diagnostic)]
-    #[msg = "expected identifier or numeral, found `{actual}`"]
-    pub struct ExpectedFieldToken {
-        #[span]
-        pub span: Span,
-        pub actual: Lexeme,
-    }
-
-    #[derive(Diagnostic)]
-    #[msg = "expected type annotation, found `{actual}`"]
-    pub struct ExpectedTypeAnnot {
-        #[span]
-        pub span: Span,
-        /// The lexeme actually found
-        pub actual: Lexeme,
     }
 
     #[derive(Diagnostic)]
@@ -1385,15 +1397,6 @@ mod tests {
             [True],
             {True}
         }
-    }
-
-    #[test]
-    fn single_var_1() {
-        let name = "foo";
-        test_parser! {
-            [Lexeme::Ident(name.to_owned())],
-            {Lexeme::Ident(name.to_owned())}
-        };
     }
 
     ///////////////////////////////////////

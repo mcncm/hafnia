@@ -1,6 +1,8 @@
-use crate::num::Uint;
-use crate::source::Span;
-use crate::source::SrcObject;
+use crate::{
+    context::{self, SymbolId},
+    num::Uint,
+    source::{Span, SrcObject},
+};
 use std::fmt;
 
 pub type Unsigned = u32;
@@ -9,7 +11,10 @@ pub type Unsigned = u32;
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Lexeme {
     // identifiers
-    Ident(String),
+    Ident(SymbolId),
+
+    // `'a`,...
+    Tick(SymbolId),
 
     // keywords
     If, Else, Match, For, Let, Mut, In, Fn, FFn, Type, Struct,
@@ -38,12 +43,23 @@ pub enum Delim {
     Brace,
 }
 
+impl context::CtxDisplay for Lexeme {
+    fn fmt(&self, ctx: &context::Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Lexeme::Ident(s) => write!(f, "{}", s.fmt_with(ctx)),
+            Lexeme::Tick(s) => write!(f, "'{}", s.fmt_with(ctx)),
+            other => write!(f, "{}", other),
+        }
+    }
+}
+
 impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Delim::*;
         use Lexeme::*;
         let s = match self {
-            Ident(s) => return write!(f, "{}", s),
+            Ident(_) => "<ident>",
+            Tick(_) => "<lt>",
             Fn => "fn",
             FFn => "Fn",
             For => "for",
@@ -124,6 +140,6 @@ impl fmt::Display for Token {
 #[derive(Debug, Clone)]
 pub struct Ident {
     /// The actual name associated with the identifier
-    pub name: String,
+    pub name: SymbolId,
     pub span: Span,
 }

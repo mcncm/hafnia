@@ -1,22 +1,27 @@
-use crate::num::Uint;
-use crate::source::{Span, SrcId, SrcObject, SrcPoint, SrcStore};
-use crate::token::Lexeme::{Ident, Nat};
 use crate::{
     cavy_errors::ErrorBuf,
-    token::{Lexeme, Token, Unsigned},
+    context::{Context, SymbolId, SymbolInterner},
+    num::Uint,
+    source::{Span, SrcId, SrcObject, SrcPoint, SrcStore},
+    token::{
+        Delim,
+        Lexeme::{self, Ident, Nat, Tick},
+        Token, Unsigned,
+    },
 };
-use crate::{context::Context, token::Delim};
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::fmt;
-use std::iter::Peekable;
-use std::path::{Path, PathBuf};
-use std::str::Chars;
-use std::vec::Vec;
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    fmt,
+    iter::Peekable,
+    path::{Path, PathBuf},
+    str::Chars,
+    vec::Vec,
+};
 
 /// Main entry point for scanning
 pub fn tokenize(src_id: SrcId, ctx: &mut Context) -> Result<Vec<Token>, ErrorBuf> {
-    Scanner::new(src_id, &mut ctx.srcs).tokenize()
+    Scanner::new(src_id, ctx).tokenize()
 }
 
 fn keyword(kw: &str) -> Option<Lexeme> {
@@ -185,7 +190,7 @@ pub struct TokenBuf {
     point: SrcPoint,
     // NOTE this doesn't need to be a Vec<char>; it could just be a pointer
     // pair, if you replace the source code iterator with a simple &str.
-    chars: Vec<char>,
+    chars: String,
 }
 
 impl TokenBuf {
@@ -194,7 +199,7 @@ impl TokenBuf {
             start: SrcPoint::default(),
             // Again, this state is invalid at program start--but it's not a problem!
             point: SrcPoint::default(),
-            chars: vec![],
+            chars: String::new(),
         }
     }
 
@@ -204,7 +209,7 @@ impl TokenBuf {
     }
 
     fn digest(&mut self) -> String {
-        self.chars.iter().collect()
+        std::mem::replace(&mut self.chars, String::new())
     }
 
     fn clear(&mut self) {
@@ -216,6 +221,7 @@ pub struct Scanner<'s> {
     // Scanner data
     scan_head: ScanHead<'s>,
     src_id: SrcId,
+    symbols: &'s mut SymbolInterner,
     token_buf: TokenBuf,
     tokens: Vec<Token>,
     errors: ErrorBuf,
@@ -234,12 +240,14 @@ macro_rules! push_token {
     };
 }
 
-impl<'s> Scanner<'s> {
-    pub fn new(src_id: SrcId, store: &'s mut SrcStore) -> Self {
-        let src = &mut store[src_id];
+impl<'s, 'c> Scanner<'s> {
+    pub fn new(src_id: SrcId, ctx: &'s mut Context<'c>) -> Self {
+        let src = &mut ctx.srcs[src_id];
+        let symbols = &mut ctx.symbols;
         Scanner {
             scan_head: ScanHead::new(src.code.chars().peekable(), &mut src.newlines),
             src_id,
+            symbols,
             token_buf: TokenBuf::new(),
             tokens: vec![],
             errors: ErrorBuf::new(),
@@ -331,6 +339,10 @@ impl<'s> Scanner<'s> {
                     self.token_buf.clear(); // The buffer has a '/' in it.
                     self.scan_head.advance_to_newline();
                     continue;
+                } else if ch == '\'' && is_ident_char(following) {
+                    // Or this could be a lifetime token!
+                    self.consume_lifetime();
+                    continue;
                 }
             }
             // Single-character tokens
@@ -413,19 +425,40 @@ impl<'s> Scanner<'s> {
     /// `tokens` vector, or adds an error. Idents must begin with an alphabetic
     /// character, and may be followed by alphabetic and numeric characters.
     fn consume_ident(&mut self) {
+        self.consume_ident_chars();
+        if let Some(kw) = keyword(&self.token_buf.chars) {
+            self.token_buf.clear();
+            push_token!(self, kw);
+        } else {
+            let ident = self.digest_symbol();
+            push_token!(self, Ident(ident));
+        }
+    }
+
+    /// We already know that a lifetime is next, but haven't eaten any of the
+    /// characters yet.
+    fn consume_lifetime(&mut self) {
+        self.next_char(); // Already know this is a `'`
+        self.token_buf.clear();
+        self.consume_ident_chars();
+        let lt = self.digest_symbol();
+        push_token!(self, Tick(lt));
+    }
+
+    /// Produce a symbol from the characters currently in the token buffer
+    fn digest_symbol(&mut self) -> SymbolId {
+        let string = self.token_buf.digest();
+        self.symbols.intern(string)
+    }
+
+    /// Eat identifier characters for long as you find them
+    fn consume_ident_chars(&mut self) {
         while let Some(ch) = self.scan_head.peek() {
             if is_ident_char(*ch) {
                 self.next_char();
             } else {
                 break;
             }
-        }
-
-        let ident: String = self.token_buf.digest();
-        if let Some(kw) = keyword(ident.as_str()) {
-            push_token!(self, kw);
-        } else {
-            push_token!(self, Ident(ident));
         }
     }
 }
@@ -468,9 +501,10 @@ mod tests {
                 )*
             )?
 
-            let mut store = SrcStore::new();
-            let id = store.insert(SrcObject::from($code));
-            let tokens = Scanner::new(id, &mut store).tokenize().unwrap();
+            let conf = crate::session::Config::default();
+            let mut ctx = crate::context::Context::new(&conf);
+            let id = ctx.srcs.insert(SrcObject::from($code));
+            let tokens = Scanner::new(id, &mut ctx).tokenize().unwrap();
 
             assert_eq!(tokens.len(), expected_tokens.len(), "expected same number of tokens.");
 
@@ -579,39 +613,6 @@ mod tests {
         );
     }
 
-    //////////////////////////////
-    // Identifier-related tests //
-    //////////////////////////////
-
-    #[test]
-    fn ident_simple() {
-        lex_test!("ihtfp"; Ident(String::from("ihtfp")));
-    }
-
-    #[test]
-    fn ident_trailing_numbers() {
-        lex_test!("foo1"; Ident(String::from("foo1")));
-    }
-
-    #[test]
-    fn ident_underscore() {
-        lex_test!("foo_bar"; Ident(String::from("foo_bar")));
-    }
-
-    #[test]
-    #[should_panic]
-    fn ident_leading_numbers() {
-        lex_test!("99luft_ballons"; Ident(String::from("99luft_ballons")));
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    fn ident_no_whitespace() {
-        lex_test!("zip!zap!";
-                  Ident(String::from("zip")), Bang,
-                  Ident(String::from("zap")), Bang);
-    }
-
     #[test]
     #[rustfmt::skip]
     fn ident_keywords() {
@@ -625,9 +626,10 @@ mod tests {
 
     #[test]
     fn spans_correct() {
-        let mut store = SrcStore::new();
-        let id = store.insert(SrcObject::from("fn hello()"));
-        let scanner = Scanner::new(id, &mut store);
+        let conf = crate::session::Config::default();
+        let mut ctx = crate::context::Context::new(&conf);
+        let id = ctx.srcs.insert(SrcObject::from("fn hello()"));
+        let scanner = Scanner::new(id, &mut ctx);
         let tokens = scanner.tokenize().unwrap();
         assert_eq!(tokens.len(), 4);
         check_span(&tokens[0], 0, 1);

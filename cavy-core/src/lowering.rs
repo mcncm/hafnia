@@ -83,7 +83,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         for variant in enum_.variants.iter() {
             let name = variant.name.data;
             let ty = match &variant.data {
-                Some((annots, _)) => {
+                Some(Spanned { data: annots, .. }) => {
                     let tys = annots
                         .iter()
                         .map(|ty| self.resolve_annot(ty, table))
