@@ -8,6 +8,7 @@ use crate::{
     context::{CtxDisplay, SymbolId},
     source::Span,
     store::Store,
+    types::RefKind,
     values::Value,
 };
 // use crate::functions::{Func, UserFunc};
@@ -403,6 +404,7 @@ pub enum Operand {
 pub enum RvalueKind {
     BinOp(BinOp, Operand, Operand),
     UnOp(UnOp, Operand),
+    Ref(RefKind, Place),
     Use(Operand),
 }
 
@@ -545,7 +547,8 @@ impl fmt::Display for RvalueKind {
         match self {
             Self::BinOp(op, left, right) => write!(f, "{} {} {}", left, op, right),
             Self::UnOp(op, right) => write!(f, "{} {}", op, right),
-            RvalueKind::Use(arg) => write!(f, "{}", arg),
+            Self::Use(arg) => write!(f, "{}", arg),
+            Self::Ref(ref_kind, place) => write!(f, "{}{}", ref_kind, place),
         }
     }
 }

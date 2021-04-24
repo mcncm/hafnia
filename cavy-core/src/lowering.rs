@@ -506,7 +506,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Index { head, index } => {
                 todo!()
             }
-            ExprKind::Ref { .. } => todo!(),
+            ExprKind::Ref { annot, expr: inner } => {
+                self.lower_into_ref(place, annot, inner, expr.span)
+            }
         }
     }
 
@@ -917,6 +919,41 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
+    fn lower_into_ref(
+        &mut self,
+        place: Place,
+        annot: &RefAnnot,
+        expr: &Expr,
+        span: Span,
+    ) -> Maybe<()> {
+        // Lower the rhs
+        let arg_ty = self.gamma.get(&expr.node).unwrap();
+        let r_place = self.gr.auto_place(*arg_ty);
+        self.lower_into(&r_place, expr)?;
+
+        // No lifetime annotation in a borrow expression
+        if let Some(lt) = &annot.lifetime {
+            return Err(self
+                .errors
+                .push(errors::LifetimeInBorrow { span, name: lt.0 }));
+        }
+
+        // Get the reference kind
+        let ref_kind = typing::resolve_ref_annot(annot);
+
+        // Now, the type of the place should be the appropriate kind of
+        // reference to the type of the rhs.
+        // self.expect_type(&[place.root.ty], arg_ty, span: Span)
+
+        // Finally, put it there
+        let rvalue = Rvalue {
+            data: RvalueKind::Ref(ref_kind, r_place),
+            span,
+        };
+        self.assn_stmt(place, rvalue);
+        Ok(())
+    }
+
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {
             StmtKind::Io(io) => self.lower_io_stmt(io, stmt.span),
@@ -1050,7 +1087,7 @@ mod typing {
     use super::*;
     use crate::{index_type, store::Counter};
 
-    fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
+    pub fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
         match annot.kind {
             RefAnnotKind::Shrd => RefKind::Shrd,
             RefAnnotKind::Uniq => RefKind::Uniq,
@@ -1711,6 +1748,15 @@ mod errors {
     #[derive(Diagnostic)]
     #[msg = "type `{name}` cannot be found in this scope"]
     pub struct NoSuchType {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub name: SymbolId,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "explicit lifetime `'{name}` forbidden in borrow expression"]
+    pub struct LifetimeInBorrow {
         #[span]
         pub span: Span,
         #[ctx]

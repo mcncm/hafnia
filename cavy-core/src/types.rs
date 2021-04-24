@@ -371,9 +371,10 @@ impl Type {
                         .iter()
                         .any(|field| field.1.is_linear_inner(interner))
             }
-            // It's a little unclear, actually, what this function should mean
-            // on a `Ref` type.
-            Type::Ref(_, ty) => ty.is_linear_inner(interner),
+            Type::Ref(ref_kind, _) => match ref_kind {
+                RefKind::Shrd => false,
+                RefKind::Uniq => true,
+            },
             Type::Ord => true,
         }
     }

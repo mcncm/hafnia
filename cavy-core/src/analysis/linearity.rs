@@ -242,6 +242,7 @@ impl Analysis<'_, '_> for LinearityAnalysis {
             }
             RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
             RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
+            RvalueKind::Ref(_, _) => todo!(),
         }
         state.move_into(&place);
     }

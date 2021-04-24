@@ -316,6 +316,7 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
                     self.insert_bindings(&lplace, rbits);
                 }
             },
+            Ref(_, _) => todo!(),
         }
     }
 

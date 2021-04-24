@@ -99,6 +99,9 @@ impl Analysis<'_, '_> for FeedbackAnalysis {
                     state.delin.insert(place.root, span);
                 }
             }
+            // I *think* refs should do nothing here! They are merely taking a
+            // reference, not actually "doing" anything
+            Ref(_, _) => {}
         }
     }
 

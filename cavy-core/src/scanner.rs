@@ -440,7 +440,6 @@ impl<'s, 'c> Scanner<'s> {
     /// We already know that a lifetime is next, but haven't eaten any of the
     /// characters yet.
     fn consume_lifetime(&mut self) {
-        self.next_char(); // Already know this is a `'`
         self.token_buf.clear();
         self.consume_ident_chars();
         let lt = self.digest_symbol();

@@ -217,6 +217,14 @@ impl Interpreter {
                     Evaluated::Yes
                 }
             },
+            // NOTE: is this always correct?
+            RvalueKind::Ref(_, rplace) => {
+                if let Some(c) = self.env.get(rplace).cloned() {
+                    self.env.insert(place, c);
+                    return Evaluated::Yes;
+                }
+                Evaluated::No
+            }
         }
     }
 

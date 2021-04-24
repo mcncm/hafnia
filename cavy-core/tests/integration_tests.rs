@@ -350,4 +350,21 @@ test_compiles! {
     unsafe_fn_block fail [Parse] {
         fn f() unsafe {}
     }
+
+    // BORROW
+
+    borrow_lower [Typecheck] {
+        fn main() {
+            let x = ?true;
+            let y = &x;
+            let z = y;
+        }
+    }
+
+    lifetime_in_borrow fail [Typecheck] {
+        fn main() {
+            let x = ?true;
+            let y = &'a x;
+        }
+    }
 }
