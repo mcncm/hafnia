@@ -86,7 +86,7 @@ impl PredGraph {
     fn new() -> Self {
         Self {
             preds: RefCell::new(Store::new()),
-            invalid: RefCell::new(false),
+            invalid: RefCell::new(true),
         }
     }
 

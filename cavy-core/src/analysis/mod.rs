@@ -48,7 +48,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut sub_cond_data: Store<FnId, subconditional::SubCondData> = Store::new();
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
-        let linearity_res = linearity::LinearityAnalysis {}.into_runner(ctx, gr).run();
+        let linearity_res = DataflowRunner::new(linearity::LinearityAnalysis {}, gr, ctx).run();
         for (_local, (fst, snd)) in linearity_res.exit_state.double_moves.iter() {
             // TODO different messages for partial moves
             errs.push(errors::DoubleMove {
@@ -58,7 +58,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         }
 
         if !ctx.conf.arch.feedback {
-            let feedback_res = feedback::FeedbackAnalysis {}.into_runner(ctx, gr).run();
+            let feedback_res = DataflowRunner::new(feedback::FeedbackAnalysis {}, gr, ctx).run();
             for (local, lin_site) in feedback_res.exit_state.lin.into_iter() {
                 if let Some(&delin_site) = feedback_res.exit_state.delin.get(&local) {
                     errs.push(errors::ClassicalFeedback {

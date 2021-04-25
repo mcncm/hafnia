@@ -8,7 +8,7 @@
 //! interprocedural: you have to ensure that no delinearization occurs anywhere
 //! in the call graph downstream of a location within a linear conditional.
 
-use super::common::{DataflowAnalysis, Forward, Lattice, SummaryAnalysis};
+use super::common::{Backward, DataflowAnalysis, Lattice, SummaryAnalysis};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,

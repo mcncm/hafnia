@@ -12,6 +12,7 @@ pub trait Direction {}
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
 impl Direction for Forward {}
+
 /// Marker type for backward-flowing dataflow analyses
 pub struct Backward;
 impl Direction for Backward {}
@@ -57,7 +58,6 @@ where
 pub trait DataflowAnalysis<'mir, 'ctx, D>
 where
     D: Direction,
-    Successors<'mir, D>: SuccGetter<'mir>,
 {
     type Domain: Lattice;
 
@@ -66,19 +66,6 @@ where
 
     /// Apply the transfer function for the end of a basic block
     fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, data: &mir::BlockData);
-
-    // FIXME Instead of making a new runner for each analysis, consider
-    // registering all analyses with a single runner.
-    fn into_runner(
-        self,
-        ctx: &'mir Context<'ctx>,
-        gr: &'mir Graph,
-    ) -> DataflowRunner<'mir, 'ctx, Self, D>
-    where
-        Self: Sized,
-    {
-        DataflowRunner::new(self, gr, ctx)
-    }
 }
 
 /// The state of an an analysis on entry into each block.
@@ -168,9 +155,10 @@ impl<'mir, 'ctx, A, D> DataflowRunner<'mir, 'ctx, A, D>
 where
     A: DataflowAnalysis<'mir, 'ctx, D>,
     D: Direction,
+    Self: Propagate<'mir, 'ctx, A, D>,
     Successors<'mir, D>: SuccGetter<'mir>,
 {
-    fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
+    pub fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
         let succs = Successors::new(gr.get_preds());
         let bot = A::Domain::bottom(gr, ctx);
         // FIXME this is doing a lot of extra work to fill in these "default"
@@ -232,7 +220,20 @@ where
             }
         }
     }
+}
 
+pub trait Propagate<'m, 'c, A, D>
+where
+    A: DataflowAnalysis<'m, 'c, D>,
+    D: Direction,
+{
+    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock);
+}
+
+impl<'m, 'c, A> Propagate<'m, 'c, A, Forward> for DataflowRunner<'m, 'c, A, Forward>
+where
+    A: DataflowAnalysis<'m, 'c, Forward>,
+{
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
@@ -241,6 +242,21 @@ where
             self.analysis.trans_stmt(state, stmt, &block.data);
         }
         self.analysis.trans_block(state, &block.kind, &block.data);
+    }
+}
+
+impl<'m, 'c, A> Propagate<'m, 'c, A, Backward> for DataflowRunner<'m, 'c, A, Backward>
+where
+    A: DataflowAnalysis<'m, 'c, Backward>,
+{
+    /// Apply the transfer function of a block, which is just the composition of
+    /// the transfer functions of its statements. Begin with the state-on-entry,
+    /// set the result value to this state, and mutate the state through the block.
+    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
+        self.analysis.trans_block(state, &block.kind, &block.data);
+        for stmt in block.stmts.iter().rev() {
+            self.analysis.trans_stmt(state, stmt, &block.data);
+        }
     }
 }
 
