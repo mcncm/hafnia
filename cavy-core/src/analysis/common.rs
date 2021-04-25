@@ -1,14 +1,20 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::{cell::Ref, collections::hash_map::Entry};
 
 use mir::Stmt;
 
 use crate::{ast::FnId, context::Context, mir::*};
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
 
+pub trait Direction {}
+
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
+impl Direction for Forward {}
+/// Marker type for backward-flowing dataflow analyses
+pub struct Backward;
+impl Direction for Backward {}
 
 /// The main trait for analysis data, representing a join-semilattice.
 pub trait Lattice: Clone + PartialEq + Eq {
@@ -48,8 +54,11 @@ where
 }
 
 /// Trait for a general dataflow analysis
-pub trait DataflowAnalysis<'mir, 'ctx> {
-    type Direction;
+pub trait DataflowAnalysis<'mir, 'ctx, D>
+where
+    D: Direction,
+    Successors<'mir, D>: SuccGetter<'mir>,
+{
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement
@@ -64,7 +73,7 @@ pub trait DataflowAnalysis<'mir, 'ctx> {
         self,
         ctx: &'mir Context<'ctx>,
         gr: &'mir Graph,
-    ) -> DataflowRunner<'mir, 'ctx, Self>
+    ) -> DataflowRunner<'mir, 'ctx, Self, D>
     where
         Self: Sized,
     {
@@ -90,28 +99,79 @@ pub struct AnalysisStates<L: Lattice> {
     pub exit_state: L,
 }
 
+pub trait SuccGetter<'a> {
+    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self;
+
+    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
+        block.successors()
+    }
+}
+
+/// A helper struct to satisfy the borrow checker: used to compute the
+/// successors to a node.
+pub struct Successors<'a, D: Direction> {
+    preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
+    _d: D,
+}
+
+impl<'a> SuccGetter<'a> for Successors<'a, Forward> {
+    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self {
+        Self {
+            preds,
+            _d: Forward {},
+        }
+    }
+
+    /// It looks silly, but this has both arguments because we have access to
+    /// the `Block` going forwards, and only the `BlockId` going backwards.
+    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
+        block.successors()
+    }
+}
+
+impl<'a> SuccGetter<'a> for Successors<'a, Backward> {
+    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self {
+        Self {
+            preds,
+            _d: Backward {},
+        }
+    }
+
+    /// It looks silly, but this has both arguments because we have access to
+    /// the `Block` going forwards, and only the `BlockId` going backwards.
+    fn successors(&self, blk_id: BlockId, _block: &BasicBlock) -> &[BlockId] {
+        &self.preds[blk_id]
+    }
+}
+
 /// An execution environment for a dataflow analysis, using the Killdall method.
 ///
 /// NOTE Can we do this with a *single* pass per direction? Can we do it without
 /// generics? Probably only if we store the results in the analysis types
 /// themselves.
-pub struct DataflowRunner<'mir, 'ctx, A>
+pub struct DataflowRunner<'mir, 'ctx, A, D>
 where
-    A: DataflowAnalysis<'mir, 'ctx>,
+    A: DataflowAnalysis<'mir, 'ctx, D>,
+    D: Direction,
+    Successors<'mir, D>: SuccGetter<'mir>,
 {
     analysis: A,
     results: AnalysisStates<A::Domain>,
     gr: &'mir mir::Graph,
+    succs: Successors<'mir, D>,
     ctx: &'mir Context<'ctx>,
     /// The next set of blocks to be analyzed
     working_set: HashSet<BlockId>,
 }
 
-impl<'mir, 'ctx, A> DataflowRunner<'mir, 'ctx, A>
+impl<'mir, 'ctx, A, D> DataflowRunner<'mir, 'ctx, A, D>
 where
-    A: DataflowAnalysis<'mir, 'ctx>,
+    A: DataflowAnalysis<'mir, 'ctx, D>,
+    D: Direction,
+    Successors<'mir, D>: SuccGetter<'mir>,
 {
     fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
+        let succs = Successors::new(gr.get_preds());
         let bot = A::Domain::bottom(gr, ctx);
         // FIXME this is doing a lot of extra work to fill in these "default"
         // values. Maybe we should use either a `Store<BlockId,
@@ -130,6 +190,7 @@ where
             results,
             gr,
             ctx,
+            succs,
             working_set,
         }
     }
@@ -149,16 +210,16 @@ where
     /// states of any successor block. If they differ, they are updated and
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
-    fn run_inner(&mut self, block: BlockId) {
-        let mut state = self.results.entry_states[block].clone();
-        let block = &self.gr[block];
+    fn run_inner(&mut self, blk_id: BlockId) {
+        let mut state = self.results.entry_states[blk_id].clone();
+        let block = &self.gr[blk_id];
         self.propagate(&mut state, &block);
 
         // Compute the successor blocks and do any extra block-kind-dependent work.
-        let succs = block.successors();
         if let BlockKind::Ret = block.kind {
             self.results.exit_state = self.results.exit_state.join(&state);
         }
+        let succs = self.succs.successors(blk_id, block);
 
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
@@ -182,6 +243,8 @@ where
         self.analysis.trans_block(state, &block.kind, &block.data);
     }
 }
+
+// == Summary analyses ==
 
 /// A simple analysis that makes only a single pass over all blocks, *regardless
 /// of the graph topology*, and that only needs to track a single (therefore

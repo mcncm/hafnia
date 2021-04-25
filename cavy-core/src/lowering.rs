@@ -453,6 +453,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower(mut self) -> Result<Graph, (Graph, ErrorBuf)> {
         let place = self.gr.return_site().into();
         let _ = self.lower_into(&place, self.body);
+        // NOTE: is this always correct?
+        self.gr.exit_block = self.cursor;
 
         if !self.errors.is_empty() {
             Err((self.gr, self.errors))

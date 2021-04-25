@@ -31,16 +31,14 @@ pub type CallSites = HashMap<FnId, Span>;
 pub struct CallGraphAnalysis<'a> {
     /// This is really the "wrong" way to do this, because now we can't
     /// parallelize the analyses over procedures.
-    global_sites: &'a mut Store<FnId, CallSites>,
-    sites: CallSites,
+    sites: &'a mut CallSites,
 }
 
 impl<'a> CallGraphAnalysis<'a> {
     pub fn new(global_sites: &'a mut Store<FnId, CallSites>) -> Self {
-        Self {
-            sites: CallSites::new(),
-            global_sites,
-        }
+        let idx = global_sites.insert(CallSites::new());
+        let sites = &mut global_sites[idx];
+        Self { sites }
     }
 }
 

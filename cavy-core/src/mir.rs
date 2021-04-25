@@ -18,7 +18,13 @@ use crate::{
     num::{self, Uint},
     types::{TyId, Type},
 };
-use std::{collections::HashMap, env::args, fmt};
+use std::{
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    env::args,
+    fmt,
+    rc::Rc,
+};
 
 store_type! { BlockStore : BlockId -> BasicBlock }
 store_type! { LocalStore : LocalId -> Local }
@@ -71,42 +77,50 @@ type Predecessors = Store<BlockId, Vec<BlockId>>;
 /// and should be (slightly) faster.
 struct PredGraph {
     /// The current predecessors graph.
-    preds: Store<BlockId, Vec<BlockId>>,
+    preds: RefCell<Store<BlockId, Vec<BlockId>>>,
     /// Has the current graph been invalidated?
-    invalid: bool,
+    invalid: RefCell<bool>,
 }
 
 impl PredGraph {
     fn new() -> Self {
         Self {
-            preds: Store::new(),
-            invalid: true,
+            preds: RefCell::new(Store::new()),
+            invalid: RefCell::new(false),
         }
     }
 
     /// Empty the store (lazily)
     fn invalidate(&mut self) {
-        self.invalid = true;
+        self.invalid.replace(true);
     }
 
-    /// (Re)compute the predecessor graph
-    fn compute(&mut self, blocks: &BlockStore) {
-        for elem in self.preds.iter_mut() {
+    /// (Re)compute the predecessor graph using interior mutability
+    fn compute(&self, blocks: &BlockStore) {
+        let mut preds = self.preds.borrow_mut();
+        for elem in preds.iter_mut() {
             elem.clear();
+        }
+
+        // Extend the graph if it isn't yet large enough. Is this slow?
+        let diff = blocks.len() - preds.len();
+        for _ in 0..diff {
+            preds.insert(Vec::new());
         }
 
         for (idx, block) in blocks.idx_enumerate() {
             for succ in block.successors() {
-                self.preds[idx].push(*succ);
+                preds[idx].push(*succ);
             }
         }
+        self.invalid.replace(false);
     }
 
-    fn get_preds(&mut self, blocks: &BlockStore) -> &Store<BlockId, Vec<BlockId>> {
-        if self.invalid {
+    fn get_preds(&self, blocks: &BlockStore) -> Ref<Store<BlockId, Vec<BlockId>>> {
+        if *self.invalid.borrow() {
             self.compute(blocks);
         }
-        &self.preds
+        self.preds.borrow()
     }
 }
 
@@ -130,6 +144,8 @@ pub struct Graph {
     blocks: BlockStore,
     /// The first block of the CFG
     pub entry_block: BlockId,
+    /// The final block of the CFG
+    pub exit_block: BlockId,
     /// The predecessor graph
     preds: PredGraph,
 }
@@ -139,6 +155,7 @@ impl Graph {
     pub fn new(sig: &TypedSig) -> Self {
         let mut blocks = BlockStore::new();
         let entry_block = blocks.insert(BasicBlock::new());
+        let exit_block = entry_block;
         let nargs = sig.params.len();
         Self {
             locals: LocalStore::new(),
@@ -146,6 +163,7 @@ impl Graph {
             preds: PredGraph::new(),
             nargs,
             entry_block,
+            exit_block,
         }
     }
 
@@ -166,7 +184,7 @@ impl Graph {
         self.blocks.idx_enumerate()
     }
 
-    pub fn get_preds(&mut self) -> &Predecessors {
+    pub fn get_preds(&self) -> Ref<Predecessors> {
         self.preds.get_preds(&self.blocks)
     }
 

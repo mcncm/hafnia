@@ -66,8 +66,7 @@ impl MeasState {
 /// gen-kill thing is all about.)
 pub struct FeedbackAnalysis {}
 
-impl DataflowAnalysis<'_, '_> for FeedbackAnalysis {
-    type Direction = Forward;
+impl DataflowAnalysis<'_, '_, Forward> for FeedbackAnalysis {
     type Domain = MeasState;
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {

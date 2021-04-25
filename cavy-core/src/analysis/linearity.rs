@@ -222,8 +222,7 @@ pub struct LinearityAnalysis {}
 
 impl LinearityAnalysis {}
 
-impl DataflowAnalysis<'_, '_> for LinearityAnalysis {
-    type Direction = Forward;
+impl DataflowAnalysis<'_, '_, Forward> for LinearityAnalysis {
     type Domain = MoveState;
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
