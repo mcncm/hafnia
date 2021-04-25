@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use super::common::{Analysis, Forward, Lattice};
+use super::common::{DataflowAnalysis, Forward, Lattice};
 use crate::{
     mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
     source::Span,
@@ -222,7 +222,7 @@ pub struct LinearityAnalysis {}
 
 impl LinearityAnalysis {}
 
-impl Analysis<'_, '_> for LinearityAnalysis {
+impl DataflowAnalysis<'_, '_> for LinearityAnalysis {
     type Direction = Forward;
     type Domain = MoveState;
 

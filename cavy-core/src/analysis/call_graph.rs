@@ -8,15 +8,17 @@
 //! interprocedural symbolic execution to show that the recursion always
 //! terminates after a finite number of cycles.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::mir::{BlockData, Graph};
+use crate::mir::{BlockData, BlockId, Graph, GraphLoc};
 use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};
 
-use super::common::{Analysis, Forward, Lattice};
+use super::common::SummaryAnalysis;
+
+// == Procedure-local analysis ==
 
 /// The state for this summary analysis is the collection of call sites found in
 /// the control-flow graph. For simplicity, we'll only track at most one such
@@ -26,22 +28,35 @@ pub type CallSites = HashMap<FnId, Span>;
 /// Note that this uses a *lot* more space than it needs to! We could really use
 /// two bits for each local, for a whole procedure. (...That must be what this
 /// gen-kill thing is all about.)
-pub struct CallGraphAnalysis {}
+pub struct CallGraphAnalysis<'a> {
+    /// This is really the "wrong" way to do this, because now we can't
+    /// parallelize the analyses over procedures.
+    global_sites: &'a mut Store<FnId, CallSites>,
+    sites: CallSites,
+}
 
-impl Analysis<'_, '_> for CallGraphAnalysis {
-    type Direction = Forward;
-    type Domain = CallSites;
-
-    /// Do absolutely nothing: calls appear in basic block tails, so these are
-    /// all we care about.
-    fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &crate::mir::Stmt, _data: &BlockData) {}
-
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, _data: &BlockData) {
-        if let BlockKind::Call { callee, span, .. } = block {
-            state.insert(*callee, *span);
+impl<'a> CallGraphAnalysis<'a> {
+    pub fn new(global_sites: &'a mut Store<FnId, CallSites>) -> Self {
+        Self {
+            sites: CallSites::new(),
+            global_sites,
         }
     }
 }
+
+impl<'a> SummaryAnalysis for CallGraphAnalysis<'a> {
+    /// Do absolutely nothing: calls appear in basic block tails, so these are
+    /// all we care about.
+    fn trans_stmt(&mut self, _stmt: &crate::mir::Stmt, _loc: &GraphLoc) {}
+
+    fn trans_block(&mut self, block: &BlockKind, _loc: &BlockId) {
+        if let BlockKind::Call { callee, span, .. } = block {
+            self.sites.insert(*callee, *span);
+        }
+    }
+}
+
+// == Global checking ==
 
 /// A graph of call sites for the entire MIR
 pub type CallGraph = Store<FnId, CallSites>;

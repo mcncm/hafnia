@@ -37,7 +37,7 @@ mod subconditional;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::common::{Analysis, DataflowRunner, SummaryRunner};
+use self::common::{DataflowAnalysis, DataflowRunner, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
@@ -69,16 +69,13 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
             }
         }
 
-        // Awkward; figure out equivalent of `into_runner` for summary analyses
-        let calls = SummaryRunner::new(call_graph::CallGraphAnalysis {}, gr, ctx).run();
-        let idx = call_sites.insert(calls);
-        // Make sure that there is no accidental reordering. This caught a bug
-        // before! Consider moving into a test.
-        debug_assert!(idx == fn_id);
-
-        let sub_cond_gr = SummaryRunner::new(subconditional::SubCondAnalysis {}, gr, ctx).run();
-        let idx = sub_cond_data.insert(sub_cond_gr);
-        debug_assert!(idx == fn_id);
+        // == Summary analyses ==
+        let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);
+        let mut subcond_ana = subconditional::SubCondAnalysis::new(&mut sub_cond_data, &());
+        SummaryRunner::new(fn_id, gr, ctx)
+            .register(&mut call_graph_ana)
+            .register(&mut subcond_ana)
+            .run();
     }
 
     if !ctx.conf.arch.recursion {

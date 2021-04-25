@@ -110,6 +110,11 @@ impl PredGraph {
     }
 }
 
+pub struct GraphLoc {
+    pub blk: BlockId,
+    pub stmt: usize,
+}
+
 /// The control-flow graph of a function
 #[derive(Debug)]
 pub struct Graph {
@@ -155,6 +160,10 @@ impl Graph {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BasicBlock> {
         self.blocks.iter_mut()
+    }
+
+    pub fn idx_enumerate(&self) -> impl Iterator<Item = (BlockId, &BasicBlock)> {
+        self.blocks.idx_enumerate()
     }
 
     pub fn get_preds(&mut self) -> &Predecessors {

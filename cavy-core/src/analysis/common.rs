@@ -2,8 +2,10 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
+use mir::Stmt;
+
+use crate::{ast::FnId, context::Context, mir::*};
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
-use crate::{context::Context, mir::*};
 
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
@@ -46,12 +48,12 @@ where
 }
 
 /// Trait for a general dataflow analysis
-pub trait Analysis<'mir, 'ctx> {
+pub trait DataflowAnalysis<'mir, 'ctx> {
     type Direction;
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, data: &mir::BlockData);
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, data: &mir::BlockData);
 
     /// Apply the transfer function for the end of a basic block
     fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, data: &mir::BlockData);
@@ -95,7 +97,7 @@ pub struct AnalysisStates<L: Lattice> {
 /// themselves.
 pub struct DataflowRunner<'mir, 'ctx, A>
 where
-    A: Analysis<'mir, 'ctx>,
+    A: DataflowAnalysis<'mir, 'ctx>,
 {
     analysis: A,
     results: AnalysisStates<A::Domain>,
@@ -107,7 +109,7 @@ where
 
 impl<'mir, 'ctx, A> DataflowRunner<'mir, 'ctx, A>
 where
-    A: Analysis<'mir, 'ctx>,
+    A: DataflowAnalysis<'mir, 'ctx>,
 {
     fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
         let bot = A::Domain::bottom(gr, ctx);
@@ -181,44 +183,58 @@ where
     }
 }
 
-/// An execution environment for a simple analysis that makes only a single pass
-/// over all blocks, regardless of the graph topology, and that only needs to
-/// track a single (therefore non-block-local) instance of the analysis state.
-/// The motivating example is the generation of a call graph.
-pub struct SummaryRunner<'mir, 'ctx, A>
-where
-    A: Analysis<'mir, 'ctx>,
-{
-    analysis: A,
-    gr: &'mir mir::Graph,
-    ctx: &'mir Context<'ctx>,
+/// A simple analysis that makes only a single pass over all blocks, *regardless
+/// of the graph topology*, and that only needs to track a single (therefore
+/// non-block-local) instance of the analysis state.
+pub trait SummaryAnalysis {
+    /// Apply the transfer function for a single statement
+    fn trans_stmt(&mut self, stmt: &Stmt, loc: &GraphLoc);
+
+    /// Apply the transfer function for the end of a basic block
+    fn trans_block(&mut self, block: &BlockKind, loc: &BlockId);
+}
+
+/// An execution environment for simple analyses.
+pub struct SummaryRunner<'a> {
+    fn_id: FnId,
+    gr: &'a mir::Graph,
+    ctx: &'a Context<'a>,
+    analyses: Vec<&'a mut dyn SummaryAnalysis>,
 }
 
 // NOTE that we might eventually want `SummaryRunner` and `DataflowRunner` to
 // implement some common trait.
-impl<'mir, 'ctx, A> SummaryRunner<'mir, 'ctx, A>
-where
-    A: Analysis<'mir, 'ctx>,
-{
-    pub fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
-        Self { analysis, gr, ctx }
+impl<'a> SummaryRunner<'a> {
+    pub fn new(fn_id: FnId, gr: &'a Graph, ctx: &'a Context) -> Self {
+        Self {
+            fn_id,
+            gr,
+            ctx,
+            analyses: Vec::new(),
+        }
     }
 
-    pub fn run(self) -> A::Domain {
-        let mut state = A::Domain::bottom(self.gr, self.ctx);
-        for block in self.gr.iter() {
-            self.propagate(&mut state, block);
-        }
-        state
+    pub fn register(mut self, analysis: &'a mut dyn SummaryAnalysis) -> Self {
+        self.analyses.push(analysis);
+        self
     }
 
-    // FIXME this is (or should be) identical to the method of `DataflowRunner`
-    // of the same name. Until this is abstracted by some common trait, this is
-    // a possible point of failure if they get out of sync.
-    fn propagate(&self, state: &mut A::Domain, block: &BasicBlock) {
-        for stmt in block.stmts.iter() {
-            self.analysis.trans_stmt(state, stmt, &block.data);
+    pub fn run(mut self) {
+        for (blk_id, blk) in self.gr.idx_enumerate() {
+            for (pos, stmt) in blk.stmts.iter().enumerate() {
+                let loc = GraphLoc {
+                    blk: blk_id,
+                    stmt: pos,
+                };
+                // Struggling to unify these two loops with an observer pattern
+                // here. How do I do that with only `&mut dyn Trait`s?
+                for ana in &mut self.analyses {
+                    ana.trans_stmt(stmt, &loc);
+                }
+            }
+            for ana in &mut self.analyses {
+                ana.trans_block(&blk.kind, &blk_id);
+            }
         }
-        self.analysis.trans_block(state, &block.kind, &block.data);
     }
 }

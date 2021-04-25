@@ -7,7 +7,7 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::common::{Analysis, Forward, Lattice};
+use super::common::{DataflowAnalysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
     mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
@@ -66,7 +66,7 @@ impl MeasState {
 /// gen-kill thing is all about.)
 pub struct FeedbackAnalysis {}
 
-impl Analysis<'_, '_> for FeedbackAnalysis {
+impl DataflowAnalysis<'_, '_> for FeedbackAnalysis {
     type Direction = Forward;
     type Domain = MeasState;
 

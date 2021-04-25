@@ -8,11 +8,11 @@
 //! interprocedural: you have to ensure that no delinearization occurs anywhere
 //! in the call graph downstream of a location within a linear conditional.
 
-use super::common::{Analysis, Forward, Lattice};
+use super::common::{DataflowAnalysis, Forward, Lattice, SummaryAnalysis};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,
-    mir::{self, BlockData, BlockId, BlockKind, RvalueKind},
+    mir::{self, BlockData, BlockId, BlockKind, GraphLoc, RvalueKind},
     source::Span,
     store::Store,
 };
@@ -32,7 +32,7 @@ pub struct MeasUnderCond {
 
 /// The state for this summary analysis is the collection of measurement
 /// operators and callsites that have appeared under a linear conditional.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubCondData {
     /// Does this procedure feature any delinearization operators,
     /// subconditional or otherwise? We'll use this data when we're traversing
@@ -48,54 +48,45 @@ pub struct SubCondData {
     pub sublin_calls: HashSet<(FnId, Span)>,
 }
 
-impl Lattice for SubCondData {
-    fn join(&self, other: &Self) -> Self {
-        SubCondData {
-            has_delin: self.has_delin | other.has_delin,
-            delins: self.delins.join(&other.delins),
-            has_cc: self.has_cc | other.has_cc,
-            sublin_calls: self.sublin_calls.join(&other.sublin_calls),
-        }
-    }
+pub struct SubCondAnalysis<'a> {
+    sub_cond_data: &'a mut Store<FnId, SubCondData>,
+    controls: &'a (),
+    state: SubCondData,
+}
 
-    fn bottom(gr: &mir::Graph, ctx: &crate::context::Context) -> Self {
+impl<'a> SubCondAnalysis<'a> {
+    pub fn new(sub_cond_data: &'a mut Store<FnId, SubCondData>, controls: &'a ()) -> Self {
         Self {
-            has_delin: false,
-            has_cc: false,
-            delins: HashSet::bottom(gr, ctx),
-            sublin_calls: HashSet::bottom(gr, ctx),
+            sub_cond_data,
+            controls,
+            state: SubCondData::default(),
         }
     }
 }
 
-pub struct SubCondAnalysis {}
-
-impl Analysis<'_, '_> for SubCondAnalysis {
-    type Direction = Forward;
-    type Domain = SubCondData;
-
+impl<'a> SummaryAnalysis for SubCondAnalysis<'a> {
     /// If we encounter a delinearization operator, add that.
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, data: &BlockData) {
-        let (_place, rhs) = match &stmt.kind {
-            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
-            _ => return,
-        };
+    fn trans_stmt(&mut self, _stmt: &mir::Stmt, _loc: &GraphLoc) {
+        // let (_place, rhs) = match &stmt.kind {
+        //     mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
+        //     _ => return,
+        // };
 
-        if let RvalueKind::UnOp(UnOpKind::Delin, _) = rhs.data {
-            state.has_delin = true;
-            if let Some(blk) = data.sup_lin_branch {
-                state.delins.insert(MeasUnderCond {
-                    cond: blk,
-                    span: rhs.span,
-                });
-            }
-        }
+        // if let RvalueKind::UnOp(UnOpKind::Delin, _) = rhs.data {
+        //     self.state.has_delin = true;
+        //     if let Some(blk) = data.sup_lin_branch {
+        //         self.state.delins.insert(MeasUnderCond {
+        //             cond: blk,
+        //             span: rhs.span,
+        //         });
+        //     }
+        // }
     }
 
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, data: &BlockData) {
-        if let (BlockKind::Call { callee, span, .. }, Some(_)) = (block, data.sup_lin_branch) {
-            state.sublin_calls.insert((*callee, *span));
-        }
+    fn trans_block(&mut self, _block: &BlockKind, _loc: &BlockId) {
+        // if let (BlockKind::Call { callee, span, .. }, Some(_)) = (block, data.sup_lin_branch) {
+        //     state.sublin_calls.insert((*callee, *span));
+        // }
     }
 }
 
