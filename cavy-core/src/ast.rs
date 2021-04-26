@@ -739,7 +739,10 @@ pub struct Func {
     /// so). To resolve symbols in its body, we need the `TableId` held in the
     /// body `Block`.
     pub table: TableId,
+    /// `unsafe fn`
     pub is_unsafe: bool,
+    /// The name of the function declared at the definition site.
+    pub def_name: SymbolId,
     pub span: Span,
 }
 

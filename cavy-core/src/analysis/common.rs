@@ -271,12 +271,21 @@ pub trait SummaryAnalysis {
 
     /// Apply the transfer function for the end of a basic block
     fn trans_block(&mut self, block: &BlockKind, loc: &BlockId);
+
+    /// If this analysis identified any errors, check for them
+    fn check(&self, _errs: &mut ErrorBuf) {}
+
+    /// Some analyses might turn themselves off on certain inputs
+    fn enabled(&self) -> bool {
+        true
+    }
 }
 
 /// An execution environment for simple analyses.
 pub struct SummaryRunner<'a> {
     fn_id: FnId,
     gr: &'a mir::Graph,
+    errs: &'a mut ErrorBuf,
     ctx: &'a Context<'a>,
     analyses: Vec<&'a mut dyn SummaryAnalysis>,
 }
@@ -284,17 +293,20 @@ pub struct SummaryRunner<'a> {
 // NOTE that we might eventually want `SummaryRunner` and `DataflowRunner` to
 // implement some common trait.
 impl<'a> SummaryRunner<'a> {
-    pub fn new(fn_id: FnId, gr: &'a Graph, ctx: &'a Context) -> Self {
+    pub fn new(fn_id: FnId, gr: &'a Graph, ctx: &'a Context, errs: &'a mut ErrorBuf) -> Self {
         Self {
             fn_id,
             gr,
+            errs,
             ctx,
             analyses: Vec::new(),
         }
     }
 
     pub fn register(mut self, analysis: &'a mut dyn SummaryAnalysis) -> Self {
-        self.analyses.push(analysis);
+        if analysis.enabled() {
+            self.analyses.push(analysis);
+        }
         self
     }
 
@@ -314,6 +326,13 @@ impl<'a> SummaryRunner<'a> {
             for ana in &mut self.analyses {
                 ana.trans_block(&blk.kind, &blk_id);
             }
+        }
+        self.check();
+    }
+
+    fn check(&mut self) {
+        for ana in &mut self.analyses {
+            ana.check(&mut self.errs);
         }
     }
 }

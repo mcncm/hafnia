@@ -456,6 +456,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             body: self.ast.bodies.insert(body),
             table: self.table_id,
             is_unsafe,
+            def_name: name.data,
             span,
         };
 

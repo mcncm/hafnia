@@ -351,6 +351,38 @@ test_compiles! {
         fn f() unsafe {}
     }
 
+    unsafe_bare_assert fail [Analysis] {
+        fn main() {
+            assert 0;
+        }
+    }
+
+    unsafe_wrapped_assert [Analysis] {
+        fn main() {
+            unsafe { assert 0; }
+        }
+    }
+
+    unsafe_bare_fn_call fail [Analysis] {
+        unsafe fn f() {
+            assert 3;
+        }
+
+        fn main() {
+            f()
+        }
+    }
+
+    unsafe_wrapped_fn_call [Analysis] {
+        unsafe fn f() {
+            assert 3;
+        }
+
+        fn main() {
+            unsafe { f() }
+        }
+    }
+
     // BORROW
 
     borrow_lower [Typecheck] {

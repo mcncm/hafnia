@@ -174,12 +174,23 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             // function in the Mir that they do in the Ast. Bugs have caused
             // this to be violated before!
             debug_assert!(idx == fn_id);
+            self.mir.graph_data.insert(self.graph_data(fn_id));
         }
+        debug_assert_eq!(self.mir.graphs.len(), self.mir.graph_data.len());
 
         if !self.errors.is_empty() {
             Err(self.errors)
         } else {
             Ok(self.mir)
+        }
+    }
+
+    fn graph_data(&self, fn_id: FnId) -> GraphData {
+        let func = &self.ast.funcs[fn_id];
+        GraphData {
+            is_unsafe: func.is_unsafe,
+            is_rev: false,
+            def_name: func.def_name,
         }
     }
 

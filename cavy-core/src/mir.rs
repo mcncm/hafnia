@@ -33,6 +33,7 @@ store_type! { LocalStore : LocalId -> Local }
 #[derive(Debug)]
 pub struct Mir {
     pub graphs: Store<FnId, Graph>,
+    pub graph_data: Store<FnId, GraphData>,
     pub entry_point: Option<FnId>,
 }
 
@@ -40,9 +41,20 @@ impl Mir {
     pub fn new(ast: &Ast) -> Self {
         Self {
             graphs: Store::with_capacity(ast.funcs.len()),
+            graph_data: Store::with_capacity(ast.funcs.len()),
             entry_point: ast.entry_point,
         }
     }
+}
+
+/// Satellite data about a function: this will be the place to add visibility,
+/// definition name, whether this is a closure, method, or regular `fn` item,
+/// and so on.
+#[derive(Debug)]
+pub struct GraphData {
+    pub is_unsafe: bool,
+    pub is_rev: bool,
+    pub def_name: SymbolId,
 }
 
 /// A typed function signature
