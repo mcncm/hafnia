@@ -1,7 +1,7 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    circuit::Lir,
+    circuit::Circuit,
     context::{Context, CtxDisplay, CtxFmt},
     lowering, parser, scanner,
     session::Phase,
@@ -11,7 +11,7 @@ use crate::{
 use std::path::PathBuf;
 
 /// Compile a program to a quantum(-classical) circuit representation.
-pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Lir>, ErrorBuf> {
+pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Circuit>, ErrorBuf> {
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
     let ast = parser::parse(tokens, ctx)?;
@@ -43,15 +43,15 @@ pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<L
         return Ok(None);
     }
 
-    let lir = crate::codegen::translate(&mir, ctx);
+    let circ = crate::codegen::translate(&mir, ctx);
     if ctx.last_phase() == &Phase::Translation {
         if ctx.conf.debug {
-            println!("{}", lir);
+            println!("{:?}", circ);
         }
         return Ok(None);
     }
 
-    Ok(Some(lir))
+    Ok(Some(circ))
 }
 
 /// Compile a program to object code by serializing a circuit representation.
@@ -62,5 +62,5 @@ pub fn compile_target(
     entry_point: SrcId,
     ctx: &mut Context,
 ) -> Result<Option<ObjectCode>, ErrorBuf> {
-    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| ctx.conf.target.from(&circ)))
+    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| ctx.conf.target.from(circ)))
 }

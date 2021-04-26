@@ -54,7 +54,7 @@ impl<'a> UnsafeAnalysis<'a> {
         match violation.kind {
             UnsafetyKind::Assert => Box::new(errors::SafetyViolation {
                 span,
-                msg: "asserted expression",
+                msg: "assertion",
             }),
             UnsafetyKind::UnsafeCall(fn_id) => {
                 let name = self.graph_data[fn_id].def_name;

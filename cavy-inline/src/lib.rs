@@ -8,7 +8,7 @@
 #![cfg_attr(feature = "nightly-features", feature(proc_macro_span))]
 
 use cavy_core::{
-    circuit::{Gate, Lir},
+    circuit::{Circuit, Gate},
     compile,
     context::Context,
     session::Config,
@@ -83,8 +83,8 @@ fn stringify(input: TokenStream) -> (String, Vec<proc_macro::Span>) {
 /// Turns a `Circuit` value into code that builds that literal circuit.
 ///
 /// TODO better: to this by implementing `ToTokens` for `Circuit`.
-fn quote_circuit(circ: Lir) -> TokenStream {
-    let gates = circ.iter().map(|gate| match gate {
+fn quote_circuit(circ: Circuit) -> TokenStream {
+    let gates = circ.into_iter().map(|gate| match gate {
         Gate::X(q) => quote! { ::cavy::circuit::Gate::X(#q) },
         Gate::T { tgt, conj } => quote! { ::cavy::circuit::Gate::T { tgt: #tgt, conj: #conj } },
         Gate::H(q) => quote! { ::cavy::circuit::Gate::H(#q) },

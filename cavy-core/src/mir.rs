@@ -3,6 +3,7 @@
 //! all names resolved, and its structure is *very* similar. This module is
 //! *essentially* a simplified version of `rustc_middle/src/mir/mod.rs`.
 
+use crate::store_type;
 use crate::{
     ast::{self, Ast, FnId},
     context::{CtxDisplay, SymbolId},
@@ -11,8 +12,6 @@ use crate::{
     types::RefKind,
     values::Value,
 };
-// use crate::functions::{Func, UserFunc};
-use crate::store_type;
 use crate::{
     context::{Context, CtxFmt},
     num::{self, Uint},
@@ -28,6 +27,16 @@ use std::{
 
 store_type! { BlockStore : BlockId -> BasicBlock }
 store_type! { LocalStore : LocalId -> Local }
+
+impl LocalStore {
+    pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
+        let mut ty = self[place.root].ty;
+        for elem in place.path.iter() {
+            ty = ty.slot(*elem, ctx);
+        }
+        ty
+    }
+}
 
 /// The whole-program middle intermediate representation.
 #[derive(Debug)]
@@ -196,6 +205,10 @@ impl Graph {
         self.blocks.idx_enumerate()
     }
 
+    pub fn get_blocks(&self) -> &BlockStore {
+        &self.blocks
+    }
+
     pub fn get_preds(&self) -> Ref<Predecessors> {
         self.preds.get_preds(&self.blocks)
     }
@@ -208,11 +221,7 @@ impl Graph {
     }
 
     pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
-        let mut ty = self.locals[place.root].ty;
-        for elem in place.path.iter() {
-            ty = ty.slot(*elem, ctx);
-        }
-        ty
+        self.locals.type_of(place, ctx)
     }
 
     /// The local corresponding to the routine's return value
@@ -307,12 +316,7 @@ impl BasicBlock {
     }
 
     pub fn successors(&self) -> &[BlockId] {
-        match &self.kind {
-            BlockKind::Goto(blk) => std::slice::from_ref(blk),
-            BlockKind::Switch { blks, .. } => &blks,
-            BlockKind::Call(call) => std::slice::from_ref(&call.blk),
-            BlockKind::Ret => &[],
-        }
+        self.kind.successors()
     }
 }
 
@@ -345,6 +349,17 @@ pub enum BlockKind {
     Call(Box<FnCall>),
     /// A return
     Ret,
+}
+
+impl BlockKind {
+    pub fn successors(&self) -> &[BlockId] {
+        match &self {
+            BlockKind::Goto(blk) => std::slice::from_ref(blk),
+            BlockKind::Switch { blks, .. } => &blks,
+            BlockKind::Call(call) => std::slice::from_ref(&call.blk),
+            BlockKind::Ret => &[],
+        }
+    }
 }
 
 /// A CFG-level representation of a function call, which lives in a block tail
