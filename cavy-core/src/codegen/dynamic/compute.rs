@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use crate::{ast::UnOpKind, mir::Operand};
+use crate::{ast::UnOpKind, mir::Operand, values::Value};
 
 use super::{gates, mem::BitSetSlice, *};
 
@@ -10,51 +10,77 @@ enum Data {
 }
 
 impl<'m> Interpreter<'m> {
-    pub fn compute(&mut self, rvalue: &Rvalue) {
+    pub fn compute_assn(&mut self, place: &Place, rvalue: &Rvalue) {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(_, _, _) => todo!(),
-            RvalueKind::UnOp(op, rhs) => self.compute_unop(op, rhs),
+            RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
             RvalueKind::Ref(_, _) => todo!(),
-            RvalueKind::Use(_) => todo!(),
+            RvalueKind::Use(op) => self.compute_use(place, op),
         };
-    }
-
-    fn copy_of(&mut self, place: &Place) -> Place {
-        todo!();
-    }
-
-    fn move_of(&mut self, place: &Place) -> Place {
-        todo!();
     }
 
     fn unwrap_operand<'a>(&mut self, op: &'a Operand) -> &'a Place {
         match op {
             Operand::Const(c) => todo!(),
-            Operand::Copy(place) => {
-                self.copy_of(place);
-                place
+            Operand::Copy(place) => place,
+            Operand::Move(place) => place,
+        }
+    }
+
+    fn initialize(&mut self, place: &Place, value: &Value) -> BitSet {
+        let bits = value.bits();
+        let allocation = self.alloc_for_place(place);
+        for (i, b) in value.bits().iter().enumerate() {
+            if *b {
+                let addr = allocation.qbits[i];
+                self.circ.push(Gate::X(addr), &self.st);
             }
-            Operand::Move(place) => {
-                self.move_of(place);
-                place
+        }
+        allocation
+    }
+
+    fn compute_use(&mut self, lplace: &Place, op: &Operand) {
+        match op {
+            Operand::Const(value) => {}
+            Operand::Copy(rplace) => {
+                // NOTE not actually correct
+                self.st.env.mem_copy(lplace, rplace);
+            }
+            Operand::Move(rplace) => {
+                self.st.env.mem_copy(lplace, rplace);
             }
         }
     }
 
-    fn compute_unop(&mut self, op: &UnOpKind, right: &Operand) -> BitSetSlice {
-        let place = self.unwrap_operand(right);
-        let bits = self.st.env.bitset_at(place);
-        match op {
+    fn compute_unop(&mut self, place: &Place, op: &UnOpKind, right: &Operand) {
+        let bitset = match op {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
+                let rplace = self.unwrap_operand(right);
+                let bits = self.st.env.bitset_at(rplace);
                 for addr in bits.qbits {
                     self.circ.push(Gate::X(*addr), &self.st);
                 }
                 bits
             }
             UnOpKind::Split => todo!(),
-            UnOpKind::Linear => todo!(),
+            UnOpKind::Linear => {
+                match right {
+                    Operand::Const(value) => {
+                        let allocation = self.initialize(place, value);
+                        self.st.env.insert(place, allocation.as_ref());
+                    }
+                    Operand::Copy(_) => {
+                        unimplemented!("Classical feedback not yet implemented")
+                    }
+                    Operand::Move(_) => {
+                        unimplemented!("Classical feedback not yet implemented")
+                    }
+                }
+                // self.insert_bindings(&lplace, allocation);
+                return;
+            }
             UnOpKind::Delin => todo!(),
-        }
+        };
     }
 }

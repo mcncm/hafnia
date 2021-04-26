@@ -402,6 +402,13 @@ pub struct Place {
     pub path: Vec<usize>,
 }
 
+impl Place {
+    /// Check if this `Place` has a nonempty path, or the root of a local.
+    pub fn is_root(&self) -> bool {
+        self.path.is_empty()
+    }
+}
+
 impl From<LocalId> for Place {
     fn from(root: LocalId) -> Self {
         Self {

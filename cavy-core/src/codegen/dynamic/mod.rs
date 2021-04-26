@@ -2,11 +2,12 @@ mod compute;
 mod gates;
 mod mem;
 
-use mem::BitAllocator;
+use mem::{BitAllocator, BitSet};
 
 use std::{
     cell::Ref,
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
+    iter::FromIterator,
     ops::RangeFrom,
 };
 
@@ -22,22 +23,32 @@ pub struct Environment<'a> {
     /// The graph locals. We must hold onto these here in order to have access
     /// to type information and be able look up bit addresses
     locals: &'a LocalStore,
+    // NOTE: address lookups can probably be sped up considerably by modifying,
+    // or removing, this data structure.
+    /// Mapping of locals to memory locations. Note that they are _not_
+    /// write-once, because of the SWAP-elimination optimization.
+    bindings: Store<LocalId, EnvEntry>,
     /// Also needs a local `ctx` copy for type lookup
     ctx: &'a Context<'a>,
 }
 
 impl<'a> Environment<'a> {
     fn new(locals: &'a LocalStore, ctx: &'a Context<'a>) -> Self {
-        Self { locals, ctx }
+        let bindings = locals.iter().map(|loc| EnvEntry {
+            bits: BitSet::uninit(loc.ty.size(ctx)),
+        });
+        Self {
+            locals,
+            bindings: Store::from_iter(bindings),
+            ctx,
+        }
     }
+}
 
-    fn insert(&mut self, _place: &Place, _value: ()) {
-        todo!()
-    }
-
-    fn get(&self, _place: &LocalId) -> &EnvEntry {
-        todo!()
-    }
+/// Data tracked at a `LocalId`: the bits it points to, as well as any satellite
+/// data associated with deferred analyses
+struct EnvEntry {
+    bits: BitSet,
 }
 
 /// This struct essentially represents a stack frame. Everything that is pushed
@@ -67,12 +78,6 @@ impl<'a> InterpreterState<'a> {
     }
 }
 
-/// Data tracked at a `LocalId`: the bits it points to, as well as any satellite
-/// data associated with deferred analyses
-struct EnvEntry {
-    bits: mem::BitSet,
-}
-
 struct CircAssembler<'a> {
     /// This needs to own the allocater because we might use temporaries while
     /// inserting gates.
@@ -97,7 +102,7 @@ pub struct Interpreter<'a> {
 }
 
 impl<'a> Interpreter<'a> {
-    fn new(mir: &'a Mir, ctx: &'a Context<'a>) -> Self {
+    pub fn new(mir: &'a Mir, ctx: &'a Context<'a>) -> Self {
         let entry_point = mir.entry_point.unwrap();
         let gr = &mir.graphs[entry_point];
         Self {
@@ -109,15 +114,20 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Run the interpreter, starting from its entry block.
-    fn exec(mut self) -> Circuit {
+    pub fn exec(mut self) -> Circuit {
         let mut block_candidates = vec![];
+        self.swap_blocks(&mut block_candidates);
         while !block_candidates.is_empty() {
-            std::mem::swap(&mut block_candidates, &mut self.st.next_candidates);
             for blk in block_candidates.drain(0..) {
                 self.exec_block(blk);
             }
+            self.swap_blocks(&mut block_candidates);
         }
         self.circ.gate_buf
+    }
+
+    fn swap_blocks(&mut self, other: &mut Vec<BlockId>) {
+        std::mem::swap(other, &mut self.st.next_candidates);
     }
 
     fn exec_block(&mut self, blk_id: BlockId) {
@@ -146,8 +156,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn exec_assn(&mut self, place: &Place, rvalue: &Rvalue) {
-        let value = self.compute(rvalue);
-        self.st.env.insert(place, value);
+        self.compute_assn(place, rvalue);
     }
 
     /// Checks if a block is eligible according to the DFS traversal criterion:

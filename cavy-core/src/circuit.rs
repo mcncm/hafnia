@@ -27,9 +27,12 @@ pub struct IoOutGate {
     pub elem: usize,
 }
 
-/// These are gates from which most ordinary circuits will be built
+// NOTE: if you change the layout of this enum, its method `qubits` is sure to
+// break, on account of the pointer arithmetic inside it.
+/// These are gates from which most ordinary circuits will be built.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub enum Gate {
     X(VirtAddr),
     T {
@@ -39,8 +42,8 @@ pub enum Gate {
     H(VirtAddr),
     Z(VirtAddr),
     CX {
-        tgt: VirtAddr,
         ctrl: VirtAddr,
+        tgt: VirtAddr,
     },
     SWAP {
         fst: VirtAddr,
@@ -55,16 +58,27 @@ pub enum Gate {
 }
 
 impl Gate {
-    pub fn qubits(&self) -> Vec<VirtAddr> {
-        match self {
-            X(tgt) => vec![*tgt],
-            T { tgt, conj: _ } => vec![*tgt],
-            H(tgt) => vec![*tgt],
-            Z(tgt) => vec![*tgt],
-            CX { ctrl, tgt } => vec![*ctrl, *tgt],
-            SWAP { fst, snd } => vec![*fst, *snd],
-            M(tgt) => vec![*tgt],
-            Out(_) => vec![],
+    pub fn qubits(&self) -> &[VirtAddr] {
+        // NOTE: A ridiculous unsafe optimization that almost certainly yields no
+        // measurable performance benefits, and will lead to a bug as soon as I
+        // forget about it and change the data layout of `Gate`. This is
+        // basically bad engineering in the name of fun.
+        use std::mem::Discriminant;
+        let tgts = match self {
+            X(_) => 1,
+            T { .. } => 1,
+            H(_) => 1,
+            Z(_) => 1,
+            CX { .. } => 2,
+            SWAP { .. } => 2,
+            M(_) => 1,
+            // Not quite correct, anyway
+            Out(_) => 0,
+        };
+        // Safety: `Gate` is `#[repr(C)]`
+        unsafe {
+            let ptr = (self as *const Self as *const Discriminant<Self>).add(1);
+            std::slice::from_raw_parts(ptr as *const VirtAddr, tgts)
         }
     }
 
@@ -149,7 +163,7 @@ impl IntoTarget<Qasm> for Gate {
 #[derive(Debug)]
 pub struct Circuit {
     gates: Vec<Gate>,
-    max_qbit: usize,
+    max_qbit: Option<usize>,
     max_cbit: usize,
 }
 
@@ -157,13 +171,19 @@ impl Circuit {
     pub fn new() -> Self {
         Self {
             gates: Vec::new(),
-            max_qbit: 0,
+            max_qbit: None,
             max_cbit: 0,
         }
     }
 
     pub fn max_qubit(&self) -> Option<usize> {
-        Some(self.max_qbit)
+        self.max_qbit
+    }
+
+    pub fn push(&mut self, gate: Gate) {
+        let max_gate = gate.qubits().iter().copied().max();
+        self.max_qbit = self.max_qbit.max(max_gate);
+        self.gates.push(gate);
     }
 
     pub fn into_iter(self) -> CircuitStream {

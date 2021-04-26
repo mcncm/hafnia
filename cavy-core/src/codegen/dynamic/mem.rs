@@ -38,12 +38,18 @@ where
         std::iter::from_fn(|| self.alloc_one()).take(n).collect()
     }
 
-    fn free_clean(&mut self, item: T) {
-        self.clean.push(item);
+    fn free_clean<S>(&mut self, items: S)
+    where
+        S: Iterator<Item = T>,
+    {
+        self.clean.extend(items);
     }
 
-    fn free_dirty(&mut self, item: T) {
-        self.dirty.push_back(item);
+    fn free_dirty<S>(&mut self, items: S)
+    where
+        S: Iterator<Item = T>,
+    {
+        self.dirty.extend(items);
     }
 }
 
@@ -66,7 +72,7 @@ impl<'c> BitAllocator<'c> {
     pub fn alloc_for_ty(&mut self, ty: TyId) -> BitSet {
         let sz = ty.size(self.ctx);
         BitSet {
-            cbits: self.class.alloc(sz.qsize),
+            cbits: self.class.alloc(sz.csize),
             qbits: self.quant.alloc(sz.qsize),
         }
     }
@@ -103,11 +109,40 @@ impl<'a> Environment<'a> {
         (qi..qf, ci..cf)
     }
 
+    pub fn mem_copy(&mut self, lplace: &Place, rplace: &Place) {
+        // NOTE: this actually *is* safe, and doesn't require an extra copy,
+        // since we could always exclude the case `lplace == rplace`. But
+        // proving that to the borrow checker sounds pretty daunting.
+        let bits = self.bitset_at(rplace).to_owned();
+        self.insert(lplace, bits.as_ref());
+    }
+
     /// Get a sub-allocation at a place.
     pub fn bitset_at(&self, place: &Place) -> BitSetSlice {
         let ranges = self.bitset_ranges(place);
-        let bitset = &self.get(&place.root).bits;
+        let bitset = &self.get_entry(place.root).bits;
         bitset.index(ranges)
+    }
+
+    pub fn insert(&mut self, place: &Place, value: BitSetSlice) {
+        let bits = &mut self.get_entry_mut(place.root).bits;
+        bits.copy_from_slice(&value);
+    }
+
+    fn get_entry(&self, local: LocalId) -> &EnvEntry {
+        &self.bindings[local]
+    }
+
+    fn get_entry_mut(&mut self, local: LocalId) -> &mut EnvEntry {
+        &mut self.bindings[local]
+    }
+}
+
+impl Default for EnvEntry {
+    fn default() -> Self {
+        Self {
+            bits: BitSet::new(),
+        }
     }
 }
 
@@ -119,6 +154,7 @@ impl<'m> Interpreter<'m> {
     // take `&mut self`?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitSet {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
+        use crate::context::CtxDisplay;
         self.circ.alloc.alloc_for_ty(ty)
     }
 }
@@ -141,6 +177,13 @@ impl BitSet {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.qbits.len() == 0 && self.cbits.len() == 0
+    }
+
+    // NOTE: this is not going to be very efficient at all, and these values
+    // will soon be overwritten. We could accomplish the same thing lazily, and
+    // could also use uninitialied memory.
     /// Create an uninitialized set of address bindings
     pub fn uninit(sz: &TypeSize) -> Self {
         Self {
@@ -152,6 +195,18 @@ impl BitSet {
     pub fn append(&mut self, other: &mut BitSet) {
         self.qbits.append(&mut other.qbits);
         self.cbits.append(&mut other.cbits);
+    }
+
+    pub fn copy_from_slice(&mut self, slice: &BitSetSlice) {
+        self.qbits.copy_from_slice(slice.qbits);
+        self.cbits.copy_from_slice(slice.cbits);
+    }
+
+    pub fn as_ref(&self) -> BitSetSlice {
+        BitSetSlice {
+            qbits: &self.qbits,
+            cbits: &self.cbits,
+        }
     }
 
     // NOTE I don't think this can actually be done with the Index trait without
@@ -177,6 +232,7 @@ impl BitSet {
     }
 }
 
+#[derive(Debug)]
 pub struct BitSetSlice<'a> {
     pub qbits: &'a [Addr],
     pub cbits: &'a [Addr],
