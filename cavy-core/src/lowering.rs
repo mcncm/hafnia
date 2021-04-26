@@ -300,6 +300,8 @@ pub struct GraphBuilder<'mir, 'ctx> {
     gamma: HashMap<NodeId, TyId>,
     /// The currently active basic block
     cursor: BlockId,
+    /// If the currently active scope is contained in an `unsafe` block
+    in_unsafe: bool,
     /// The type signatures of all functions in the MIR
     sigs: &'mir Store<FnId, TypedSig>,
     pub errors: ErrorBuf,
@@ -347,6 +349,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             tables,
             cursor,
             sigs,
+            in_unsafe: false,
             gamma: HashMap::new(),
             errors: ErrorBuf::new(),
         }
@@ -373,17 +376,20 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     // === Block-manipulating methods ===
 
-    fn push_stmt(&mut self, stmt: mir::Stmt) {
+    fn push_stmt(&mut self, span: Span, stmt: mir::StmtKind) {
+        let stmt = mir::Stmt {
+            span,
+            in_unsafe: self.in_unsafe,
+            kind: stmt,
+        };
         self.gr.push_stmt(self.cursor, stmt);
     }
 
     /// Push an assignment statement into the current basic block
     fn assn_stmt(&mut self, place: Place, rhs: Rvalue) {
-        let stmt = mir::Stmt {
-            span: rhs.span,
-            kind: mir::StmtKind::Assn(place, rhs),
-        };
-        self.push_stmt(stmt);
+        let span = rhs.span;
+        let stmt = mir::StmtKind::Assn(place, rhs);
+        self.push_stmt(span, stmt);
     }
 
     // NOTE: This is the only call site of `Graph::insert_block`, and it's only
@@ -402,14 +408,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// The partner of Parser::with_table at the next stage of the compilation
     /// pipeline.
-    fn with_table<T, F>(&mut self, new: TableId, f: F) -> Maybe<T>
+    fn with_scope<T, F>(&mut self, new: TableId, is_unsafe: bool, f: F) -> Maybe<T>
     where
         F: FnOnce(&mut Self) -> Maybe<T>,
     {
-        let old = self.table;
+        let old_table = self.table;
         self.table = new;
+        let old_unsafe = self.in_unsafe;
+        self.in_unsafe = is_unsafe;
         let restore = |this: &mut Self| {
-            this.table = old;
+            this.in_unsafe = old_unsafe;
+            this.table = old_table;
             this.st.pop_table();
         };
         self.st.push_table();
@@ -551,17 +560,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let left = self.operand_of(l_place);
         let right = self.operand_of(r_place);
 
-        let stmt = mir::Stmt {
-            span, // FIXME actually a different span
-            kind: mir::StmtKind::Assn(
-                place,
-                Rvalue {
-                    span,
-                    data: RvalueKind::BinOp(op.data, left, right),
-                },
-            ),
-        };
-        self.push_stmt(stmt);
+        let stmt = mir::StmtKind::Assn(
+            place,
+            Rvalue {
+                span,
+                data: RvalueKind::BinOp(op.data, left, right),
+            },
+        );
+        // FIXME: actually a different span
+        self.push_stmt(span, stmt);
         Ok(())
     }
 
@@ -583,11 +590,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             data: RvalueKind::UnOp(op.data, right),
         };
 
-        let stmt = mir::Stmt {
-            span, // FIXME actually a different span
-            kind: mir::StmtKind::Assn(place, rhs),
-        };
-        self.push_stmt(stmt);
+        // FIXME: actually a different span
+        self.push_stmt(span, mir::StmtKind::Assn(place, rhs));
         Ok(())
     }
 
@@ -595,17 +599,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_into_assn(&mut self, place: Place, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
-        let stmt = mir::Stmt {
-            span: Span::default(), // FIXME always wrong!
-            kind: mir::StmtKind::Assn(
-                place,
-                Rvalue {
-                    span: Span::default(), // ibid
-                    data: RvalueKind::Use(Operand::Const(Value::Unit)),
-                },
-            ),
-        };
-        self.push_stmt(stmt);
+        let span = Span::default(); // FIXME always wrong!
+        let stmt = mir::StmtKind::Assn(
+            place,
+            Rvalue {
+                span: Span::default(), // ibid
+                data: RvalueKind::Use(Operand::Const(Value::Unit)),
+            },
+        );
+        self.push_stmt(span, stmt);
 
         let lhs = match &lhs.data {
             // This unwrap *should* be safe because the name is validated during
@@ -772,7 +774,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: Place, block: &Block) -> Maybe<()> {
-        self.with_table(block.table, |this| {
+        self.with_scope(block.table, block.is_unsafe, |this| {
             Self::lower_into_block_inner(this, place, block)
         })
     }
@@ -990,11 +992,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                     place,
                     symb: name.data,
                 };
-                let stmt = mir::Stmt {
-                    span,
-                    kind: mir::StmtKind::Io(stmt),
-                };
-                self.push_stmt(stmt);
+                self.push_stmt(span, mir::StmtKind::Io(stmt));
                 Ok(())
             }
         }
@@ -1006,11 +1004,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let ty = self.type_expr(expr)?;
         let place = self.gr.auto_place(ty);
         self.lower_into(&place, expr)?;
-        let stmt = mir::Stmt {
-            span,
-            kind: mir::StmtKind::Assert(place),
-        };
-        self.push_stmt(stmt);
+        self.push_stmt(span, mir::StmtKind::Assert(place));
         Ok(())
     }
 

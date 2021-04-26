@@ -375,6 +375,7 @@ impl From<LocalId> for Place {
 #[derive(Debug)]
 pub struct Stmt {
     pub span: Span,
+    pub in_unsafe: bool,
     pub kind: StmtKind,
 }
 
