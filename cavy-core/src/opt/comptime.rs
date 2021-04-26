@@ -58,15 +58,9 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
             Some(&Value::Bool(true)) => blk.kind = BlockKind::Goto(blks[1]),
             _ => {}
         },
-        BlockKind::Call {
-            callee: _,
-            span: _,
-            ret: _,
-            ref mut args,
-            blk,
-        } => {
+        BlockKind::Call(call) => {
             // Replace args with compile-time evaluated ones
-            for arg in args.iter_mut() {
+            for arg in call.args.iter_mut() {
                 if let Operand::Copy(place) | Operand::Move(place) = arg {
                     if let Some(c) = interp.env.get(&place) {
                         *arg = Operand::Const(c.clone());
@@ -77,7 +71,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
             // This is a pretty critical missing component. For now we're not
             // going to do any compile-time evaluation even of purely classical
             // functions.
-            simpl_block(*blk, gr, interp);
+            simpl_block(call.blk, gr, interp);
         }
         crate::mir::BlockKind::Ret => {}
     }

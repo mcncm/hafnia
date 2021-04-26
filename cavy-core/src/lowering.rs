@@ -7,7 +7,7 @@ use crate::{
     ast::{self, StmtKind, *},
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
     context::{Context, CtxDisplay, SymbolId},
-    mir::{self, *},
+    mir::{self, FnCall, *},
     num::Uint,
     source::Span,
     store::Index,
@@ -377,9 +377,12 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // === Block-manipulating methods ===
 
     fn push_stmt(&mut self, span: Span, stmt: mir::StmtKind) {
+        let scope_data = ScopeData {
+            in_unsafe: self.in_unsafe,
+        };
         let stmt = mir::Stmt {
             span,
-            in_unsafe: self.in_unsafe,
+            scope_data,
             kind: stmt,
         };
         self.gr.push_stmt(self.cursor, stmt);
@@ -911,13 +914,17 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             .collect::<Result<Vec<_>, _>>()?;
 
         let tail_block = self.new_block();
-        let call = BlockKind::Call {
+        let scope_data = ScopeData {
+            in_unsafe: self.in_unsafe,
+        };
+        let call = BlockKind::Call(Box::new(FnCall {
             callee: func,
             args,
             ret: place,
             blk: tail_block,
+            scope_data,
             span,
-        };
+        }));
         self.set_terminator(call);
         self.cursor = tail_block;
         Ok(())

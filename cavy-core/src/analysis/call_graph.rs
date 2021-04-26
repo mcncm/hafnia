@@ -48,8 +48,8 @@ impl<'a> SummaryAnalysis for CallGraphAnalysis<'a> {
     fn trans_stmt(&mut self, _stmt: &crate::mir::Stmt, _loc: &GraphLoc) {}
 
     fn trans_block(&mut self, block: &BlockKind, _loc: &BlockId) {
-        if let BlockKind::Call { callee, span, .. } = block {
-            self.sites.insert(*callee, *span);
+        if let BlockKind::Call(call) = block {
+            self.sites.insert(call.callee, call.span);
         }
     }
 }

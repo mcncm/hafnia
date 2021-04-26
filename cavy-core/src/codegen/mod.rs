@@ -199,14 +199,8 @@ impl<'mir, 'ctx> LirBuilder<'mir, 'ctx> {
         match &blk.kind {
             BlockKind::Goto(blk) => self.translate_block(*blk),
             BlockKind::Switch { cond, blks } => self.translate_switch(cond, blks),
-            BlockKind::Call {
-                callee,
-                span: _,
-                args,
-                ret,
-                blk,
-            } => {
-                self.translate_call(*callee, args, ret, *blk);
+            BlockKind::Call(call) => {
+                self.translate_call(call.callee, &call.args, &call.ret, call.blk);
             }
             BlockKind::Ret => {}
         }

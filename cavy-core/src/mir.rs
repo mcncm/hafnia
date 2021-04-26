@@ -258,6 +258,13 @@ impl std::ops::IndexMut<BlockId> for Graph {
     }
 }
 
+/// Data about the scope in which some element is found. For now, this has only
+/// very little data in it.
+#[derive(Debug)]
+pub struct ScopeData {
+    pub in_unsafe: bool,
+}
+
 #[derive(Debug)]
 pub struct BasicBlock {
     /// The branch-free sequence of MIR statements within the basic block
@@ -291,7 +298,7 @@ impl BasicBlock {
         match &self.kind {
             BlockKind::Goto(blk) => std::slice::from_ref(blk),
             BlockKind::Switch { blks, .. } => &blks,
-            BlockKind::Call { blk, .. } => std::slice::from_ref(blk),
+            BlockKind::Call(call) => std::slice::from_ref(&call.blk),
             BlockKind::Ret => &[],
         }
     }
@@ -319,23 +326,30 @@ pub enum BlockKind {
     /// An n-way conditional jump.
     ///
     /// NOTE: this vec will *almost always* have only two elements. Is there a
-    /// lighter-weight alternative that could be used here? Smallvec might be an
-    /// option.
+    /// lighter-weight alternative that could be used here? `smallvec` might be
+    /// a good option.
     Switch { cond: Place, blks: Vec<BlockId> },
     /// A block ending in a function call
-    Call {
-        /// The function being called. This might not be the right type, in
-        /// particular if we introduce closures or other "callables".
-        callee: FnId,
-        /// The span of the function call
-        span: Span,
-        args: Vec<Operand>,
-        ret: Place,
-        /// The block to which the function returns
-        blk: BlockId,
-    },
+    Call(Box<FnCall>),
     /// A return
     Ret,
+}
+
+/// A CFG-level representation of a function call, which lives in a block tail
+#[derive(Debug)]
+pub struct FnCall {
+    /// The function being called. This might not be the right type, in
+    /// particular if we introduce closures or other "callables".
+    pub callee: FnId,
+    /// For now, this just says whether it's in an unsafe scope or not.
+    pub scope_data: ScopeData,
+    /// The span of the function call
+    pub span: Span,
+    pub args: Vec<Operand>,
+    /// the place to which the function returns
+    pub ret: Place,
+    /// The block to which the function returns
+    pub blk: BlockId,
 }
 
 #[derive(Debug)]
@@ -375,7 +389,7 @@ impl From<LocalId> for Place {
 #[derive(Debug)]
 pub struct Stmt {
     pub span: Span,
-    pub in_unsafe: bool,
+    pub scope_data: ScopeData,
     pub kind: StmtKind,
 }
 
@@ -509,22 +523,16 @@ impl fmt::Display for BlockKind {
                 });
                 f.write_str("];")
             }
-            BlockKind::Call {
-                callee,
-                args,
-                blk,
-                ret,
-                span: _,
-            } => {
-                write!(f, "{} = call {:?}(", ret, callee)?;
-                args.iter().fold(true, |first, arg| {
+            BlockKind::Call(call) => {
+                write!(f, "{} = call {:?}(", call.ret, call.callee)?;
+                call.args.iter().fold(true, |first, arg| {
                     if !first {
                         let _ = f.write_str(", ");
                     }
                     let _ = write!(f, "{}", arg);
                     false
                 });
-                write!(f, ") => {}", blk)
+                write!(f, ") => {}", call.blk)
             }
             BlockKind::Ret => f.write_str("return;"),
         }
