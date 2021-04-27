@@ -118,6 +118,41 @@ impl<'a> Interpreter<'a> {
 
     /// Run the interpreter, starting from its entry block.
     pub fn exec(mut self) -> CircuitBuf {
+        self.run();
+        self.circ.gate_buf
+    }
+
+    fn funcall(&mut self, call: &FnCall) {
+        let FnCall {
+            callee, args, ret, ..
+        } = call;
+        let gr = &self.mir.graphs[*callee];
+        let mut st = InterpreterState::new(gr, self.ctx);
+        // Copy local state
+        let mut locals = st.env.locals.idx_enumerate();
+        let (ret_local, _) = locals.next().unwrap();
+        for (arg, (arg_local, _)) in args.iter().zip(locals) {
+            let arg = match arg {
+                Operand::Const(_) => unreachable!(),
+                Operand::Copy(place) | Operand::Move(place) => place,
+            };
+
+            st.env.insert(&arg_local.into(), self.st.env.bits_at(&arg));
+        }
+        // New stack frame
+        std::mem::swap(&mut self.st, &mut st);
+        self.run();
+        // Restore interpreter state
+        std::mem::swap(&mut self.st, &mut st);
+        // Copy return value back
+        self.st.env.insert(ret, st.env.bits_at(&ret_local.into()));
+    }
+
+    fn pop_stack(&mut self) {
+        todo!();
+    }
+
+    pub fn run(&mut self) {
         let mut block_candidates = vec![];
         self.swap_blocks(&mut block_candidates);
         while !block_candidates.is_empty() {
@@ -126,7 +161,6 @@ impl<'a> Interpreter<'a> {
             }
             self.swap_blocks(&mut block_candidates);
         }
-        self.circ.gate_buf
     }
 
     fn swap_blocks(&mut self, other: &mut Vec<BlockId>) {
@@ -174,6 +208,16 @@ impl<'a> Interpreter<'a> {
     /// add more blocks to the candidates list
     fn terminate(&mut self, kind: &BlockKind) {
         // TODO: procedure calls: figure out calling convention
+        match kind {
+            BlockKind::Goto(_) => {}
+            BlockKind::Switch { .. } => {}
+            BlockKind::Call(call) => {
+                self.funcall(call);
+            }
+            BlockKind::Ret => {
+                return;
+            }
+        }
         // TODO: conditionals: add some conditions, I guess
         for succ in kind.successors() {
             if self.dfs_eligible(*succ) {

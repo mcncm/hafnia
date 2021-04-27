@@ -29,9 +29,8 @@ where
     }
 
     fn alloc_one(&mut self) -> Option<T> {
-        self.clean
-            .pop()
-            .or_else(|| self.dirty.pop_front().or_else(|| self.fresh.next()))
+        let bit = self.clean.pop().or_else(|| self.fresh.next());
+        bit
     }
 
     fn alloc(&mut self, n: usize) -> Vec<T> {
@@ -190,8 +189,8 @@ impl<'m> Interpreter<'m> {
     // take `&mut self`?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitSet {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
-        use crate::context::CtxDisplay;
-        self.circ.alloc.alloc_for_ty(ty)
+        let bitset = self.circ.alloc.alloc_for_ty(ty);
+        bitset
     }
 }
 

@@ -200,11 +200,11 @@ impl MaxBits for QGate {
 
 impl MaxBits for CGate {
     fn max_qbit(&self) -> Option<usize> {
-        self.cbits().iter().cloned().max()
+        self.qbits().iter().cloned().max()
     }
 
     fn max_cbit(&self) -> Option<usize> {
-        self.qbits().iter().cloned().max()
+        self.cbits().iter().cloned().max()
     }
 }
 
@@ -229,7 +229,7 @@ impl MaxBits for Inst {
             Inst::QInit(_) => None,
             Inst::QFree(_) => None,
             Inst::QGate(g) => g.max_cbit(),
-            Inst::CGate(g) => g.max_qbit(),
+            Inst::CGate(g) => g.max_cbit(),
             Inst::Meas(_, u) => Some(*u),
             Inst::Out(_) => todo!(),
         }
@@ -323,7 +323,7 @@ impl CircuitBuf {
         T: Into<Inst> + MaxBits,
     {
         self.max_qbit = self.max_qbit.max(g.max_qbit());
-        self.max_cbit = self.max_qbit.max(g.max_cbit());
+        self.max_cbit = self.max_cbit.max(g.max_cbit());
         self.insts.push(g.into());
     }
 }
