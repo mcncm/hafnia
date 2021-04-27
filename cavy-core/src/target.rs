@@ -92,7 +92,12 @@ pub mod qasm {
 
 /// The LaTeX backend, which uses quantikz.
 pub mod latex {
-    use crate::circuit;
+    use std::{
+        fmt,
+        ops::{Index, IndexMut, RangeInclusive},
+    };
+
+    use crate::circuit::{self, CGate, Inst, QGate};
 
     use super::*;
 
@@ -114,44 +119,133 @@ pub mod latex {
         }
     }
 
-    /// The three cell states in a common quantum circuit: in `Some(T)`, the
-    /// cell is occupied by a gate. In `None`, there is no gate or blocking
-    /// element. In `Blocked` there is no gate, but the cell is obstructed, as
-    /// by a vertical wire.
-    #[derive(Clone, PartialEq)]
-    enum LayoutState<T: Clone + PartialEq> {
-        Some(T),
-        None,
-        Blocked,
+    /// Whether or not a wire has a live bit on it. Note that *might* one day
+    /// want to be able to transform qubit wires into cbit wires for a more
+    /// visually appealing layout, so *each cell* has the possibility of `LiveQ`
+    /// or `LiveC`.
+    #[derive(Debug, Clone, Copy)]
+    enum Liveness {
+        // A live quantum wire
+        LiveQ,
+        // A live classical wire
+        LiveC,
+        // A dead wire
+        Dead,
     }
 
-    type Wire<T> = Vec<LayoutState<T>>;
+    // Let's just bring this into module scope; nothing will conflict with it.
+    use Liveness::*;
+
+    /// The three cell states in a common quantum circuit: in `Occupied(T)`, the
+    /// cell is occupied by a circuit elemen. In `Free`, there is no gate or
+    /// blocking element, and the wire may be live or dead. In `Blocked` there
+    /// is no gate, but the cell is obstructed, as by a vertical wire, and the
+    /// wire may be live or dead.
+    #[derive(Debug)]
+    enum LayoutState<T> {
+        Occupied(T),
+        Free(Liveness),
+        Blocked(Liveness),
+    }
+
+    // And let's bring this into module scope, too.
+    use LayoutState::*;
+
+    /// The kinds of elements that will occupy our circuit
+    #[derive(Debug)]
+    #[rustfmt::skip]
+    enum Elem {
+        // Quantum gates
+        X, Z, H, T, TDag,
+        // A control label
+        Ctrl(isize),
+        // A control target
+        Targ,
+        // A meter
+        Meter,
+        // A label for IO data
+        IoLabel(Box<IoLabelData>),
+    }
+
+    #[derive(Debug)]
+    struct IoLabelData {
+        /// The name of the IO object being written to
+        name: String,
+        /// The index within the IO object being output to
+        elem: usize,
+    }
+
+    impl fmt::Display for Elem {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            use Elem::*;
+            match self {
+                X => f.write_str(r"\gate{X}"),
+                Z => f.write_str(r"\gate{Z}"),
+                H => f.write_str(r"\gate{H}"),
+                T => f.write_str(r"\gate{T}"),
+                TDag => f.write_str(r"\gate{T^\dag}"),
+                Ctrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
+                Targ => f.write_str(r"\targ{}"),
+                Meter => f.write_str(r"\meter{}"),
+                IoLabel(io) => write!(f, "\\push{{ \\tt {}[{}] }}", io.name, io.elem),
+            }
+        }
+    }
+
+    /// The circuit, as we build it, will be composed of a vector of `Wire`s
+    struct Wire {
+        cells: Vec<LayoutState<Elem>>,
+        /// On each wire, the index of the first `Free` cell, of which there is
+        /// guaranteed to be at least one.
+        first_free: usize,
+        /// The current liveness state, for new cells
+        liveness: Liveness,
+    }
+
+    impl Wire {
+        fn new() -> Self {
+            Self {
+                cells: vec![Blocked(LiveQ), Free(LiveQ)],
+                first_free: 1,
+                liveness: LiveQ,
+            }
+        }
+
+        fn len(&self) -> usize {
+            self.cells.len()
+        }
+    }
+
+    impl Index<usize> for Wire {
+        type Output = LayoutState<Elem>;
+
+        fn index(&self, index: usize) -> &Self::Output {
+            &self.cells[index]
+        }
+    }
+
+    impl IndexMut<usize> for Wire {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            &mut self.cells[index]
+        }
+    }
 
     /// A private struct used by the Latex backend to lay out the circuit
     /// representation. The index order is space-major, because this should have
     /// better locality of reference, and easier to serialize without an extra
     /// allocation.
     struct LayoutArray {
-        arr: Vec<Wire<String>>,
-        /// On each wire, the index of the first `None` cell, of which there is
-        /// guaranteed to be at least one.
-        first_free: Vec<usize>,
+        /// The wire array itself
+        arr: Vec<Wire>,
+        /// The index of the first classical wire
+        cwire: usize,
+        // NOTE: Might want an auxiliary data structure to track blocked columns
     }
 
     impl LayoutArray {
-        /// Construct a wire in the initial state
-        fn new_wire() -> Wire<String> {
-            vec![LayoutState::Blocked, LayoutState::None]
-        }
-
-        /// Construct a wire without any gates at the current length
-        fn empty_wire(&self) -> Wire<String> {
-            let mut wire = Self::new_wire();
-            wire.extend(std::iter::repeat(LayoutState::None).take(self.len() - wire.len()));
-            wire
-        }
-
-        fn new(wires: usize) -> Self {
+        /// It only makes sense to construct a LaTeX circuit from a finite
+        /// circuit of known size.
+        fn new(qwires: usize, cwires: usize) -> Self {
             // Start with length at least one. It will be an invariant of this
             // data structure that there is always an empty final moment. This
             // final moment will provide the terminal $\qw$ on each wire.
@@ -161,14 +255,13 @@ pub mod latex {
             //
             // It is also an invariant that there's at least one wire, that
             // should be enforced by `new`, although it isn't yet in a *natural* way.
-            assert!(wires > 0);
-            Self {
-                arr: vec![Self::new_wire(); wires],
-                first_free: vec![1; wires],
-            }
+            assert!(qwires + cwires > 0);
+            let arr = std::iter::repeat_with(|| Wire::new())
+                .take(qwires + cwires)
+                .collect();
+            Self { arr, cwire: qwires }
         }
 
-        #[inline(always)]
         fn wires(&self) -> usize {
             // This is safe because we’re always guaranteed to contain at least
             // one moment.
@@ -178,14 +271,12 @@ pub mod latex {
         // NOTE: Is it really necessary to maintain the invariant that all the
         // wires are the same length at all times? We do extra work checking for
         // empty moments on wires.
-        #[inline(always)]
         fn add_moment(&mut self) {
             for wire in self.arr.iter_mut() {
-                wire.push(LayoutState::None);
+                wire.cells.push(Free(wire.liveness));
             }
         }
 
-        #[inline(always)]
         fn len(&self) -> usize {
             self.arr[0].len()
         }
@@ -194,84 +285,84 @@ pub mod latex {
             self.arr.len()
         }
 
-        /// Widen to the argument if the diagram is currently too narrow
-        fn widen_to(&mut self, wire: usize) {
-            let new_width = wire + 1;
-            let diff = new_width.saturating_sub(self.width());
-            self.arr.extend(vec![self.empty_wire(); diff]);
-            self.first_free.extend(std::iter::repeat(1).take(diff));
-        }
-
         fn push_inst(&mut self, inst: circuit::Inst) {
-            use circuit::Inst::*;
             match inst {
-                QGate(g) => self.push_gate(g),
-                Meas(src, _tgt) => self.insert_single(src, r"\meter{}".to_string()),
-                Out(e) => {
-                    // *very* provisional; this will be really ugly in practice
-                    // if there’s ever an `ext` in the middle of a circuit
-                    let name = Latex::escape(&e.name);
-                    let label = format!("\\push{{ \\tt {}[{}] }}", name, e.elem);
-                    self.insert_single(e.addr, label)
-                }
-                _ => todo!(),
+                Inst::CInit(_) => {}
+                Inst::CFree(_) => {}
+                Inst::QInit(_) => {}
+                Inst::QFree(_) => {}
+                Inst::QGate(g) => self.push_qgate(g),
+                Inst::CGate(g) => self.push_cgate(g),
+                Inst::Meas(s, t) => self.push_meas(s, t),
+                Inst::Out(io) => self.push_io_out(&io),
             }
         }
 
-        #[rustfmt::skip]
-        fn push_gate(&mut self, gate: circuit::QGate) {
-            use crate::circuit::QGate::*;
-            match gate {
-                X(tgt)            => self.insert_single(tgt, r"\gate{X}".to_string()),
-                T { tgt, conj }   => self.insert_single(tgt, {
+        fn push_qgate(&mut self, gate: QGate) {
+            use QGate::*;
+            let (wire, elem) = match gate {
+                X(u) => (u, Elem::X),
+                T { tgt, conj } => {
                     if conj {
-                        r"\gate{T^\dag}".to_string()
+                        (tgt, Elem::TDag)
                     } else {
-                        r"\gate{T}".to_string()
+                        (tgt, Elem::T)
                     }
-                }),
-                H(tgt)            => self.insert_single(tgt, r"\gate{H}".to_string()),
-                Z(tgt)            => self.insert_single(tgt, r"\gate{Z}".to_string()),
-                CX { ctrl, tgt }  => {
-                    let dist = (tgt as isize) - (ctrl as isize);
-                    let ctrl_label = format!(r"\ctrl{{{}}}", dist);
-                    let ctrl = (ctrl, ctrl_label);
-                    let tgt = (tgt, r"\targ{}".to_string());
-                    self.insert_multiple(vec![ctrl, tgt]);
                 }
-                SWAP { .. }       => todo!(),
-            }
+                H(u) => (u, Elem::H),
+                Z(u) => (u, Elem::Z),
+                CX { ctrl, tgt } => {
+                    let dist = (tgt as isize) - (ctrl as isize);
+                    let ctrl = (ctrl, Elem::Ctrl(dist));
+                    let tgt = (tgt, Elem::Targ);
+                    self.insert_multiple(vec![ctrl, tgt]);
+                    return;
+                }
+                SWAP { .. } => todo!(),
+            };
+            self.insert_single(wire, elem);
         }
 
-        fn insert_single(&mut self, wire: usize, gate: String) {
-            // Accomodate the new wire, if new allocations must be made
-            self.widen_to(wire);
+        fn push_cgate(&mut self, _gate: CGate) {
+            todo!()
+        }
 
-            let mut moment = self.first_free[wire];
-            self.arr[wire][moment] = LayoutState::Some(gate);
+        fn push_meas(&mut self, _src: usize, _tgt: usize) {
+            todo!()
+        }
 
-            while moment < self.len() - 1 {
+        fn push_io_out(&mut self, _io: &circuit::IoOutGate) {
+            todo!()
+        }
+
+        fn insert_single(&mut self, wire: usize, elem: Elem) {
+            let arr_len = self.len(); // compute first for borrowck
+            let wire = &mut self.arr[wire];
+            let mut moment = wire.first_free;
+            wire[moment] = LayoutState::Occupied(elem);
+
+            while moment < arr_len - 1 {
                 moment += 1;
-                if self.arr[wire][moment] == LayoutState::None {
-                    self.first_free[wire] = moment;
+                if let Free(_) = wire[moment] {
+                    wire.first_free = moment;
                     return;
                 }
             }
 
             // There are no empty cells on this wire!
+            wire.first_free = arr_len;
             self.add_moment();
-            self.first_free[wire] = self.len() - 1;
         }
 
         /// Returns true if and only if the range of wires between `lower` and
         /// `upper` (inclusive!) is all free.
-        fn range_free(&self, moment: usize, range: std::ops::RangeInclusive<usize>) -> bool {
+        fn range_free(&self, moment: usize, range: RangeInclusive<usize>) -> bool {
             self.arr[range]
                 .iter()
-                .all(|wire| wire[moment] == LayoutState::None)
+                .all(|wire| matches!(wire[moment], Free(_)))
         }
 
-        fn insert_multiple(&mut self, gates: Vec<(usize, String)>) {
+        fn insert_multiple(&mut self, elems: Vec<(usize, Elem)>) {
             // FIXME This method is pretty unweildy and inelegant. It still
             // doesn't always find the optimal layout, and its asymptotic isn't
             // great. There's probably a lovely dynamic programming algorithm
@@ -280,11 +371,8 @@ pub mod latex {
             // NOTE: is there a single iterator
             // adapter in the standard library for getting both the min and max
             // in one go?
-            let min = *gates.iter().map(|(wire, _)| wire).min().unwrap();
-            let max = *gates.iter().map(|(wire, _)| wire).max().unwrap();
-
-            // Accomodate for the highest wire index
-            self.widen_to(max);
+            let min = *elems.iter().map(|(wire, _)| wire).min().unwrap();
+            let max = *elems.iter().map(|(wire, _)| wire).max().unwrap();
 
             // If the last moment isn't free, we’ll have to add another one.
             let moment = if !self.range_free(self.len() - 1, min..=max) {
@@ -308,9 +396,10 @@ pub mod latex {
                 self.add_moment()
             }
 
-            for (wire, gate) in gates.into_iter() {
-                self.arr[wire][moment] = LayoutState::Some(gate);
-                self.first_free[wire] = moment + 1;
+            for (wire, elem) in elems.into_iter() {
+                let wire = &mut self.arr[wire];
+                wire[moment] = Occupied(elem);
+                wire.first_free = moment + 1;
             }
 
             // We'll also do this suboptimally: we'll do a second pass
@@ -319,32 +408,77 @@ pub mod latex {
             // that the range is *ex*clusive, because we can’t have the
             // ends of a CNOT being free.
             for wire in (min + 1)..max {
-                if self.arr[wire][moment] == LayoutState::None {
-                    self.arr[wire][moment] = LayoutState::Blocked;
-                    if self.first_free[wire] == moment {
-                        self.first_free[wire] += 1;
+                let wire = &mut self.arr[wire];
+                if let Free(ln) = wire[moment] {
+                    wire[moment] = Blocked(ln);
+                    if wire.first_free == moment {
+                        wire.first_free += 1;
                     }
                 }
             }
         }
     }
 
+    impl fmt::Display for LayoutState<Elem> {
+        #[rustfmt::skip]
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Occupied(elem) => write!(f, "{}", elem),
+                Free(Dead)  | Blocked(Dead)  => f.write_str(" "),
+                Free(LiveQ) | Blocked(LiveQ) => f.write_str(r"\qw"),
+                Free(LiveC) | Blocked(LiveC) => todo!(),
+            }
+        }
+    }
+
+    // let cells = self.cells.iter();
+    // if let Some(elem) = cells.next() {
+    //     write!(f, "{}", cells.next())?;
+    // }
+    // for cell in cells {
+    //     write!(f, "& {}", cell)?;
+    // }
+    // Ok(())
+    impl fmt::Display for Wire {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if let Some((last, head)) = &self.cells.split_last() {
+                for cell in head.iter() {
+                    // Prev comment: "must not be a raw string"; why?
+                    write!(f, "{} & ", cell)?;
+                }
+                write!(f, "{} ", last)?;
+            }
+            Ok(())
+        }
+    }
+
+    impl fmt::Display for LayoutArray {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if let Some((last, head)) = &self.arr.split_last() {
+                for wire in head.iter() {
+                    // Prev comment: "must not be a raw string"; why?
+                    write!(f, "{}\\\\\n", wire)?;
+                }
+                write!(f, "{}\n", last)?;
+            }
+            Ok(())
+        }
+    }
+
     impl IntoTarget<Latex> for LayoutArray {
-        fn into_target(self, _target: &Latex) -> String {
-            self.arr
-                .iter()
-                .map(|wire| {
-                    wire.iter()
-                        .map(|gate| match gate {
-                            LayoutState::Some(gate) => gate,
-                            _ => r"\qw",
-                        })
-                        .collect::<Vec<&str>>()
-                        .join(" & ")
-                })
-                .collect::<Vec<String>>()
-                // Must not be a raw string; we really want to emit a newline!
-                .join(" \\\\\n")
+        fn into_target(self, target: &Latex) -> String {
+            if target.standalone {
+                format!(
+                    "{}{}{}{}{}",
+                    Latex::HEADER,
+                    Latex::ENV_BEGIN,
+                    self,
+                    Latex::ENV_END,
+                    Latex::FOOTER,
+                )
+            } else {
+                format!("{}{}{}", Latex::ENV_BEGIN, self, Latex::ENV_END)
+            }
         }
     }
 
@@ -354,42 +488,30 @@ pub mod latex {
 \usetikzlibrary{quantikz}
 \usepackage[T1]{fontenc}
 \begin{document}
-\begin{quantikz}
 ";
 
-        const FOOTER: &'static str = r"
-\end{quantikz}
-\end{document}
+        const FOOTER: &'static str = r"\end{document}
 ";
 
-        fn diagram(&self, circuit: circuit::CircuitBuf) -> String {
-            // TODO: [PERF] could track width more carefully to do all
-            // allocations at once
+        const ENV_BEGIN: &'static str = r"\begin{quantikz}
+";
 
-            // FIXME: this data structure currently assumes that its with is
-            // *always* > 0; check the assertion in `new`. It could be nice to
-            // remove that restriction.
-            let mut layout_array = LayoutArray::new(1);
-
-            for inst in circuit.into_iter() {
-                layout_array.push_inst(inst);
-            }
-
-            layout_array.into_target(self)
-        }
+        const ENV_END: &'static str = r"\end{quantikz}
+";
     }
 
     impl Target for Latex {
         #[rustfmt::skip]
         fn from(&self, circ: CircuitBuf) -> ObjectCode {
-            let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
-            let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
-            format!(
-                r"{}{}{}",
-                header,
-                self.diagram(circ),
-                footer
-            )
+            let qbits = circ.qbit_size.unwrap_or(1);
+            let cbits = circ.qbit_size.unwrap_or(0);
+            let mut layout_array = LayoutArray::new(qbits, cbits);
+
+            for inst in circ.into_iter() {
+                layout_array.push_inst(inst);
+            }
+
+            layout_array.into_target(self)
         }
     }
 }
