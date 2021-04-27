@@ -195,6 +195,8 @@ impl<'m> Interpreter<'m> {
     }
 }
 
+// NOTE: it has already caused some slight problems that these are untyped. It
+// might really make sense to wrap them.
 /// A quantum or classical bit address
 pub type Addr = usize;
 

@@ -73,12 +73,11 @@ pub mod qasm {
     impl IntoTarget<Qasm> for crate::circuit::CircuitBuf {
         fn into_target(self, target: &Qasm) -> String {
             let declaration = {
-                if let Some(max_qubit) = self.max_qubit() {
-                    let qubits = max_qubit + 1;
-                    format!("qreg q[{}];\ncreg c[{}];", qubits, qubits)
-                } else {
-                    String::new()
-                }
+                format!(
+                    "qreg q[{}];\ncreg c[{}];",
+                    self.qbit_size(),
+                    self.cbit_size()
+                )
             };
             let gates = self
                 .into_iter()
@@ -157,12 +156,12 @@ pub mod latex {
     enum Elem {
         // Quantum gates
         X, Z, H, T, TDag,
-        // A control label
+        // A control label with a distance to its target
         Ctrl(isize),
         // A control target
         Targ,
-        // A meter
-        Meter,
+        // A meter with an optional distance to its target
+        Meter(Option<isize>),
         // A label for IO data
         IoLabel(Box<IoLabelData>),
     }
@@ -186,7 +185,13 @@ pub mod latex {
                 TDag => f.write_str(r"\gate{T^\dag}"),
                 Ctrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
                 Targ => f.write_str(r"\targ{}"),
-                Meter => f.write_str(r"\meter{}"),
+                Meter(targ) => {
+                    f.write_str(r"\meter{}")?;
+                    if let Some(dist) = targ {
+                        write!(f, r" \vcw{{{}}}", dist)?;
+                    }
+                    Ok(())
+                }
                 IoLabel(io) => write!(f, "\\push{{ \\tt {}[{}] }}", io.name, io.elem),
             }
         }
@@ -205,7 +210,7 @@ pub mod latex {
     impl Wire {
         fn new() -> Self {
             Self {
-                cells: vec![Blocked(LiveQ), Free(LiveQ)],
+                cells: vec![Blocked(Dead), Free(Dead)],
                 first_free: 1,
                 liveness: LiveQ,
             }
@@ -234,18 +239,20 @@ pub mod latex {
     /// representation. The index order is space-major, because this should have
     /// better locality of reference, and easier to serialize without an extra
     /// allocation.
-    struct LayoutArray {
+    struct LayoutArray<'l> {
+        /// The target spec
+        latex: &'l Latex,
         /// The wire array itself
-        arr: Vec<Wire>,
+        wires: Vec<Wire>,
         /// The index of the first classical wire
-        cwire: usize,
+        fst_cwire: usize,
         // NOTE: Might want an auxiliary data structure to track blocked columns
     }
 
-    impl LayoutArray {
+    impl<'l> LayoutArray<'l> {
         /// It only makes sense to construct a LaTeX circuit from a finite
         /// circuit of known size.
-        fn new(qwires: usize, cwires: usize) -> Self {
+        fn new(latex: &'l Latex, qwires: usize, cwires: usize) -> Self {
             // Start with length at least one. It will be an invariant of this
             // data structure that there is always an empty final moment. This
             // final moment will provide the terminal $\qw$ on each wire.
@@ -256,33 +263,50 @@ pub mod latex {
             // It is also an invariant that there's at least one wire, that
             // should be enforced by `new`, although it isn't yet in a *natural* way.
             assert!(qwires + cwires > 0);
-            let arr = std::iter::repeat_with(|| Wire::new())
+            let wires = std::iter::repeat_with(|| Wire::new())
                 .take(qwires + cwires)
                 .collect();
-            Self { arr, cwire: qwires }
-        }
-
-        fn wires(&self) -> usize {
-            // This is safe because we’re always guaranteed to contain at least
-            // one moment.
-            self.arr.len()
+            Self {
+                latex,
+                wires,
+                fst_cwire: qwires,
+            }
         }
 
         // NOTE: Is it really necessary to maintain the invariant that all the
         // wires are the same length at all times? We do extra work checking for
         // empty moments on wires.
         fn add_moment(&mut self) {
-            for wire in self.arr.iter_mut() {
+            for wire in self.wires.iter_mut() {
                 wire.cells.push(Free(wire.liveness));
             }
         }
 
         fn len(&self) -> usize {
-            self.arr[0].len()
+            self.wires[0].len()
         }
 
         fn width(&self) -> usize {
-            self.arr.len()
+            self.wires.len()
+        }
+
+        /// Translate from qwire address to absolute address
+        #[inline(always)]
+        fn qwire(&self, wire: usize) -> usize {
+            wire
+        }
+
+        /// Translate from cwire address to absolute address
+        #[inline(always)]
+        fn cwire(&self, wire: usize) -> usize {
+            wire + self.fst_cwire
+        }
+
+        /// How quantikz expects distances to be calculated. Here, `src` denotes
+        /// e.g. the source of a control operation; `tgt` denotes its target.
+        #[inline(always)]
+        fn dist(src: usize, tgt: usize) -> isize {
+            (tgt as isize) - (src as isize)
         }
 
         fn push_inst(&mut self, inst: circuit::Inst) {
@@ -293,7 +317,7 @@ pub mod latex {
                 Inst::QFree(_) => {}
                 Inst::QGate(g) => self.push_qgate(g),
                 Inst::CGate(g) => self.push_cgate(g),
-                Inst::Meas(s, t) => self.push_meas(s, t),
+                Inst::Meas(s, t) => self.push_meas(self.qwire(s), self.cwire(t)),
                 Inst::Out(io) => self.push_io_out(&io),
             }
         }
@@ -312,7 +336,7 @@ pub mod latex {
                 H(u) => (u, Elem::H),
                 Z(u) => (u, Elem::Z),
                 CX { ctrl, tgt } => {
-                    let dist = (tgt as isize) - (ctrl as isize);
+                    let dist = Self::dist(ctrl, tgt);
                     let ctrl = (ctrl, Elem::Ctrl(dist));
                     let tgt = (tgt, Elem::Targ);
                     self.insert_multiple(vec![ctrl, tgt]);
@@ -320,15 +344,31 @@ pub mod latex {
                 }
                 SWAP { .. } => todo!(),
             };
+            let wire = self.qwire(wire);
+            self.wires[wire].liveness = LiveQ;
             self.insert_single(wire, elem);
         }
 
-        fn push_cgate(&mut self, _gate: CGate) {
-            todo!()
+        fn push_cgate(&mut self, gate: CGate) {
+            use CGate::*;
+            let (wire, elem) = match gate {
+                Not(u) => (u, Elem::Targ),
+                Copy(_, _) => todo!(),
+                Cnot(_, _) => todo!(),
+                Control(_, _) => todo!(),
+            };
+            let wire = self.cwire(wire);
+            self.wires[wire].liveness = LiveC;
+            self.insert_single(wire, elem);
         }
 
-        fn push_meas(&mut self, _src: usize, _tgt: usize) {
-            todo!()
+        fn push_meas(&mut self, src: usize, tgt: usize) {
+            let dist = Self::dist(src, tgt);
+            self.wires[tgt].liveness = LiveC;
+            self.wires[src].liveness = Dead;
+            let src = (src, Elem::Meter(Some(dist)));
+            let tgt = (tgt, Elem::Targ);
+            self.insert_multiple(vec![src, tgt])
         }
 
         fn push_io_out(&mut self, _io: &circuit::IoOutGate) {
@@ -337,7 +377,7 @@ pub mod latex {
 
         fn insert_single(&mut self, wire: usize, elem: Elem) {
             let arr_len = self.len(); // compute first for borrowck
-            let wire = &mut self.arr[wire];
+            let wire = &mut self.wires[wire];
             let mut moment = wire.first_free;
             wire[moment] = LayoutState::Occupied(elem);
 
@@ -357,7 +397,7 @@ pub mod latex {
         /// Returns true if and only if the range of wires between `lower` and
         /// `upper` (inclusive!) is all free.
         fn range_free(&self, moment: usize, range: RangeInclusive<usize>) -> bool {
-            self.arr[range]
+            self.wires[range]
                 .iter()
                 .all(|wire| matches!(wire[moment], Free(_)))
         }
@@ -397,7 +437,7 @@ pub mod latex {
             }
 
             for (wire, elem) in elems.into_iter() {
-                let wire = &mut self.arr[wire];
+                let wire = &mut self.wires[wire];
                 wire[moment] = Occupied(elem);
                 wire.first_free = moment + 1;
             }
@@ -408,7 +448,7 @@ pub mod latex {
             // that the range is *ex*clusive, because we can’t have the
             // ends of a CNOT being free.
             for wire in (min + 1)..max {
-                let wire = &mut self.arr[wire];
+                let wire = &mut self.wires[wire];
                 if let Free(ln) = wire[moment] {
                     wire[moment] = Blocked(ln);
                     if wire.first_free == moment {
@@ -426,7 +466,7 @@ pub mod latex {
                 Occupied(elem) => write!(f, "{}", elem),
                 Free(Dead)  | Blocked(Dead)  => f.write_str(" "),
                 Free(LiveQ) | Blocked(LiveQ) => f.write_str(r"\qw"),
-                Free(LiveC) | Blocked(LiveC) => todo!(),
+                Free(LiveC) | Blocked(LiveC) => f.write_str(r"\cw"),
             }
         }
     }
@@ -452,33 +492,29 @@ pub mod latex {
         }
     }
 
-    impl fmt::Display for LayoutArray {
+    impl fmt::Display for LayoutArray<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            if let Some((last, head)) = &self.arr.split_last() {
+            if self.latex.standalone {
+                writeln!(f, "{}", Latex::HEADER)?;
+            }
+            writeln!(f, "{}", Latex::BEGIN_ENV)?;
+            if let Some((last, head)) = &self.wires.split_last() {
                 for wire in head.iter() {
-                    // Prev comment: "must not be a raw string"; why?
-                    write!(f, "{}\\\\\n", wire)?;
+                    writeln!(f, "{}\\\\", wire)?;
                 }
-                write!(f, "{}\n", last)?;
+                writeln!(f, "{}", last)?;
+            }
+            writeln!(f, "{}", Latex::END_ENV)?;
+            if self.latex.standalone {
+                writeln!(f, "{}", Latex::FOOTER)?;
             }
             Ok(())
         }
     }
 
-    impl IntoTarget<Latex> for LayoutArray {
-        fn into_target(self, target: &Latex) -> String {
-            if target.standalone {
-                format!(
-                    "{}{}{}{}{}",
-                    Latex::HEADER,
-                    Latex::ENV_BEGIN,
-                    self,
-                    Latex::ENV_END,
-                    Latex::FOOTER,
-                )
-            } else {
-                format!("{}{}{}", Latex::ENV_BEGIN, self, Latex::ENV_END)
-            }
+    impl IntoTarget<Latex> for LayoutArray<'_> {
+        fn into_target(self, _target: &Latex) -> String {
+            format!("{}", self)
         }
     }
 
@@ -487,25 +523,21 @@ pub mod latex {
 \usepackage{tikz}
 \usetikzlibrary{quantikz}
 \usepackage[T1]{fontenc}
-\begin{document}
-";
+\begin{document}";
 
-        const FOOTER: &'static str = r"\end{document}
-";
+        const FOOTER: &'static str = r"\end{document}";
 
-        const ENV_BEGIN: &'static str = r"\begin{quantikz}
-";
+        const BEGIN_ENV: &'static str = r"\begin{quantikz}";
 
-        const ENV_END: &'static str = r"\end{quantikz}
-";
+        const END_ENV: &'static str = r"\end{quantikz}";
     }
 
     impl Target for Latex {
         #[rustfmt::skip]
         fn from(&self, circ: CircuitBuf) -> ObjectCode {
-            let qbits = circ.qbit_size.unwrap_or(1);
-            let cbits = circ.qbit_size.unwrap_or(0);
-            let mut layout_array = LayoutArray::new(qbits, cbits);
+            let qbits = circ.qbit_size();
+            let cbits = circ.cbit_size();
+            let mut layout_array = LayoutArray::new(self, qbits, cbits);
 
             for inst in circ.into_iter() {
                 layout_array.push_inst(inst);

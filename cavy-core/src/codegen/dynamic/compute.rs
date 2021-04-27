@@ -1,6 +1,11 @@
 #![allow(unused_variables)]
 
-use crate::{ast::UnOpKind, mir::Operand, values::Value};
+use crate::{
+    ast::UnOpKind,
+    circuit::{CGate, QGate},
+    mir::Operand,
+    values::Value,
+};
 
 use super::{gates, mem::BitSetSlice, *};
 
@@ -33,7 +38,7 @@ impl<'m> Interpreter<'m> {
         for (i, b) in value.bits().iter().enumerate() {
             if *b {
                 let addr = allocation.qbits[i];
-                self.circ.push(QGate::X(addr), &self.st);
+                self.circ.push_qgate(QGate::X(addr), &self.st);
             }
         }
         allocation
@@ -52,14 +57,17 @@ impl<'m> Interpreter<'m> {
         }
     }
 
-    fn compute_unop(&mut self, place: &Place, op: &UnOpKind, right: &Operand) {
+    fn compute_unop(&mut self, lplace: &Place, op: &UnOpKind, right: &Operand) {
         let bitset = match op {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
                 let rplace = self.unwrap_operand(right);
                 let bits = self.st.env.bits_at(rplace);
                 for addr in bits.qbits {
-                    self.circ.push(QGate::X(*addr), &self.st);
+                    self.circ.push_qgate(QGate::X(*addr), &self.st);
+                }
+                for addr in bits.cbits {
+                    self.circ.push_cgate(CGate::Not(*addr), &self.st);
                 }
                 bits
             }
@@ -67,15 +75,15 @@ impl<'m> Interpreter<'m> {
                 let rplace = self.unwrap_operand(right);
                 let bits = self.st.env.bits_at(rplace);
                 for addr in bits.qbits {
-                    self.circ.push(QGate::H(*addr), &self.st);
+                    self.circ.push_qgate(QGate::H(*addr), &self.st);
                 }
                 bits
             }
             UnOpKind::Linear => {
                 match right {
                     Operand::Const(value) => {
-                        let allocation = self.initialize(place, value);
-                        self.st.env.insert(place, allocation.as_ref());
+                        let allocation = self.initialize(lplace, value);
+                        self.st.env.insert(lplace, allocation.as_ref());
                     }
                     Operand::Copy(_) => {
                         unimplemented!("Classical feedback not yet implemented")
@@ -89,9 +97,10 @@ impl<'m> Interpreter<'m> {
             }
             UnOpKind::Delin => {
                 let rplace = self.unwrap_operand(right);
-                let bits = self.st.env.bits_at(rplace);
-                self.circ.meas(bits.qbits, bits.cbits, &self.st);
-                bits
+                let rbits = self.st.env.bits_at(rplace);
+                let lbits = self.st.env.bits_at(lplace);
+                self.circ.meas(lbits.cbits, rbits.qbits, &self.st);
+                return;
             }
         };
     }

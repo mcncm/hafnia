@@ -220,21 +220,31 @@ impl IntoTarget<Qasm> for Inst {
 #[derive(Debug)]
 pub struct CircuitBuf {
     insts: Vec<Inst>,
-    pub qbit_size: Option<usize>,
-    pub cbit_size: Option<usize>,
+    max_qbit: Option<usize>,
+    max_cbit: Option<usize>,
 }
 
 impl CircuitBuf {
     pub fn new() -> Self {
         Self {
             insts: Vec::new(),
-            qbit_size: None,
-            cbit_size: None,
+            max_qbit: None,
+            max_cbit: None,
         }
     }
 
-    pub fn max_qubit(&self) -> Option<usize> {
-        self.qbit_size
+    pub fn qbit_size(&self) -> usize {
+        match self.max_qbit {
+            Some(n) => n + 1,
+            None => 0,
+        }
+    }
+
+    pub fn cbit_size(&self) -> usize {
+        match self.max_cbit {
+            Some(n) => n + 1,
+            None => 0,
+        }
     }
 
     pub fn into_iter(self) -> CircuitStream {
@@ -252,7 +262,7 @@ pub trait PushInst<G> {
 impl PushInst<QGate> for CircuitBuf {
     fn push(&mut self, g: QGate) {
         let gate_max_qbit = g.qbits().iter().copied().max();
-        self.qbit_size = self.qbit_size.max(gate_max_qbit);
+        self.max_qbit = self.max_qbit.max(gate_max_qbit);
         self.insts.push(Inst::QGate(g));
     }
 }
@@ -260,10 +270,10 @@ impl PushInst<QGate> for CircuitBuf {
 impl PushInst<CGate> for CircuitBuf {
     fn push(&mut self, g: CGate) {
         let gate_max_cbit = g.cbits().iter().copied().max();
-        self.cbit_size = self.cbit_size.max(gate_max_cbit);
+        self.max_cbit = self.max_cbit.max(gate_max_cbit);
 
         let gate_max_qbit = g.qbits().iter().copied().max();
-        self.qbit_size = self.cbit_size.max(gate_max_qbit);
+        self.max_qbit = self.max_qbit.max(gate_max_qbit);
 
         self.insts.push(Inst::CGate(g));
     }
