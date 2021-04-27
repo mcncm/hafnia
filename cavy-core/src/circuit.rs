@@ -183,6 +183,71 @@ impl QGate {
     }
 }
 
+pub trait MaxBits {
+    fn max_qbit(&self) -> Option<usize>;
+    fn max_cbit(&self) -> Option<usize>;
+}
+
+impl MaxBits for QGate {
+    fn max_qbit(&self) -> Option<usize> {
+        self.qbits().iter().cloned().max()
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        None
+    }
+}
+
+impl MaxBits for CGate {
+    fn max_qbit(&self) -> Option<usize> {
+        self.cbits().iter().cloned().max()
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        self.qbits().iter().cloned().max()
+    }
+}
+
+impl MaxBits for Inst {
+    fn max_qbit(&self) -> Option<usize> {
+        match self {
+            Inst::CInit(_) => None,
+            Inst::CFree(_) => None,
+            Inst::QInit(u) => Some(*u),
+            Inst::QFree(u) => Some(*u),
+            Inst::QGate(g) => g.max_qbit(),
+            Inst::CGate(g) => g.max_qbit(),
+            Inst::Meas(u, _) => Some(*u),
+            Inst::Out(_) => todo!(),
+        }
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        match self {
+            Inst::CInit(u) => Some(*u),
+            Inst::CFree(u) => Some(*u),
+            Inst::QInit(_) => None,
+            Inst::QFree(_) => None,
+            Inst::QGate(g) => g.max_cbit(),
+            Inst::CGate(g) => g.max_qbit(),
+            Inst::Meas(_, u) => Some(*u),
+            Inst::Out(_) => todo!(),
+        }
+    }
+}
+
+impl From<QGate> for Inst {
+    fn from(g: QGate) -> Self {
+        Self::QGate(g)
+    }
+}
+
+impl From<CGate> for Inst {
+    fn from(g: CGate) -> Self {
+        Self::CGate(g)
+    }
+}
+
 impl IntoTarget<Qasm> for QGate {
     #[rustfmt::skip]
     fn into_target(self, _target: &Qasm) -> String {
@@ -211,7 +276,7 @@ impl IntoTarget<Qasm> for Inst {
                 // should we do here?
                 format!("// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
             },
-            _ => todo!(),
+            _ => String::new(),
         }
     }
 }
@@ -252,40 +317,14 @@ impl CircuitBuf {
             gates: self.insts.into_iter(),
         }
     }
-}
 
-/// A kind of thing that can be pushed into the `CircuitBuf`
-pub trait PushInst<G> {
-    fn push(&mut self, g: G);
-}
-
-impl PushInst<QGate> for CircuitBuf {
-    fn push(&mut self, g: QGate) {
-        let gate_max_qbit = g.qbits().iter().copied().max();
-        self.max_qbit = self.max_qbit.max(gate_max_qbit);
-        self.insts.push(Inst::QGate(g));
-    }
-}
-
-impl PushInst<CGate> for CircuitBuf {
-    fn push(&mut self, g: CGate) {
-        let gate_max_cbit = g.cbits().iter().copied().max();
-        self.max_cbit = self.max_cbit.max(gate_max_cbit);
-
-        let gate_max_qbit = g.qbits().iter().copied().max();
-        self.max_qbit = self.max_qbit.max(gate_max_qbit);
-
-        self.insts.push(Inst::CGate(g));
-    }
-}
-
-impl PushInst<Inst> for CircuitBuf {
-    fn push(&mut self, inst: Inst) {
-        match inst {
-            Inst::QGate(g) => self.push(g),
-            Inst::CGate(g) => self.push(g),
-            inst => self.insts.push(inst),
-        }
+    pub fn push<T>(&mut self, g: T)
+    where
+        T: Into<Inst> + MaxBits,
+    {
+        self.max_qbit = self.max_qbit.max(g.max_qbit());
+        self.max_cbit = self.max_qbit.max(g.max_cbit());
+        self.insts.push(g.into());
     }
 }
 

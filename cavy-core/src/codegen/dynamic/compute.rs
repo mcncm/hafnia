@@ -97,9 +97,9 @@ impl<'m> Interpreter<'m> {
             }
             UnOpKind::Delin => {
                 let rplace = self.unwrap_operand(right);
-                let rbits = self.st.env.bits_at(rplace);
-                let lbits = self.st.env.bits_at(lplace);
-                self.circ.meas(lbits.cbits, rbits.qbits, &self.st);
+                let cbits = &self.alloc_for_place(lplace).cbits;
+                let qbits = self.st.env.bits_at(rplace).qbits;
+                self.circ.meas(qbits, cbits, &self.st);
                 return;
             }
         };

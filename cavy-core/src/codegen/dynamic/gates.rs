@@ -1,6 +1,6 @@
 use crate::{
     arch::MeasurementMode,
-    circuit::{CGate, Inst, PushInst, QGate},
+    circuit::{CGate, Inst, QGate},
 };
 
 use super::{mem::*, *};
@@ -16,7 +16,7 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Measure some qubits and store them in classical bits
-    pub fn meas(&mut self, tgts: &[Addr], srcs: &[Addr], _st: &InterpreterState) {
+    pub fn meas(&mut self, srcs: &[Addr], tgts: &[Addr], _st: &InterpreterState) {
         debug_assert!(srcs.len() == tgts.len());
         for (&src, &tgt) in srcs.iter().zip(tgts) {
             self.gate_buf.push(Inst::Meas(src, tgt));

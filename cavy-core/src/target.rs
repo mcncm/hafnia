@@ -262,7 +262,7 @@ pub mod latex {
             //
             // It is also an invariant that there's at least one wire, that
             // should be enforced by `new`, although it isn't yet in a *natural* way.
-            assert!(qwires + cwires > 0);
+            debug_assert!(qwires + cwires > 0);
             let wires = std::iter::repeat_with(|| Wire::new())
                 .take(qwires + cwires)
                 .collect();
