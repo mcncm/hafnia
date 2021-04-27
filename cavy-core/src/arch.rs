@@ -50,6 +50,8 @@ pub enum MeasurementMode {
     /// In this mode, a measured qubit is in the same state as its measured
     /// value.
     Nondemolition,
+    /// In this mode, a measured qubit is in an arbitrary state
+    Dirty,
 }
 
 impl Default for MeasurementMode {

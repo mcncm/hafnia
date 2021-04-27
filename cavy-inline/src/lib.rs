@@ -7,12 +7,7 @@
 #![cfg_attr(feature = "nightly-features", feature(proc_macro_diagnostic))]
 #![cfg_attr(feature = "nightly-features", feature(proc_macro_span))]
 
-use cavy_core::{
-    circuit::{Circuit, Gate},
-    compile,
-    context::Context,
-    session::Config,
-};
+use cavy_core::{circuit::CircuitBuf, compile, context::Context, session::Config};
 use proc_macro::TokenStream;
 use quote::quote;
 
@@ -49,7 +44,7 @@ pub fn inline_cavy(input: TokenStream) -> TokenStream {
                 let spans = src.1;
                 nightly::emit_diagnostics(errs, spans, &mut ctx);
                 // Have to return something, or else get another error
-                (quote! { Vec::<cavy::circuit::Gate>::new() }).into()
+                (quote! { Vec::<cavy::circuit::Qgate>::new() }).into()
             }
         }
     }
@@ -83,35 +78,10 @@ fn stringify(input: TokenStream) -> (String, Vec<proc_macro::Span>) {
 /// Turns a `Circuit` value into code that builds that literal circuit.
 ///
 /// TODO better: to this by implementing `ToTokens` for `Circuit`.
-fn quote_circuit(circ: Circuit) -> TokenStream {
-    let gates = circ.into_iter().map(|gate| match gate {
-        Gate::X(q) => quote! { ::cavy::circuit::Gate::X(#q) },
-        Gate::T { tgt, conj } => quote! { ::cavy::circuit::Gate::T { tgt: #tgt, conj: #conj } },
-        Gate::H(q) => quote! { ::cavy::circuit::Gate::H(#q) },
-        Gate::Z(q) => quote! { ::cavy::circuit::Gate::Z(#q) },
-        Gate::CX { tgt, ctrl } => quote! { ::cavy::circuit::Gate::CX { tgt: #tgt, ctrl: #ctrl } },
-        Gate::SWAP { fst, snd } => quote! { ::cavy::circuit::Gate::Swap { fst: #fst, snd: #snd } },
-        Gate::M(q) => quote! { ::cavy::circuit::Gate::M(#q) },
-        Gate::Out(e) => {
-            let cavy_core::circuit::IoOutGate { addr, name, elem } = *e;
-            quote! {
-                {
-                    let e = ::cavy::circuit::IoOutGate {
-                        #addr, #name, #elem
-                    };
-                    ::cavy::circuit::Gate::Ext(Box::new(e))
-                }
-            }
-        }
-    });
-
-    let circuit_def = quote! {
-        {
-            let mut circ_buf = Vec::new();
-            #(circ_buf.push(#gates);)*
-            circ_buf
-        }
+fn quote_circuit(_circ: CircuitBuf) -> TokenStream {
+    let code = quote! {
+        compile_error!("The circuit-building macro is disabled. Manual maintenance is horrible; must switch to Serde.");
     };
 
-    circuit_def.into()
+    code.into()
 }

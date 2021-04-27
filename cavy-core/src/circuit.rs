@@ -9,16 +9,14 @@ use std::{
     fmt,
     vec::IntoIter,
 };
-use Gate::*;
 
 /// This type alias identifies qubits with their numerical indices
-pub type VirtAddr = usize;
-
-pub type PhysAddr = usize;
+pub type Addr = usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoOutGate {
-    pub addr: VirtAddr,
+    /// Classical address to read from
+    pub addr: Addr,
     /// Name of the ext location. Maybe this could be a `SymbolId`--but that
     /// would necessitate refactoring the `target` api, and I really don't want
     /// to go there.
@@ -33,35 +31,86 @@ pub struct IoOutGate {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
-pub enum Gate {
-    X(VirtAddr),
-    T {
-        tgt: VirtAddr,
-        conj: bool,
-    },
-    H(VirtAddr),
-    Z(VirtAddr),
-    CX {
-        ctrl: VirtAddr,
-        tgt: VirtAddr,
-    },
-    SWAP {
-        fst: VirtAddr,
-        snd: VirtAddr,
-    },
+pub enum QGate {
+    X(Addr),
+    T { tgt: Addr, conj: bool },
+    H(Addr),
+    Z(Addr),
+    CX { ctrl: Addr, tgt: Addr },
+    SWAP { fst: Addr, snd: Addr },
+}
 
-    // Not-really-gate gates
-    /// Measurement "gate"
-    M(VirtAddr),
-    /// Output "gate"
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub enum CGate {
+    Not(Addr),
+    /// The first address is the source bit; the second is the target bit
+    Copy(Addr, Addr),
+    /// The first address is the source bit; the second is the target bit
+    Cnot(Addr, Addr),
+    /// Control a quantum gate on a classical bit
+    Control(Addr, Box<QGate>),
+}
+
+/// The simple instructions that make up the low-level circuit stream
+/// representation
+#[derive(Debug)]
+pub enum Inst {
+    /// Bring up a bit rail
+    CInit(Addr),
+    /// Set down a bit rail
+    CFree(Addr),
+    /// Bring up a qubit rail
+    QInit(Addr),
+    /// Set down a qubit rail
+    QFree(Addr),
+    /// A quantum gate
+    QGate(QGate),
+    /// A classical gate
+    CGate(CGate),
+    /// Measurement: the first address is the qubit measured; the second is the
+    /// target classical bit
+    Meas(Addr, Addr),
+    /// IO out
     Out(Box<IoOutGate>),
 }
 
-impl Gate {
-    pub fn qubits(&self) -> &[VirtAddr] {
+impl CGate {
+    pub fn qbits(&self) -> &[Addr] {
+        if let CGate::Control(_, qg) = self {
+            qg.qbits()
+        } else {
+            &[]
+        }
+    }
+
+    pub fn cbits(&self) -> &[Addr] {
+        use CGate::*;
         // NOTE: A ridiculous unsafe optimization that almost certainly yields no
         // measurable performance benefits, and will lead to a bug as soon as I
-        // forget about it and change the data layout of `Gate`. This is
+        // forget about it and change the data layout of `CGate`. This is
+        // basically bad engineering in the name of fun.
+        use std::mem::Discriminant;
+        let tgts = match self {
+            CGate::Not(_) => 1,
+            CGate::Copy(_, _) => 2,
+            CGate::Cnot(_, _) => 2,
+            CGate::Control(_, _) => 1,
+        };
+        // Safety: `CGate` is `#[repr(C)]`
+        unsafe {
+            let ptr = (self as *const Self as *const Discriminant<Self>).add(1);
+            std::slice::from_raw_parts(ptr as *const Addr, tgts)
+        }
+    }
+}
+
+impl QGate {
+    pub fn qbits(&self) -> &[Addr] {
+        use QGate::*;
+        // NOTE: A ridiculous unsafe optimization that almost certainly yields no
+        // measurable performance benefits, and will lead to a bug as soon as I
+        // forget about it and change the data layout of `QGate`. This is
         // basically bad engineering in the name of fun.
         use std::mem::Discriminant;
         let tgts = match self {
@@ -71,18 +120,16 @@ impl Gate {
             Z(_) => 1,
             CX { .. } => 2,
             SWAP { .. } => 2,
-            M(_) => 1,
-            // Not quite correct, anyway
-            Out(_) => 0,
         };
-        // Safety: `Gate` is `#[repr(C)]`
+        // Safety: `QGate` is `#[repr(C)]`
         unsafe {
             let ptr = (self as *const Self as *const Discriminant<Self>).add(1);
-            std::slice::from_raw_parts(ptr as *const VirtAddr, tgts)
+            std::slice::from_raw_parts(ptr as *const Addr, tgts)
         }
     }
 
-    pub fn conjugate(self) -> Gate {
+    pub fn conjugate(self) -> QGate {
+        use QGate::*;
         match self {
             T { tgt, conj } => T { tgt, conj: !conj },
             _ => self,
@@ -90,7 +137,8 @@ impl Gate {
     }
 
     #[rustfmt::skip]
-    fn controlled_on_one(self, ctrl: VirtAddr) -> Vec<Gate> {
+    fn controlled_on_one(self, ctrl: Addr) -> Vec<QGate> {
+        use QGate::*;
         match self {
             X(tgt) => vec![CX { ctrl, tgt }],
             T { tgt: _, conj: _ } => todo!(),
@@ -119,27 +167,26 @@ impl Gate {
                 CX { ctrl, tgt: inner_ctrl },
             ],
             SWAP{ .. } => todo!(),
-            M(_) => todo!(),
-            Out(_) => todo!(),
         }
     }
 
     /// Control on multiple qubits
-    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = VirtAddr>>) -> Vec<Gate> {
+    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = Addr>>) -> Vec<QGate> {
         let mut inner_gates = vec![self];
         for ctrl in ctrls {
             inner_gates = inner_gates
                 .into_iter()
                 .flat_map(|gate| gate.controlled_on_one(ctrl))
-                .collect::<Vec<Gate>>()
+                .collect::<Vec<QGate>>()
         }
         inner_gates
     }
 }
 
-impl IntoTarget<Qasm> for Gate {
+impl IntoTarget<Qasm> for QGate {
     #[rustfmt::skip]
     fn into_target(self, _target: &Qasm) -> String {
+        use QGate::*;
         match self {
             X(tgt)            => format!("x q[{}];", tgt),
             T { tgt, conj }   => format!("{} q[{}];",
@@ -149,30 +196,40 @@ impl IntoTarget<Qasm> for Gate {
             Z(tgt)            => format!("z q[{}];", tgt),
             CX { tgt, ctrl }  => format!("cx q[{}], q[{}];", ctrl, tgt),
             SWAP { .. }       => todo!(),
-            M(tgt)            => format!("measure q[{}] -> c[{}];", tgt, tgt),
-            Out(io)            => {
+        }
+    }
+}
+
+impl IntoTarget<Qasm> for Inst {
+    #[rustfmt::skip]
+    fn into_target(self, target: &Qasm) -> String {
+        match self {
+            Inst::QGate(g)    => g.into_target(target),
+            Inst::Meas(src, tgt) => format!("measure q[{}] -> c[{}]", src, tgt),
+            Inst::Out(io)      => {
                 // TODO OpenQASM doesn't support this kind of operation, does it? What
                 // should we do here?
                 format!("// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
             },
+            _ => todo!(),
         }
     }
 }
 
 /// A simple circuit struct. This backend data structure keeps changing, but it
 #[derive(Debug)]
-pub struct Circuit {
-    gates: Vec<Gate>,
+pub struct CircuitBuf {
+    insts: Vec<Inst>,
     max_qbit: Option<usize>,
-    max_cbit: usize,
+    max_cbit: Option<usize>,
 }
 
-impl Circuit {
+impl CircuitBuf {
     pub fn new() -> Self {
         Self {
-            gates: Vec::new(),
+            insts: Vec::new(),
             max_qbit: None,
-            max_cbit: 0,
+            max_cbit: None,
         }
     }
 
@@ -180,25 +237,54 @@ impl Circuit {
         self.max_qbit
     }
 
-    pub fn push(&mut self, gate: Gate) {
-        let max_gate = gate.qubits().iter().copied().max();
-        self.max_qbit = self.max_qbit.max(max_gate);
-        self.gates.push(gate);
-    }
-
     pub fn into_iter(self) -> CircuitStream {
         CircuitStream {
-            gates: self.gates.into_iter(),
+            gates: self.insts.into_iter(),
+        }
+    }
+}
+
+/// A kind of thing that can be pushed into the `CircuitBuf`
+pub trait PushInst<G> {
+    fn push(&mut self, g: G);
+}
+
+impl PushInst<QGate> for CircuitBuf {
+    fn push(&mut self, g: QGate) {
+        let gate_max_qbit = g.qbits().iter().copied().max();
+        self.max_qbit = self.max_qbit.max(gate_max_qbit);
+        self.insts.push(Inst::QGate(g));
+    }
+}
+
+impl PushInst<CGate> for CircuitBuf {
+    fn push(&mut self, g: CGate) {
+        let gate_max_cbit = g.cbits().iter().copied().max();
+        self.max_cbit = self.max_cbit.max(gate_max_cbit);
+
+        let gate_max_qbit = g.qbits().iter().copied().max();
+        self.max_qbit = self.max_cbit.max(gate_max_qbit);
+
+        self.insts.push(Inst::CGate(g));
+    }
+}
+
+impl PushInst<Inst> for CircuitBuf {
+    fn push(&mut self, inst: Inst) {
+        match inst {
+            Inst::QGate(g) => self.push(g),
+            Inst::CGate(g) => self.push(g),
+            inst => self.insts.push(inst),
         }
     }
 }
 
 pub struct CircuitStream {
-    gates: IntoIter<Gate>,
+    gates: IntoIter<Inst>,
 }
 
 impl Iterator for CircuitStream {
-    type Item = Gate;
+    type Item = Inst;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.gates.next()
@@ -207,8 +293,9 @@ impl Iterator for CircuitStream {
 
 // === Formatting implementations
 
-impl std::fmt::Display for Gate {
+impl std::fmt::Display for QGate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use QGate::*;
         match self {
             X(q) => write!(f, "X {}", q),
             T { tgt, conj } => {
@@ -219,8 +306,6 @@ impl std::fmt::Display for Gate {
             Z(q) => write!(f, "Z {}", q),
             CX { tgt, ctrl } => write!(f, "CX {} {}", ctrl, tgt),
             SWAP { fst, snd } => write!(f, "SWAP {} {}", fst, snd),
-            M(q) => write!(f, "M {}", q),
-            Out(e) => write!(f, "{} -> {:?}[{}]", e.addr, e.name, e.elem),
         }
     }
 }

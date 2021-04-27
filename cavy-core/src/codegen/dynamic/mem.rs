@@ -56,6 +56,9 @@ where
 pub struct BitAllocator<'c> {
     class: Allocator<usize, RangeFrom<usize>>,
     quant: Allocator<usize, RangeFrom<usize>>,
+    // NOTE: This struct *could* just hold onto the type interner. But
+    // `Ty::size_inner` isn't `pub`, so I'll give it access to the whole
+    // `Context` for now.
     ctx: &'c Context<'c>,
 }
 
@@ -75,6 +78,32 @@ impl<'c> BitAllocator<'c> {
             cbits: self.class.alloc(sz.csize),
             qbits: self.quant.alloc(sz.qsize),
         }
+    }
+
+    pub fn free_clean_class<S: Iterator<Item = Addr>>(&mut self, items: S) {
+        self.class.free_clean(items);
+    }
+
+    pub fn free_clean_quant<S: Iterator<Item = Addr>>(&mut self, items: S) {
+        self.quant.free_clean(items);
+    }
+
+    pub fn free_dirty_class<S: Iterator<Item = Addr>>(&mut self, items: S) {
+        self.quant.free_dirty(items);
+    }
+
+    pub fn free_dirty_quant<S: Iterator<Item = Addr>>(&mut self, items: S) {
+        self.quant.free_dirty(items);
+    }
+
+    pub fn free_clean(&mut self, bits: BitSetSlice) {
+        self.free_clean_class(bits.cbits.iter().copied());
+        self.free_clean_quant(bits.qbits.iter().copied());
+    }
+
+    pub fn free_dirty(&mut self, bits: BitSetSlice) {
+        self.free_dirty_class(bits.cbits.iter().copied());
+        self.free_dirty_quant(bits.qbits.iter().copied());
     }
 }
 
@@ -113,19 +142,26 @@ impl<'a> Environment<'a> {
         // NOTE: this actually *is* safe, and doesn't require an extra copy,
         // since we could always exclude the case `lplace == rplace`. But
         // proving that to the borrow checker sounds pretty daunting.
-        let bits = self.bitset_at(rplace).to_owned();
+        let bits = self.bits_at(rplace).to_owned();
         self.insert(lplace, bits.as_ref());
     }
 
     /// Get a sub-allocation at a place.
-    pub fn bitset_at(&self, place: &Place) -> BitSetSlice {
+    pub fn bits_at(&self, place: &Place) -> BitSetSlice {
         let ranges = self.bitset_ranges(place);
         let bitset = &self.get_entry(place.root).bits;
         bitset.index(ranges)
     }
 
+    /// Get a sub-allocation at a place, mutably
+    pub fn bits_at_mut(&mut self, place: &Place) -> BitSetSliceMut {
+        let ranges = self.bitset_ranges(place);
+        let bitset = &mut self.get_entry_mut(place.root).bits;
+        bitset.index_mut(ranges)
+    }
+
     pub fn insert(&mut self, place: &Place, value: BitSetSlice) {
-        let bits = &mut self.get_entry_mut(place.root).bits;
+        let bits = &mut self.bits_at_mut(place);
         bits.copy_from_slice(&value);
     }
 
@@ -198,14 +234,20 @@ impl BitSet {
     }
 
     pub fn copy_from_slice(&mut self, slice: &BitSetSlice) {
-        self.qbits.copy_from_slice(slice.qbits);
-        self.cbits.copy_from_slice(slice.cbits);
+        self.as_ref_mut().copy_from_slice(slice);
     }
 
     pub fn as_ref(&self) -> BitSetSlice {
         BitSetSlice {
             qbits: &self.qbits,
             cbits: &self.cbits,
+        }
+    }
+
+    pub fn as_ref_mut(&mut self) -> BitSetSliceMut {
+        BitSetSliceMut {
+            qbits: &mut self.qbits,
+            cbits: &mut self.cbits,
         }
     }
 
@@ -251,4 +293,11 @@ impl BitSetSlice<'_> {
 pub struct BitSetSliceMut<'a> {
     pub qbits: &'a mut [Addr],
     pub cbits: &'a mut [Addr],
+}
+
+impl<'a> BitSetSliceMut<'a> {
+    fn copy_from_slice(&mut self, other: &BitSetSlice) {
+        self.qbits.copy_from_slice(other.qbits);
+        self.cbits.copy_from_slice(other.cbits);
+    }
 }

@@ -76,6 +76,7 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
     let meas_mode = match argmatches.value_of("meas_mode") {
         Some("demolition") => arch::MeasurementMode::Demolition,
         Some("nondemolition") => arch::MeasurementMode::Nondemolition,
+        Some("dirty") => arch::MeasurementMode::Nondemolition,
         _ => arch::MeasurementMode::Demolition,
     };
 

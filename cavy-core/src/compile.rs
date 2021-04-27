@@ -1,7 +1,7 @@
 use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
-    circuit::Circuit,
+    circuit::CircuitBuf,
     context::{Context, CtxDisplay, CtxFmt},
     lowering, parser, scanner,
     session::Phase,
@@ -11,7 +11,10 @@ use crate::{
 use std::path::PathBuf;
 
 /// Compile a program to a quantum(-classical) circuit representation.
-pub fn compile_circuit(entry_point: SrcId, ctx: &mut Context) -> Result<Option<Circuit>, ErrorBuf> {
+pub fn compile_circuit(
+    entry_point: SrcId,
+    ctx: &mut Context,
+) -> Result<Option<CircuitBuf>, ErrorBuf> {
     let tokens = scanner::tokenize(entry_point, ctx)?;
 
     let ast = parser::parse(tokens, ctx)?;

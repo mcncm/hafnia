@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    circuit::{Circuit, Gate},
+    circuit::{CircuitBuf, QGate},
     context::Context,
     mir::*,
     session::Config,
@@ -82,14 +82,17 @@ struct CircAssembler<'a> {
     /// This needs to own the allocater because we might use temporaries while
     /// inserting gates.
     alloc: BitAllocator<'a>,
-    gate_buf: Circuit,
+    /// ...And, like almost everything else, a copy of the Context.
+    ctx: &'a Context<'a>,
+    gate_buf: CircuitBuf,
 }
 
 impl<'a> CircAssembler<'a> {
     fn new(ctx: &'a Context<'a>) -> Self {
         Self {
             alloc: BitAllocator::new(ctx),
-            gate_buf: Circuit::new(),
+            ctx,
+            gate_buf: CircuitBuf::new(),
         }
     }
 }
@@ -114,7 +117,7 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Run the interpreter, starting from its entry block.
-    pub fn exec(mut self) -> Circuit {
+    pub fn exec(mut self) -> CircuitBuf {
         let mut block_candidates = vec![];
         self.swap_blocks(&mut block_candidates);
         while !block_candidates.is_empty() {

@@ -2,7 +2,7 @@
 //! This is all pretty unstable for the time being, so don’t rely on it too much
 //! externally.
 
-use crate::circuit::Circuit;
+use crate::circuit::CircuitBuf;
 
 /// This type alias replaces the associated type previously attached to `Target`
 pub type ObjectCode = String;
@@ -10,7 +10,7 @@ pub type ObjectCode = String;
 /// This is a marker trait for compile targets. Must be `Send` in order to use
 /// `Box<dyn Target>` in FFI.
 pub trait Target: std::fmt::Debug + Send {
-    fn from(&self, circ: Circuit) -> ObjectCode;
+    fn from(&self, circ: CircuitBuf) -> ObjectCode;
 }
 
 impl Default for Box<dyn Target> {
@@ -35,7 +35,7 @@ pub mod null {
     #[derive(Debug)]
     pub struct NullTarget();
     impl Target for NullTarget {
-        fn from(&self, _circ: Circuit) -> ObjectCode {
+        fn from(&self, _circ: CircuitBuf) -> ObjectCode {
             String::new()
         }
     }
@@ -59,18 +59,18 @@ pub mod qasm {
             format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
         }
 
-        fn circuit(&self, circuit: crate::circuit::Circuit) -> String {
+        fn circuit(&self, circuit: crate::circuit::CircuitBuf) -> String {
             circuit.into_target(self)
         }
     }
 
     impl Target for Qasm {
-        fn from(&self, circ: Circuit) -> String {
+        fn from(&self, circ: CircuitBuf) -> String {
             format!("{}\n{}", self.headers(), self.circuit(circ))
         }
     }
 
-    impl IntoTarget<Qasm> for crate::circuit::Circuit {
+    impl IntoTarget<Qasm> for crate::circuit::CircuitBuf {
         fn into_target(self, target: &Qasm) -> String {
             let declaration = {
                 if let Some(max_qubit) = self.max_qubit() {
@@ -92,6 +92,8 @@ pub mod qasm {
 
 /// The LaTeX backend, which uses quantikz.
 pub mod latex {
+    use crate::circuit;
+
     use super::*;
 
     // TODO the public interface and private implementation are a bit mixed
@@ -200,9 +202,25 @@ pub mod latex {
             self.first_free.extend(std::iter::repeat(1).take(diff));
         }
 
+        fn push_inst(&mut self, inst: circuit::Inst) {
+            use circuit::Inst::*;
+            match inst {
+                QGate(g) => self.push_gate(g),
+                Meas(src, _tgt) => self.insert_single(src, r"\meter{}".to_string()),
+                Out(e) => {
+                    // *very* provisional; this will be really ugly in practice
+                    // if there’s ever an `ext` in the middle of a circuit
+                    let name = Latex::escape(&e.name);
+                    let label = format!("\\push{{ \\tt {}[{}] }}", name, e.elem);
+                    self.insert_single(e.addr, label)
+                }
+                _ => todo!(),
+            }
+        }
+
         #[rustfmt::skip]
-        fn push_gate(&mut self, gate: crate::circuit::Gate) {
-            use crate::circuit::Gate::*;
+        fn push_gate(&mut self, gate: circuit::QGate) {
+            use crate::circuit::QGate::*;
             match gate {
                 X(tgt)            => self.insert_single(tgt, r"\gate{X}".to_string()),
                 T { tgt, conj }   => self.insert_single(tgt, {
@@ -222,14 +240,6 @@ pub mod latex {
                     self.insert_multiple(vec![ctrl, tgt]);
                 }
                 SWAP { .. }       => todo!(),
-                M(tgt)            => self.insert_single(tgt, r"\meter{}".to_string()),
-                Out(e)              => {
-                    // *very* provisional; this will be really ugly in practice
-                    // if there’s ever an `ext` in the middle of a circuit
-                    let name = Latex::escape(&e.name);
-                    let label = format!("\\push{{ \\tt {}[{}] }}", name, e.elem);
-                    self.insert_single(e.addr, label)
-                }
             }
         }
 
@@ -352,7 +362,7 @@ pub mod latex {
 \end{document}
 ";
 
-        fn diagram(&self, circuit: crate::circuit::Circuit) -> String {
+        fn diagram(&self, circuit: circuit::CircuitBuf) -> String {
             // TODO: [PERF] could track width more carefully to do all
             // allocations at once
 
@@ -361,8 +371,8 @@ pub mod latex {
             // remove that restriction.
             let mut layout_array = LayoutArray::new(1);
 
-            for gate in circuit.into_iter() {
-                layout_array.push_gate(gate);
+            for inst in circuit.into_iter() {
+                layout_array.push_inst(inst);
             }
 
             layout_array.into_target(self)
@@ -371,7 +381,7 @@ pub mod latex {
 
     impl Target for Latex {
         #[rustfmt::skip]
-        fn from(&self, circ: Circuit) -> ObjectCode {
+        fn from(&self, circ: CircuitBuf) -> ObjectCode {
             let header = if self.standalone { Self::HEADER } else { "\\begin{quantikz}\n" };
             let footer = if self.standalone { Self::FOOTER } else { "\n\\end{quantikz}" };
             format!(

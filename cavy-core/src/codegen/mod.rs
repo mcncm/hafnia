@@ -1,8 +1,8 @@
 mod dynamic;
 
-use crate::{circuit::Circuit, context::Context, mir::Mir};
+use crate::{circuit::CircuitBuf, context::Context, mir::Mir};
 
-pub fn translate(mir: &Mir, ctx: &Context) -> Circuit {
+pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
     let interp = dynamic::Interpreter::new(mir, ctx);
     interp.exec()
 }

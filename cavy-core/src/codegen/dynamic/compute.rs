@@ -33,7 +33,7 @@ impl<'m> Interpreter<'m> {
         for (i, b) in value.bits().iter().enumerate() {
             if *b {
                 let addr = allocation.qbits[i];
-                self.circ.push(Gate::X(addr), &self.st);
+                self.circ.push(QGate::X(addr), &self.st);
             }
         }
         allocation
@@ -57,13 +57,20 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
                 let rplace = self.unwrap_operand(right);
-                let bits = self.st.env.bitset_at(rplace);
+                let bits = self.st.env.bits_at(rplace);
                 for addr in bits.qbits {
-                    self.circ.push(Gate::X(*addr), &self.st);
+                    self.circ.push(QGate::X(*addr), &self.st);
                 }
                 bits
             }
-            UnOpKind::Split => todo!(),
+            UnOpKind::Split => {
+                let rplace = self.unwrap_operand(right);
+                let bits = self.st.env.bits_at(rplace);
+                for addr in bits.qbits {
+                    self.circ.push(QGate::H(*addr), &self.st);
+                }
+                bits
+            }
             UnOpKind::Linear => {
                 match right {
                     Operand::Const(value) => {
@@ -80,7 +87,12 @@ impl<'m> Interpreter<'m> {
                 // self.insert_bindings(&lplace, allocation);
                 return;
             }
-            UnOpKind::Delin => todo!(),
+            UnOpKind::Delin => {
+                let rplace = self.unwrap_operand(right);
+                let bits = self.st.env.bits_at(rplace);
+                self.circ.meas(bits.qbits, bits.cbits, &self.st);
+                bits
+            }
         };
     }
 }
