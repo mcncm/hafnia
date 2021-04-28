@@ -77,7 +77,7 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
                 format!(
                     #msg,
                     #(#dis_fields = self.#dis_fields,)*
-                    #(#ctx_fields = crate::context::CtxDisplay::fmt_with(&self.#ctx_fields, &ctx),)*
+                    #(#ctx_fields = crate::util::FmtWith::fmt_with(&self.#ctx_fields, &ctx),)*
                 )
             }
 

@@ -6,16 +6,13 @@
 use crate::store_type;
 use crate::{
     ast::{self, Ast, FnId},
-    context::{CtxDisplay, SymbolId},
+    context::{Context, SymbolId},
+    num::{self, Uint},
     source::Span,
     store::Store,
-    types::RefKind,
+    types::{RefKind, TyId, Type},
+    util::{FmtWith, FmtWrapper},
     values::Value,
-};
-use crate::{
-    context::{Context, CtxFmt},
-    num::{self, Uint},
-    types::{TyId, Type},
 };
 use std::{
     cell::{Ref, RefCell},
@@ -504,7 +501,7 @@ impl fmt::Display for LocalId {
     }
 }
 
-impl CtxDisplay for Mir {
+impl<'c> FmtWith<Context<'c>> for Mir {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for gr in self.graphs.iter() {
             write!(f, "{}", gr.fmt_with(ctx))?;
@@ -515,7 +512,7 @@ impl CtxDisplay for Mir {
 
 /// We need context data to format a `Graph` struct, at least to resolve the
 /// types and symbols.
-impl CtxDisplay for Graph {
+impl<'c> FmtWith<Context<'c>> for Graph {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let _ = f.write_str("function {\n");
         for (n, local) in self.locals.iter().enumerate() {

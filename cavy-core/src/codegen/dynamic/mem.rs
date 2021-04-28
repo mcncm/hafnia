@@ -123,7 +123,6 @@ impl<'a> Environment<'a> {
             }
             ty = ty.slot(*elem, self.ctx);
         }
-        use crate::context::CtxDisplay;
         let sz = ty.size(self.ctx);
         let (qf, cf) = (qi + sz.qsize, ci + sz.csize);
 

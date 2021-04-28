@@ -1,11 +1,14 @@
 //! This module is home to the `Context` data structure central to the
 //! compilation process.
 
-use crate::session::{Config, Phase};
 use crate::source::{SrcId, SrcStore};
 use crate::types::{CachedTypeInterner, TyId, Type};
 use crate::{cavy_errors::ErrorBuf, num::Uint};
 use crate::{interner_type, types::TypeSize};
+use crate::{
+    session::{Config, Phase},
+    util::FmtWith,
+};
 use std::{collections::HashMap, fmt};
 
 interner_type! { SymbolInterner : SymbolId -> String }
@@ -81,33 +84,9 @@ impl<'ctx> Context<'ctx> {
     }
 }
 
-/// A trait for formatting things with with the help of a `Context`
-pub trait CtxDisplay {
-    fn fmt_with<'t>(&'t self, ctx: &'t Context) -> CtxFmt<'t, Self>
-    where
-        Self: Sized,
-    {
-        CtxFmt { self_: self, ctx }
-    }
-
-    fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result;
-}
-
-/// This struct is an implementation detail of the `CtxDisplay` trait
-pub struct CtxFmt<'t, T: CtxDisplay> {
-    self_: &'t T,
-    ctx: &'t Context<'t>,
-}
-
-impl<'t, T: CtxDisplay> fmt::Display for CtxFmt<'t, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.self_.fmt(self.ctx, f)
-    }
-}
-
 /// ====== Display and formatting ======
 
-impl CtxDisplay for SymbolId {
+impl<'c> FmtWith<Context<'c>> for SymbolId {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", ctx.symbols[*self])
     }

@@ -7,9 +7,10 @@
 //! found in rustc. `ast.rs` is somewhere in between that compiler's AST and
 //! HIR, while the CFG is very similar to its MIR.
 
+use crate::num::Uint;
 use crate::source::Span;
 use crate::token::{Token, Unsigned};
-use crate::{context::CtxDisplay, num::Uint};
+use crate::util::FmtWith;
 use crate::{
     context::{Context, SymbolId},
     store::Counter,
@@ -245,7 +246,7 @@ impl From<SymbolId> for FieldKind {
 // NOTE I'm not sure I really want to be implementing this on things in the AST,
 // instead of *just* the lightweight ID types. However, this is useful for
 // certain diagnostic messages (see `lowering::errors::NoSuchField`).
-impl CtxDisplay for FieldKind {
+impl<'c> FmtWith<Context<'c>> for FieldKind {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FieldKind::Ident(ident) => write!(f, "{}", ident.fmt_with(ctx)),

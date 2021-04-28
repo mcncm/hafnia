@@ -6,13 +6,14 @@
 use crate::{
     ast::{self, StmtKind, *},
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
-    context::{Context, CtxDisplay, SymbolId},
+    context::{Context, SymbolId},
     mir::{self, FnCall, *},
     num::Uint,
     source::Span,
     store::Index,
     store::Store,
     types::{Discriminant, RefKind, TyId, Type, TypeSize, UserType},
+    util::FmtWith,
     values::Value,
 };
 use std::collections::HashMap;
@@ -714,7 +715,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_into_field(&mut self, place: Place, head: &Expr, field: &Field) -> Maybe<()> {
-        use crate::context::CtxDisplay;
         let rhs = self.unroll_fields(head, field)?;
         let rhs = Rvalue {
             // FIXME Throughout this module, there are a lot of places where I

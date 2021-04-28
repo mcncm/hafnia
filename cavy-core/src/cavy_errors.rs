@@ -1,10 +1,10 @@
-use crate::{context::CtxDisplay, source::Span};
 use crate::{
-    context::{Context, CtxFmt},
+    context::Context,
+    source::Span,
     sys,
+    util::{FmtWith, FmtWrapper},
 };
-use std::error::Error;
-use std::fmt;
+use std::{error::Error, fmt};
 
 /// The main trait for language errors encountered in lexing, parsing, semantic
 /// analysis, and code generation.
@@ -48,7 +48,7 @@ pub struct SpanReport {
     pub msg: Option<&'static str>,
 }
 
-impl CtxDisplay for SpanReport {
+impl<'c> FmtWith<Context<'c>> for SpanReport {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let src = &ctx.srcs[self.span.src_id];
         let line = src.get_line(self.span.start);
@@ -151,7 +151,7 @@ impl ErrorBuf {
 
 // ====== Display and formatting ======
 
-impl CtxDisplay for ErrorBuf {
+impl<'c> FmtWith<Context<'c>> for ErrorBuf {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.iter().fold(true, |first, err| {
             if !first {
@@ -166,7 +166,7 @@ impl CtxDisplay for ErrorBuf {
     }
 }
 
-impl CtxDisplay for Box<dyn Diagnostic> {
+impl<'c> FmtWith<Context<'c>> for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}: {}", self.error_code(), self.message(ctx))?;
         for span_report in self.spans() {

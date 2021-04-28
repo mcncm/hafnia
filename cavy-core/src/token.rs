@@ -1,7 +1,8 @@
 use crate::{
-    context::{self, SymbolId},
+    context::{self, Context, SymbolId},
     num::Uint,
     source::{Span, SrcObject},
+    util::FmtWith,
 };
 use std::fmt;
 
@@ -45,7 +46,7 @@ pub enum Delim {
     Brace,
 }
 
-impl context::CtxDisplay for Lexeme {
+impl<'c> FmtWith<Context<'c>> for Lexeme {
     fn fmt(&self, ctx: &context::Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Lexeme::Ident(s) => write!(f, "{}", s.fmt_with(ctx)),

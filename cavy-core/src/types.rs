@@ -1,10 +1,8 @@
 use crate::{
-    context::{Context, CtxFmt},
-    num::Uint,
-};
-use crate::{
-    context::{CtxDisplay, SymbolId},
+    context::{Context, SymbolId},
     interner_type,
+    num::Uint,
+    util::{FmtWith, FmtWrapper},
 };
 use std::{
     collections::HashMap,
@@ -413,7 +411,7 @@ impl fmt::Display for RefKind {
     }
 }
 
-impl CtxDisplay for TyId {
+impl<'c> FmtWith<Context<'c>> for TyId {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &ctx.types[*self] {
             Type::Bool => f.write_str("bool"),

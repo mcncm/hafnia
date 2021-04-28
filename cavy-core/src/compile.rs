@@ -2,11 +2,12 @@ use crate::{
     arch::Arch,
     cavy_errors::ErrorBuf,
     circuit::CircuitBuf,
-    context::{Context, CtxDisplay, CtxFmt},
+    context::Context,
     lowering, parser, scanner,
     session::Phase,
     source::{SrcId, SrcObject},
     target::ObjectCode,
+    util::{FmtWith, FmtWrapper},
 };
 use std::path::PathBuf;
 

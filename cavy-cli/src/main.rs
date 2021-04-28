@@ -3,11 +3,13 @@ use std::io::Write;
 use std::panic;
 use std::path::PathBuf;
 
-use cavy_core::context::{Context, CtxDisplay};
-use cavy_core::session::{Config, Phase, PhaseConfig};
-use cavy_core::target;
-use cavy_core::{arch, session::OptConfig};
-use cavy_core::{compile, sys};
+use cavy_core::{
+    arch, compile,
+    context::Context,
+    session::{Config, OptConfig, Phase, PhaseConfig},
+    sys, target,
+    util::FmtWith,
+};
 
 use clap::{load_yaml, App, ArgMatches};
 use fs::File;
