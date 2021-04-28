@@ -95,8 +95,8 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
 fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
     match argmatches.value_of("target") {
         Some("qasm") => Box::new(target::qasm::Qasm {}),
-        Some("latex") => Box::new(target::latex::Latex { standalone: false }),
-        Some("latex_standalone") => Box::new(target::latex::Latex { standalone: true }),
+        Some("latex") => Box::new(target::latex::LaTeX { standalone: false }),
+        Some("latex_standalone") => Box::new(target::latex::LaTeX { standalone: true }),
         Some(_) => unreachable!(),
         None => Box::new(target::qasm::Qasm {}),
     }

@@ -1,7 +1,7 @@
-use crate::{ast::FnId, store::Index};
+use crate::{ast::FnId, store::Index, util::FmtWith};
 use crate::{
     context::SymbolId,
-    target::{qasm::Qasm, IntoTarget, Target},
+    target::{qasm::Qasm, Target},
     types::TypeSize,
 };
 use std::{
@@ -258,35 +258,31 @@ impl From<CGate> for Inst {
     }
 }
 
-impl IntoTarget<Qasm> for QGate {
-    #[rustfmt::skip]
-    fn into_target(self, _target: &Qasm) -> String {
+impl FmtWith<Qasm> for QGate {
+    fn fmt(&self, _qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use QGate::*;
         match self {
-            X(tgt)            => format!("x q[{}];", tgt),
-            T { tgt, conj }   => format!("{} q[{}];",
-                                         if conj { "tdg" } else { "t" },
-                                         tgt),
-            H(tgt)            => format!("h q[{}];", tgt),
-            Z(tgt)            => format!("z q[{}];", tgt),
-            CX { tgt, ctrl }  => format!("cx q[{}], q[{}];", ctrl, tgt),
-            SWAP { .. }       => todo!(),
+            X(tgt) => write!(f, "x q[{}];", tgt),
+            T { tgt, conj } => write!(f, "{} q[{}];", if *conj { "tdg" } else { "t" }, tgt),
+            H(tgt) => write!(f, "h q[{}];", tgt),
+            Z(tgt) => write!(f, "z q[{}];", tgt),
+            CX { tgt, ctrl } => write!(f, "cx q[{}], q[{}];", ctrl, tgt),
+            SWAP { .. } => todo!(),
         }
     }
 }
 
-impl IntoTarget<Qasm> for Inst {
-    #[rustfmt::skip]
-    fn into_target(self, target: &Qasm) -> String {
+impl FmtWith<Qasm> for Inst {
+    fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Inst::QGate(g)    => g.into_target(target),
-            Inst::Meas(src, tgt) => format!("measure q[{}] -> c[{}]", src, tgt),
-            Inst::Out(io)      => {
+            Inst::QGate(g) => write!(f, "{}", g.fmt_with(qasm)),
+            Inst::Meas(src, tgt) => write!(f, "measure q[{}] -> c[{}]", src, tgt),
+            Inst::Out(io) => {
                 // TODO OpenQASM doesn't support this kind of operation, does it? What
                 // should we do here?
-                format!("// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
-            },
-            _ => String::new(),
+                write!(f, "// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -322,10 +318,12 @@ impl CircuitBuf {
         }
     }
 
-    pub fn into_iter(self) -> CircuitStream {
-        CircuitStream {
-            gates: self.insts.into_iter(),
-        }
+    pub fn into_iter(self) -> impl Iterator<Item = Inst> {
+        self.insts.into_iter()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &'_ Inst> {
+        self.insts.iter()
     }
 
     pub fn push<T>(&mut self, g: T)
@@ -335,18 +333,6 @@ impl CircuitBuf {
         self.max_qbit = self.max_qbit.max(g.max_qbit());
         self.max_cbit = self.max_cbit.max(g.max_cbit());
         self.insts.push(g.into());
-    }
-}
-
-pub struct CircuitStream {
-    gates: IntoIter<Inst>,
-}
-
-impl Iterator for CircuitStream {
-    type Item = Inst;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.gates.next()
     }
 }
 

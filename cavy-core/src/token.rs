@@ -78,7 +78,7 @@ impl fmt::Display for Lexeme {
                 if let Some(sz) = sz {
                     let _ = write!(f, "{}", sz);
                 }
-                return f.write_str("");
+                return Ok(());
             }
             Dot => ".",
             DotDot => "..",

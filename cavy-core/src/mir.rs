@@ -506,7 +506,7 @@ impl<'c> FmtWith<Context<'c>> for Mir {
         for gr in self.graphs.iter() {
             write!(f, "{}", gr.fmt_with(ctx))?;
         }
-        f.write_str("")
+        Ok(())
     }
 }
 
@@ -595,7 +595,7 @@ impl fmt::Display for Place {
         for elem in self.path.iter() {
             write!(f, ".{}", elem)?;
         }
-        f.write_str("")
+        Ok(())
     }
 }
 

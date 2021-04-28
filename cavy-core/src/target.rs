@@ -2,7 +2,7 @@
 //! This is all pretty unstable for the time being, so don’t rely on it too much
 //! externally.
 
-use crate::circuit::CircuitBuf;
+use crate::{circuit::CircuitBuf, util::FmtWith};
 
 /// This type alias replaces the associated type previously attached to `Target`
 pub type ObjectCode = String;
@@ -13,19 +13,20 @@ pub trait Target: std::fmt::Debug + Send {
     fn from(&self, circ: CircuitBuf) -> ObjectCode;
 }
 
+impl<T> Target for T
+where
+    CircuitBuf: FmtWith<T>,
+    T: std::fmt::Debug + Send,
+{
+    fn from(&self, circ: CircuitBuf) -> ObjectCode {
+        format!("{}", circ.fmt_with(self))
+    }
+}
+
 impl Default for Box<dyn Target> {
     fn default() -> Self {
         Box::new(null::NullTarget())
     }
-}
-
-/// This trait is implemented by internal structs which, during code
-/// generation, need inform the target safely about their private fields.
-pub trait IntoTarget<T>
-where
-    T: Target,
-{
-    fn into_target(self, target: &T) -> ObjectCode;
 }
 
 /// A null target for testing and running partial compiler pipelines.
@@ -58,33 +59,21 @@ pub mod qasm {
         fn headers(&self) -> String {
             format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
         }
-
-        fn circuit(&self, circuit: crate::circuit::CircuitBuf) -> String {
-            circuit.into_target(self)
-        }
     }
 
-    impl Target for Qasm {
-        fn from(&self, circ: CircuitBuf) -> String {
-            format!("{}\n{}", self.headers(), self.circuit(circ))
-        }
-    }
-
-    impl IntoTarget<Qasm> for crate::circuit::CircuitBuf {
-        fn into_target(self, target: &Qasm) -> String {
-            let declaration = {
-                format!(
-                    "qreg q[{}];\ncreg c[{}];",
-                    self.qbit_size(),
-                    self.cbit_size()
-                )
-            };
-            let gates = self
-                .into_iter()
-                .map(|gate| gate.into_target(target))
-                .collect::<Vec<String>>()
-                .join("\n");
-            format!("{}\n{}\n", declaration, gates)
+    impl FmtWith<Qasm> for CircuitBuf {
+        // It's too bad that this doesn't consume the circuit. I should find a
+        // way to do that, by calling `circ.into_iter()` instead of implementing
+        // `FmtWith<Qasm>` for CircuitBuf. The problem is that, then, there's no
+        // way to format the iterator, because `.next()` mutates it.
+        fn fmt(&self, qasm: &Qasm, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            writeln!(f, "{}", qasm.headers())?;
+            writeln!(f, "qreg q[{}];", self.qbit_size())?;
+            writeln!(f, "creg c[{}];", self.cbit_size())?;
+            for inst in self.iter() {
+                writeln!(f, "{}", inst.fmt_with(qasm))?;
+            }
+            Ok(())
         }
     }
 }
@@ -106,12 +95,12 @@ pub mod latex {
 
     /// This backend emits a circuit in quantikz format
     #[derive(Debug)]
-    pub struct Latex {
+    pub struct LaTeX {
         /// Include preamble and `\begin{document}...\end{document}`?
         pub standalone: bool,
     }
 
-    impl Latex {
+    impl LaTeX {
         /// Escapes a string by replacing underscores with `\_`
         fn escape(s: &str) -> String {
             str::replace(s, "_", r"\_")
@@ -174,8 +163,8 @@ pub mod latex {
         elem: usize,
     }
 
-    impl fmt::Display for Elem {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    impl FmtWith<LaTeX> for Elem {
+        fn fmt(&self, _data: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             use Elem::*;
             match self {
                 X => f.write_str(r"\gate{X}"),
@@ -240,8 +229,12 @@ pub mod latex {
     /// better locality of reference, and easier to serialize without an extra
     /// allocation.
     struct LayoutArray<'l> {
-        /// The target spec
-        latex: &'l Latex,
+        /// The target spec: this *should* actually be visible during
+        /// construction of the array, because we might want to add *other*
+        /// LaTeX circuit libraries like qcircuit. If they have different
+        /// features, this might affect the layout process itself, not just the
+        /// string representation of gates.
+        latex: &'l LaTeX,
         /// The wire array itself
         wires: Vec<Wire>,
         /// The index of the first classical wire
@@ -252,7 +245,7 @@ pub mod latex {
     impl<'l> LayoutArray<'l> {
         /// It only makes sense to construct a LaTeX circuit from a finite
         /// circuit of known size.
-        fn new(latex: &'l Latex, qwires: usize, cwires: usize) -> Self {
+        fn new(latex: &'l LaTeX, qwires: usize, cwires: usize) -> Self {
             // Start with length at least one. It will be an invariant of this
             // data structure that there is always an empty final moment. This
             // final moment will provide the terminal $\qw$ on each wire.
@@ -459,11 +452,11 @@ pub mod latex {
         }
     }
 
-    impl fmt::Display for LayoutState<Elem> {
+    impl FmtWith<LaTeX> for LayoutState<Elem> {
         #[rustfmt::skip]
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                Occupied(elem) => write!(f, "{}", elem),
+                Occupied(elem) => write!(f, "{}", elem.fmt_with(latex)),
                 Free(Dead)  | Blocked(Dead)  => f.write_str(" "),
                 Free(LiveQ) | Blocked(LiveQ) => f.write_str(r"\qw"),
                 Free(LiveC) | Blocked(LiveC) => f.write_str(r"\cw"),
@@ -471,54 +464,41 @@ pub mod latex {
         }
     }
 
-    // let cells = self.cells.iter();
-    // if let Some(elem) = cells.next() {
-    //     write!(f, "{}", cells.next())?;
-    // }
-    // for cell in cells {
-    //     write!(f, "& {}", cell)?;
-    // }
-    // Ok(())
-    impl fmt::Display for Wire {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    impl FmtWith<LaTeX> for Wire {
+        #[rustfmt::skip]
+        fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some((last, head)) = &self.cells.split_last() {
                 for cell in head.iter() {
                     // Prev comment: "must not be a raw string"; why?
-                    write!(f, "{} & ", cell)?;
+                    write!(f, "{} & ", cell.fmt_with(latex))?;
                 }
-                write!(f, "{} ", last)?;
+                write!(f, "{} ", last.fmt_with(latex))?;
             }
             Ok(())
         }
     }
 
-    impl fmt::Display for LayoutArray<'_> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            if self.latex.standalone {
-                writeln!(f, "{}", Latex::HEADER)?;
+    impl FmtWith<LaTeX> for LayoutArray<'_> {
+        fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if latex.standalone {
+                writeln!(f, "{}", LaTeX::HEADER)?;
             }
-            writeln!(f, "{}", Latex::BEGIN_ENV)?;
+            writeln!(f, "{}", LaTeX::BEGIN_ENV)?;
             if let Some((last, head)) = &self.wires.split_last() {
                 for wire in head.iter() {
-                    writeln!(f, "{}\\\\", wire)?;
+                    writeln!(f, "{}\\\\", wire.fmt_with(latex))?;
                 }
-                writeln!(f, "{}", last)?;
+                writeln!(f, "{}", last.fmt_with(latex))?;
             }
-            writeln!(f, "{}", Latex::END_ENV)?;
-            if self.latex.standalone {
-                writeln!(f, "{}", Latex::FOOTER)?;
+            writeln!(f, "{}", LaTeX::END_ENV)?;
+            if latex.standalone {
+                writeln!(f, "{}", LaTeX::FOOTER)?;
             }
             Ok(())
         }
     }
 
-    impl IntoTarget<Latex> for LayoutArray<'_> {
-        fn into_target(self, _target: &Latex) -> String {
-            format!("{}", self)
-        }
-    }
-
-    impl Latex {
+    impl LaTeX {
         const HEADER: &'static str = r"\documentclass{standalone}
 \usepackage{tikz}
 \usetikzlibrary{quantikz}
@@ -532,7 +512,7 @@ pub mod latex {
         const END_ENV: &'static str = r"\end{quantikz}";
     }
 
-    impl Target for Latex {
+    impl Target for LaTeX {
         #[rustfmt::skip]
         fn from(&self, circ: CircuitBuf) -> ObjectCode {
             let qbits = circ.qbit_size();
@@ -543,7 +523,7 @@ pub mod latex {
                 layout_array.push_inst(inst);
             }
 
-            layout_array.into_target(self)
+            format!("{}", layout_array.fmt_with(self))
         }
     }
 }

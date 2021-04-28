@@ -162,7 +162,7 @@ impl<'c> FmtWith<Context<'c>> for ErrorBuf {
             let _ = write!(f, "{}", err.fmt_with(ctx));
             false
         });
-        f.write_str("")
+        Ok(())
     }
 }
 
