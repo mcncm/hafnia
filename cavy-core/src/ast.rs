@@ -292,6 +292,7 @@ pub enum BinOpKind {
     Swap,
     And,
     Or,
+    Xor,
 }
 
 impl FromToken for BinOp {
@@ -341,6 +342,7 @@ impl fmt::Display for BinOpKind {
             Self::Swap => Dollar,
             Self::And => AmpAmp,
             Self::Or => VertVert,
+            Self::Xor => CarotEqual,
         };
         write!(f, "{}", repr)
     }

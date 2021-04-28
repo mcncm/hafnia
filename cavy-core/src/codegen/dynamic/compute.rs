@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 
 use crate::{
-    ast::UnOpKind,
+    ast::{BinOpKind, UnOpKind},
     circuit::{CGate, QGate},
     mir::Operand,
     values::Value,
@@ -17,7 +17,7 @@ enum Data {
 impl<'m> Interpreter<'m> {
     pub fn compute_assn(&mut self, place: &Place, rvalue: &Rvalue) {
         let bindings = match &rvalue.data {
-            RvalueKind::BinOp(_, _, _) => todo!(),
+            RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
             RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
             RvalueKind::Ref(_, _) => todo!(),
             RvalueKind::Use(op) => self.compute_use(place, op),
@@ -51,9 +51,30 @@ impl<'m> Interpreter<'m> {
                 // NOTE not actually correct
                 self.st.env.mem_copy(lplace, rplace);
             }
+            // NOTE: When is this correct/safe? When should we swap? Can we
+            // always memcpy?
             Operand::Move(rplace) => {
                 self.st.env.mem_copy(lplace, rplace);
             }
+        }
+    }
+
+    fn compute_binop(&mut self, place: &Place, op: &BinOpKind, left: &Operand, right: &Operand) {
+        use BinOpKind::*;
+        match op {
+            Equal => todo!(),
+            Nequal => todo!(),
+            DotDot => todo!(),
+            Plus => todo!(),
+            Minus => todo!(),
+            Times => todo!(),
+            Mod => todo!(),
+            Less => todo!(),
+            Greater => todo!(),
+            Swap => todo!(),
+            And => todo!(),
+            Or => todo!(),
+            Xor => todo!(),
         }
     }
 

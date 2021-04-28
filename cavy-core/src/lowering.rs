@@ -537,6 +537,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
+    /// Lower an expression, generating a new temp variable to store it in.
+    fn lower_expr(&mut self, expr: &Expr) -> Maybe<Place> {
+        let ty = self.type_expr(expr)?;
+        let place = self.gr.auto_place(ty);
+        self.lower_into(&place, expr)?;
+        Ok(place)
+    }
+
     /// Convert a place to an operand, basing the choice to move or copy on its
     /// type
     fn operand_of(&self, place: Place) -> Operand {
@@ -558,16 +566,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
-        let l_ty = self.type_expr(left)?;
-        let r_ty = self.type_expr(right)?;
-        let l_place = self.gr.auto_place(l_ty);
-        let r_place = self.gr.auto_place(r_ty);
-
-        let left = self.lower_into(&l_place, left);
-        let right = self.lower_into(&r_place, right);
-        if let (Err(e), _) | (_, Err(e)) = (left, right) {
-            return Err(e);
-        }
+        let l_place = self.lower_expr(left)?;
+        let r_place = self.lower_expr(right)?;
 
         let left = self.operand_of(l_place);
         let right = self.operand_of(r_place);
@@ -611,11 +611,11 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_into_assn(&mut self, place: Place, op: &AssnOp, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
-        let span = Span::default(); // FIXME always wrong!
+        let span = lhs.span.join(&rhs.span).unwrap();
         let stmt = mir::StmtKind::Assn(
             place,
             Rvalue {
-                span: Span::default(), // ibid
+                span: Span::default(), // FIXME always wrong
                 data: RvalueKind::Use(Operand::Const(Value::Unit)),
             },
         );
@@ -629,12 +629,27 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
 
-        match op.data {
-            AssnOpKind::Equal => self.lower_into(&lhs, rhs),
-            AssnOpKind::And => todo!(),
-            AssnOpKind::Or => todo!(),
-            AssnOpKind::Xor => todo!(),
-        }
+        let binop = match op.data {
+            AssnOpKind::Equal => return self.lower_into(&lhs, rhs),
+            AssnOpKind::And => BinOpKind::And,
+            AssnOpKind::Or => BinOpKind::Or,
+            AssnOpKind::Xor => BinOpKind::Xor,
+        };
+
+        // This was not an `Equal` assignment; do the operation and store it
+        // *back* in the lhs.
+        let rhs = self.lower_expr(rhs)?;
+        let rvalue_kind = RvalueKind::BinOp(
+            binop,
+            self.operand_of(lhs.clone()),
+            self.operand_of(rhs.clone()),
+        );
+        let rvalue = Rvalue {
+            span,
+            data: rvalue_kind,
+        };
+        self.assn_stmt(lhs, rvalue);
+        Ok(())
     }
 
     fn lower_into_literal(&mut self, place: Place, lit: &Literal) -> Maybe<()> {
@@ -1211,12 +1226,13 @@ mod typing {
         }
 
         fn type_binop(&mut self, left: &Expr, op: &ast::BinOp, right: &Expr) -> Maybe<TyId> {
+            use BinOpKind::*;
+            use RefKind::*;
             let left = self.type_inner(left)?;
             let right = self.type_inner(right)?;
 
             match &op.data {
-                BinOpKind::Equal | BinOpKind::Nequal => {
-                    use RefKind::*;
+                Equal | Nequal => {
                     let lty = &self.ctx.types[left];
                     let rty = &self.ctx.types[left];
                     match (lty, rty) {
@@ -1234,24 +1250,24 @@ mod typing {
                         }
                     }
                 }
-                BinOpKind::DotDot => todo!(),
-                BinOpKind::Plus | BinOpKind::Times => {
+                DotDot => todo!(),
+                Plus | Times => {
                     if (left == right) & left.is_uint(&self.ctx) {
                         return Ok(left);
                     }
                 }
-                BinOpKind::Minus => todo!(),
-                BinOpKind::Mod => todo!(),
-                BinOpKind::Less => todo!(),
-                BinOpKind::Greater => todo!(),
-                BinOpKind::Swap => {
-                    if let Some(RefKind::Uniq) = left.ref_kind(&self.ctx) {
+                Minus => todo!(),
+                Mod => todo!(),
+                Less => todo!(),
+                Greater => todo!(),
+                Swap => {
+                    if let Some(Uniq) = left.ref_kind(&self.ctx) {
                         if left == right {
                             return Ok(self.ctx.common.unit);
                         }
                     }
                 }
-                BinOpKind::And | BinOpKind::Or => {
+                And | Or | Xor => {
                     use RefKind::*;
                     let lty = &self.ctx.types[left];
                     let rty = &self.ctx.types[left];

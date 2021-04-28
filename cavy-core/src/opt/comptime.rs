@@ -155,6 +155,25 @@ impl Interpreter {
     fn exec(&mut self, place: &Place, rhs: &mut Rvalue) -> Evaluated {
         use Operand::*;
         match &mut rhs.data {
+            // We need to special-case the `Swap` operator, because it
+            // doesn't require both of its operands to be evaluated
+            RvalueKind::BinOp(BinOp::Swap, u, v) => match (&u, &v) {
+                (Const(c), Move(place)) | (Move(place), Const(c)) => {
+                    self.env.insert(place, c.clone());
+                    Evaluated::Yes
+                }
+                (Move(u_place), Move(v_place)) => {
+                    if let (Some(u_val), Some(v_val)) =
+                        (self.operand_value(u), self.operand_value(v))
+                    {
+                        self.env.insert(u_place, v_val);
+                        self.env.insert(v_place, u_val);
+                    }
+                    Evaluated::Yes
+                }
+                _ => Evaluated::No,
+            },
+
             RvalueKind::BinOp(op, u, v) => {
                 if let (Some(u), Some(v)) = (self.operand_value(u), self.operand_value(v)) {
                     match op {
@@ -164,7 +183,9 @@ impl Interpreter {
                         BinOp::Nequal => {
                             self.env.insert(place, self.eval_not(self.eval_equal(u, v)))
                         }
-                        _ => todo!(),
+                        // Previously special-cased
+                        BinOp::Swap => unreachable!(),
+                        _ => return Evaluated::No,
                     };
                     return Evaluated::Yes;
                 }
