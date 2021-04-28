@@ -66,6 +66,7 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         ',' => Lexeme::Comma,
         '.' => Lexeme::Dot,
         '!' => Lexeme::Bang,
+        '$' => Lexeme::Dollar,
         '?' => Lexeme::Question,
         ';' => Lexeme::Semicolon,
         ':' => Lexeme::Colon,
@@ -79,6 +80,7 @@ fn sctokens(ch: char) -> Option<Lexeme> {
         '>' => Lexeme::RAngle,
         '#' => Lexeme::Octothorpe,
         '&' => Lexeme::Ampersand,
+        '^' => Lexeme::Carot,
         _ => return None,
     };
     Some(lexeme)
@@ -89,9 +91,14 @@ fn tctokens(chars: (char, char)) -> Option<Lexeme> {
         ('.', '.') => Lexeme::DotDot,
         ('=', '=') => Lexeme::EqualEqual,
         ('~', '=') => Lexeme::TildeEqual,
+        ('&', '=') => Lexeme::AmpEqual,
+        ('|', '=') => Lexeme::VertEqual,
+        ('^', '=') => Lexeme::CarotEqual,
         ('-', '>') => Lexeme::MinusRAngle,
         ('=', '>') => Lexeme::EqualRAngle,
         (':', ':') => Lexeme::ColonColon,
+        ('|', '|') => Lexeme::VertVert,
+        ('&', '&') => Lexeme::AmpAmp,
         _ => return None,
     };
     Some(lexeme)

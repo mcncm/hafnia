@@ -312,9 +312,9 @@ pub mod latex {
         fn push_inst(&mut self, inst: circuit::Inst) {
             match inst {
                 Inst::CInit(_) => {}
-                Inst::CFree(_) => {}
+                Inst::CFree(_, _) => {}
                 Inst::QInit(_) => {}
-                Inst::QFree(_) => {}
+                Inst::QFree(_, _) => {}
                 Inst::QGate(g) => self.push_qgate(g),
                 Inst::CGate(g) => self.push_cgate(g),
                 Inst::Meas(s, t) => self.push_meas(self.qwire(s), self.cwire(t)),

@@ -289,6 +289,9 @@ pub enum BinOpKind {
     Mod,
     Less,
     Greater,
+    Swap,
+    And,
+    Or,
 }
 
 impl FromToken for BinOp {
@@ -305,6 +308,9 @@ impl FromToken for BinOp {
             Lexeme::Percent => Mod,
             Lexeme::LAngle => Less,
             Lexeme::RAngle => Greater,
+            Lexeme::VertVert => Or,
+            Lexeme::AmpAmp => And,
+            Lexeme::Dollar => Swap,
             _ => {
                 return Err(());
             }
@@ -332,8 +338,55 @@ impl fmt::Display for BinOpKind {
             Self::Mod => Percent,
             Self::Less => LAngle,
             Self::Greater => RAngle,
+            Self::Swap => Dollar,
+            Self::And => AmpAmp,
+            Self::Or => VertVert,
         };
         write!(f, "{}", repr)
+    }
+}
+
+/// Assignment operator node
+pub type AssnOp = Spanned<AssnOpKind>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssnOpKind {
+    Equal,
+    And,
+    Or,
+    Xor,
+}
+
+impl fmt::Display for AssnOpKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::token::Lexeme::*;
+        let repr = match self {
+            Self::Equal => Equal,
+            Self::And => AmpEqual,
+            Self::Or => VertEqual,
+            Self::Xor => CarotEqual,
+        };
+        write!(f, "{}", repr)
+    }
+}
+
+impl FromToken for AssnOp {
+    fn from_token(token: Token) -> Result<Self, ()> {
+        use crate::token::Lexeme;
+        use AssnOpKind::*;
+        let kind = match token.lexeme {
+            Lexeme::Equal => Equal,
+            Lexeme::AmpEqual => And,
+            Lexeme::VertEqual => Or,
+            Lexeme::CarotEqual => Xor,
+            _ => {
+                return Err(());
+            }
+        };
+        Ok(AssnOp {
+            data: kind,
+            span: token.span,
+        })
     }
 }
 
@@ -445,6 +498,7 @@ pub enum ExprKind {
         /// remove the need to check later that this is the right kind of
         /// expression. However, that would make parsing more difficult, so we
         /// won't do it for now.
+        op: AssnOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },

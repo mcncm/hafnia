@@ -26,11 +26,12 @@ pub enum Lexeme {
 
     // two-character token types
     DotDot, EqualEqual, TildeEqual, MinusRAngle, EqualRAngle,
-    ColonColon,
+    ColonColon, VertVert, AmpAmp, VertEqual, AmpEqual, CarotEqual,
 
     // single-character token types
     Dot, Equal, Plus, Minus, Star, Percent, Bang, Question, Tilde,
     Comma, Semicolon, Colon, LAngle, RAngle, Octothorpe, Ampersand,
+    Dollar, Carot,
 
     // delimiters
     LDelim(Delim), RDelim(Delim),
@@ -81,14 +82,21 @@ impl fmt::Display for Lexeme {
             Dot => ".",
             DotDot => "..",
             EqualEqual => "==",
+            VertVert => "||",
+            AmpAmp => "&&",
+            Carot => "^",
             TildeEqual => "~=",
             MinusRAngle => "->",
             EqualRAngle => "=>",
             ColonColon => "::",
             Equal => "=",
+            VertEqual => "|=",
+            AmpEqual => "&=",
+            CarotEqual => "^=",
             Plus => "+",
             Minus => "-",
             Star => "*",
+            Dollar => "$",
             Percent => "%",
             Bang => "!",
             Tilde => "~",

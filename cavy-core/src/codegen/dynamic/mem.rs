@@ -1,6 +1,9 @@
 use std::ops;
 
-use crate::types::{TyId, TypeSize};
+use crate::{
+    circuit::FreeState,
+    types::{TyId, TypeSize},
+};
 
 use super::*;
 
@@ -37,20 +40,19 @@ where
         std::iter::from_fn(|| self.alloc_one()).take(n).collect()
     }
 
-    fn free_clean<S>(&mut self, items: S)
+    fn free<S>(&mut self, items: S, state: FreeState)
     where
         S: Iterator<Item = T>,
     {
-        self.clean.extend(items);
-    }
-
-    fn free_dirty<S>(&mut self, items: S)
-    where
-        S: Iterator<Item = T>,
-    {
-        self.dirty.extend(items);
+        match state {
+            FreeState::Clean => self.clean.extend(items),
+            FreeState::Dirty => self.dirty.extend(items),
+        }
     }
 }
+
+/// Specifier for a qubit set
+pub enum BitKind {}
 
 pub struct BitAllocator<'c> {
     class: Allocator<usize, RangeFrom<usize>>,
@@ -60,6 +62,8 @@ pub struct BitAllocator<'c> {
     // `Context` for now.
     ctx: &'c Context<'c>,
 }
+
+///
 
 impl<'c> BitAllocator<'c> {
     pub fn new(ctx: &'c Context) -> Self {
@@ -79,32 +83,21 @@ impl<'c> BitAllocator<'c> {
         }
     }
 
-    pub fn free_clean_class<S: Iterator<Item = Addr>>(&mut self, items: S) {
-        self.class.free_clean(items);
+    pub fn free_class<S: Iterator<Item = Addr>>(&mut self, items: S, state: FreeState) {
+        self.class.free(items, state);
     }
 
-    pub fn free_clean_quant<S: Iterator<Item = Addr>>(&mut self, items: S) {
-        self.quant.free_clean(items);
+    pub fn free_quant<S: Iterator<Item = Addr>>(&mut self, items: S, state: FreeState) {
+        self.quant.free(items, state);
     }
 
-    pub fn free_dirty_class<S: Iterator<Item = Addr>>(&mut self, items: S) {
-        self.quant.free_dirty(items);
-    }
-
-    pub fn free_dirty_quant<S: Iterator<Item = Addr>>(&mut self, items: S) {
-        self.quant.free_dirty(items);
-    }
-
-    pub fn free_clean(&mut self, bits: BitSetSlice) {
-        self.free_clean_class(bits.cbits.iter().copied());
-        self.free_clean_quant(bits.qbits.iter().copied());
-    }
-
-    pub fn free_dirty(&mut self, bits: BitSetSlice) {
-        self.free_dirty_class(bits.cbits.iter().copied());
-        self.free_dirty_quant(bits.qbits.iter().copied());
+    pub fn free(&mut self, bits: BitSetSlice, state: FreeState) {
+        self.free_class(bits.cbits.iter().copied(), state);
+        self.free_quant(bits.qbits.iter().copied(), state);
     }
 }
+
+impl<'a> CircAssembler<'a> {}
 
 impl<'a> Environment<'a> {
     pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<Addr>, ops::Range<Addr>) {

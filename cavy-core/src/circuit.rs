@@ -52,6 +52,16 @@ pub enum CGate {
     Control(Addr, Box<QGate>),
 }
 
+/// Is a freed bit clean (known pure state) or dirty (unknown, possibly
+/// entangled [if qubit]?)
+#[derive(Debug, Clone, Copy)]
+pub enum FreeState {
+    /// Known pure state
+    Clean,
+    /// Unknown state, (if qubit) possibly entangled
+    Dirty,
+}
+
 /// The simple instructions that make up the low-level circuit stream
 /// representation
 #[derive(Debug)]
@@ -59,11 +69,11 @@ pub enum Inst {
     /// Bring up a bit rail
     CInit(Addr),
     /// Set down a bit rail
-    CFree(Addr),
+    CFree(Addr, FreeState),
     /// Bring up a qubit rail
     QInit(Addr),
     /// Set down a qubit rail
-    QFree(Addr),
+    QFree(Addr, FreeState),
     /// A quantum gate
     QGate(QGate),
     /// A classical gate
@@ -212,9 +222,9 @@ impl MaxBits for Inst {
     fn max_qbit(&self) -> Option<usize> {
         match self {
             Inst::CInit(_) => None,
-            Inst::CFree(_) => None,
+            Inst::CFree(_, _) => None,
             Inst::QInit(u) => Some(*u),
-            Inst::QFree(u) => Some(*u),
+            Inst::QFree(u, _) => Some(*u),
             Inst::QGate(g) => g.max_qbit(),
             Inst::CGate(g) => g.max_qbit(),
             Inst::Meas(u, _) => Some(*u),
@@ -225,9 +235,9 @@ impl MaxBits for Inst {
     fn max_cbit(&self) -> Option<usize> {
         match self {
             Inst::CInit(u) => Some(*u),
-            Inst::CFree(u) => Some(*u),
+            Inst::CFree(u, _) => Some(*u),
             Inst::QInit(_) => None,
-            Inst::QFree(_) => None,
+            Inst::QFree(_, _) => None,
             Inst::QGate(g) => g.max_cbit(),
             Inst::CGate(g) => g.max_cbit(),
             Inst::Meas(_, u) => Some(*u),

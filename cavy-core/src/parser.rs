@@ -49,15 +49,21 @@ struct Precedence(u8, bool);
 fn operator(lexeme: &Lexeme) -> Option<Precedence> {
     let prec = match lexeme {
         Equal => Precedence(0, true),
+        AmpEqual => Precedence(0, true),
+        VertEqual => Precedence(0, true),
+        CarotEqual => Precedence(0, true),
         TildeEqual => Precedence(1, false),
         EqualEqual => Precedence(1, false),
-        LAngle => Precedence(2, false),
-        RAngle => Precedence(2, false),
-        Plus => Precedence(3, false),
-        Minus => Precedence(3, false),
-        Star => Precedence(4, false),
-        Percent => Precedence(4, false),
-        DotDot => Precedence(5, false),
+        Dollar => Precedence(2, false),
+        VertVert => Precedence(3, false),
+        AmpAmp => Precedence(4, false),
+        LAngle => Precedence(5, false),
+        RAngle => Precedence(5, false),
+        Plus => Precedence(6, false),
+        Minus => Precedence(6, false),
+        Star => Precedence(7, false),
+        Percent => Precedence(7, false),
+        DotDot => Precedence(8, false),
         _ => return None,
     };
     Some(prec)
@@ -1198,10 +1204,14 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
 
                 let rhs_span = rhs.span;
                 // Check for assignment expressions as a specal case
-                if let Lexeme::Equal = outer.lexeme {
+                if matches!(
+                    outer.lexeme,
+                    Lexeme::Equal | Lexeme::AmpEqual | Lexeme::VertEqual | Lexeme::CarotEqual
+                ) {
                     let lhs = self.node(lhs, span);
                     return Ok(self.node(
                         ExprKind::Assn {
+                            op: AssnOp::from_token(outer).unwrap(),
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs),
                         },

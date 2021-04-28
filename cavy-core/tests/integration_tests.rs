@@ -399,4 +399,31 @@ test_compiles! {
             let y = &'a x;
         }
     }
+
+    // // Operators on borrowed types
+
+    or_takes_shrd [Typecheck] {
+        fn main() {
+            let x = ?true;
+            let y = ?false;
+            let z = &x || &y;
+            let test: &?bool = z;
+        }
+    }
+
+    swap_takes_mut [Typecheck] {
+        fn main() {
+            let x = ?true;
+            let y = ?true;
+            &mut x $ &mut y;
+        }
+    }
+
+    assn_or_not_quantum fail [Typecheck] {
+        fn main() {
+            let x = ?true;
+            let y = ?true;
+            x |= &y;
+        }
+    }
 }

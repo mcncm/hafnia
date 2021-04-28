@@ -23,7 +23,10 @@ pub struct TypeProperties {
     linear: bool,
     /// True if this type is owned
     owned: bool,
+    /// True if the type is ord
     ord: bool,
+    /// If a reference, the kind of reference that it is
+    ref_kind: Option<RefKind>,
 }
 
 /// A type interner that also carries some satellite data caches
@@ -52,6 +55,7 @@ impl CachedTypeInterner {
             owned: ty.is_owned(self),
             linear: ty.is_linear(self),
             ord: ty.is_ord(self),
+            ref_kind: ty.ref_kind(self),
         };
         let ty = self.interner.intern(ty);
         self.cache.insert(ty, props);
@@ -88,6 +92,14 @@ impl TyId {
 
     fn is_owned_inner(&self, interner: &CachedTypeInterner) -> bool {
         interner.cache[self].owned
+    }
+
+    pub fn ref_kind(&self, ctx: &Context) -> Option<RefKind> {
+        self.ref_kind_inner(&ctx.types)
+    }
+
+    pub fn ref_kind_inner(&self, interner: &CachedTypeInterner) -> Option<RefKind> {
+        interner.cache[self].ref_kind
     }
 
     /// A type will be said to be "classical" if none of the data it points to
@@ -239,7 +251,7 @@ impl std::iter::Sum<TypeSize> for TypeSize {
 }
 
 /// Kinds of reference types
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RefKind {
     /// A shared reference
     Shrd,
@@ -381,6 +393,14 @@ impl Type {
 
     pub fn is_ord(&self, _ctx: &CachedTypeInterner) -> bool {
         matches!(self, Type::Ord)
+    }
+
+    pub fn ref_kind(&self, _interner: &CachedTypeInterner) -> Option<RefKind> {
+        if let Type::Ref(ref_kind, _) = self {
+            Some(*ref_kind)
+        } else {
+            None
+        }
     }
 }
 

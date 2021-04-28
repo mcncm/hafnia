@@ -509,7 +509,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 self.lower_into_binop(place, left, op, right, expr.span)
             }
             ExprKind::UnOp { op, right } => self.lower_into_unop(place, op, right, expr.span),
-            ExprKind::Assn { lhs, rhs } => self.lower_into_assn(place, lhs, rhs),
+            ExprKind::Assn { op, lhs, rhs } => self.lower_into_assn(place, op, lhs, rhs),
             ExprKind::Literal(lit) => self.lower_into_literal(place, lit),
             ExprKind::Ident(ident) => self.lower_into_ident(place, ident),
             ExprKind::Field(root, field) => self.lower_into_field(place, root, field),
@@ -558,12 +558,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
-        let ty = self.gr.type_of(&place, self.ctx);
-        // Let's assume for now that all the binops take the same two types, in
-        // both arguments. This won't be true, but it's a convenient simplifying
-        // assumption.
-        let l_place = self.gr.auto_place(ty);
-        let r_place = self.gr.auto_place(ty);
+        let l_ty = self.type_expr(left)?;
+        let r_ty = self.type_expr(right)?;
+        let l_place = self.gr.auto_place(l_ty);
+        let r_place = self.gr.auto_place(r_ty);
 
         let left = self.lower_into(&l_place, left);
         let right = self.lower_into(&r_place, right);
@@ -610,7 +608,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     /// Lower an assignment *expression*, as on the rhs of `let x = (y = 2);`.
-    fn lower_into_assn(&mut self, place: Place, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
+    fn lower_into_assn(&mut self, place: Place, op: &AssnOp, lhs: &Expr, rhs: &Expr) -> Maybe<()> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
         let span = Span::default(); // FIXME always wrong!
@@ -631,7 +629,12 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
 
-        self.lower_into(&lhs, rhs)
+        match op.data {
+            AssnOpKind::Equal => self.lower_into(&lhs, rhs),
+            AssnOpKind::And => todo!(),
+            AssnOpKind::Or => todo!(),
+            AssnOpKind::Xor => todo!(),
+        }
     }
 
     fn lower_into_literal(&mut self, place: Place, lit: &Literal) -> Maybe<()> {
@@ -963,10 +966,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // Get the reference kind
         let ref_kind = typing::resolve_ref_annot(annot);
 
-        // Now, the type of the place should be the appropriate kind of
-        // reference to the type of the rhs.
-        // self.expect_type(&[place.root.ty], arg_ty, span: Span)
-
         // Finally, put it there
         let rvalue = Rvalue {
             data: RvalueKind::Ref(ref_kind, r_place),
@@ -1129,12 +1128,7 @@ mod typing {
             let ty = match &expr.data {
                 ExprKind::BinOp { left, op, right } => self.type_binop(left, op, right)?,
                 ExprKind::UnOp { op, right } => self.type_unop(op, right)?,
-                ExprKind::Assn { lhs, rhs } => {
-                    // Check the lhs and rhs, to make sure validations happen
-                    self.type_expr(lhs)?;
-                    self.type_expr(rhs)?;
-                    self.ctx.common.unit
-                }
+                ExprKind::Assn { op, lhs, rhs } => self.type_assn(op, lhs, rhs)?,
                 ExprKind::Literal(lit) => self.type_literal(lit),
                 ExprKind::Ident(ident) => self.type_ident(ident)?,
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
@@ -1222,35 +1216,62 @@ mod typing {
 
             match &op.data {
                 BinOpKind::Equal | BinOpKind::Nequal => {
-                    if left == right {
-                        Ok(left)
-                    } else {
-                        Err(self.errors.push(errors::BinOpTypeError {
-                            span: op.span,
-                            kind: op.data,
-                            left,
-                            right,
-                        }))
+                    use RefKind::*;
+                    let lty = &self.ctx.types[left];
+                    let rty = &self.ctx.types[left];
+                    match (lty, rty) {
+                        (Type::Ref(Shrd, _), Type::Ref(Shrd, _)) => {
+                            if left == right && !left.is_classical(self.ctx) {
+                                return Ok(left);
+                            }
+                        }
+                        _ => {
+                            if left == right && left.is_classical(self.ctx) {
+                                return Ok(self.ctx.common.bool);
+                            } else {
+                                ()
+                            }
+                        }
                     }
                 }
                 BinOpKind::DotDot => todo!(),
                 BinOpKind::Plus | BinOpKind::Times => {
                     if (left == right) & left.is_uint(&self.ctx) {
-                        Ok(left)
-                    } else {
-                        Err(self.errors.push(errors::BinOpTypeError {
-                            span: op.span,
-                            kind: op.data,
-                            left,
-                            right,
-                        }))
+                        return Ok(left);
                     }
                 }
                 BinOpKind::Minus => todo!(),
                 BinOpKind::Mod => todo!(),
                 BinOpKind::Less => todo!(),
                 BinOpKind::Greater => todo!(),
-            }
+                BinOpKind::Swap => {
+                    if let Some(RefKind::Uniq) = left.ref_kind(&self.ctx) {
+                        if left == right {
+                            return Ok(self.ctx.common.unit);
+                        }
+                    }
+                }
+                BinOpKind::And | BinOpKind::Or => {
+                    use RefKind::*;
+                    let lty = &self.ctx.types[left];
+                    let rty = &self.ctx.types[left];
+                    match (lty, rty) {
+                        (Type::Ref(Shrd, lty), Type::Ref(Shrd, rty)) => {
+                            if rty == rty && *lty == self.ctx.common.q_bool {
+                                return Ok(left);
+                            }
+                        }
+                        (Type::Bool, Type::Bool) => return Ok(self.ctx.common.bool),
+                        _ => (),
+                    }
+                }
+            };
+            Err(self.errors.push(errors::BinOpTypeError {
+                span: op.span,
+                kind: op.data,
+                left,
+                right,
+            }))
         }
 
         fn type_unop(&mut self, op: &ast::UnOp, right: &Expr) -> Maybe<TyId> {
@@ -1307,6 +1328,41 @@ mod typing {
                         }))
                     }
                 }
+            }
+        }
+
+        fn type_assn(&mut self, op: &AssnOp, lhs: &Expr, rhs: &Expr) -> Maybe<TyId> {
+            // NOTE: Check the lhs and rhs, to make sure validations happen. But, this
+            // is not where the *equality of the sides* is checked: that is at
+            // the top of `lower_into`.
+            //
+            // Why is that?
+            let lty = self.type_expr(lhs)?;
+            let rty = self.type_expr(rhs)?;
+            let well_typed = match op.data {
+                AssnOpKind::Equal => true, // as per the magic comment, do nothing
+                AssnOpKind::And | AssnOpKind::Or => lty == rty && lty.is_classical(self.ctx),
+                AssnOpKind::Xor => {
+                    if lty.is_classical(self.ctx) {
+                        lty == rty
+                    } else {
+                        if let Type::Ref(RefKind::Shrd, rty_inner) = self.ctx.types[rty] {
+                            lty == rty_inner
+                        } else {
+                            false
+                        }
+                    }
+                }
+            };
+            if well_typed {
+                Ok(self.ctx.common.unit)
+            } else {
+                Err(self.errors.push(errors::AssnOpTypeError {
+                    span: op.span,
+                    kind: op.data,
+                    rty,
+                    lty,
+                }))
             }
         }
 
@@ -1594,7 +1650,6 @@ mod util {
 
 mod errors {
     use crate::ast::*;
-    use crate::cavy_errors::Diagnostic;
     use crate::context::SymbolId;
     use crate::source::Span;
     use crate::types::TyId;
@@ -1664,6 +1719,18 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
+    #[msg = "assignment operator `{kind}` doesn't support types `{lty}` and `{rty}`"]
+    pub struct AssnOpTypeError {
+        #[span]
+        pub span: Span,
+        pub kind: AssnOpKind,
+        #[ctx]
+        pub rty: TyId,
+        #[ctx]
+        pub lty: TyId,
+    }
+
+    #[derive(Diagnostic)]
     #[msg = "pattern fails to match type `{actual}`"]
     pub struct DestructuringError {
         #[span]
@@ -1711,7 +1778,7 @@ mod errors {
     #[derive(Diagnostic)]
     #[msg = "invalid left-hand side of assignment"]
     pub struct InvalidLhsKind {
-        #[span(msg = "expected a variable here")]
+        #[span(msg = "expected an lvalue here")]
         pub span: Span,
     }
 

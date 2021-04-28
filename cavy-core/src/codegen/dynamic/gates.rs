@@ -1,6 +1,6 @@
 use crate::{
     arch::MeasurementMode,
-    circuit::{CGate, Inst, QGate},
+    circuit::{CGate, FreeState, Inst, QGate},
 };
 
 use super::{mem::*, *};
@@ -29,21 +29,15 @@ impl<'m> CircAssembler<'m> {
         use MeasurementMode::*;
         let mode = self.ctx.conf.arch.meas_mode;
         // Hm, will the branch predictor take care of this for us?
-        match mode {
-            Demolition => {
-                for &addr in addrs {
-                    self.gate_buf.push(Inst::QFree(addr));
-                }
-                self.alloc.free_clean_quant(addrs.iter().copied());
-            }
-            Nondemolition => {
-                // TODO: should reset qubit based on measurement result and
-                // deallocate clean, if classical feedback is enabled.
-                // Otherwise, deallocate dirty.
-            }
-            Dirty => {
-                self.alloc.free_dirty_quant(addrs.iter().copied());
-            }
+        let free_state = match mode {
+            Demolition => FreeState::Clean,
+            Nondemolition => FreeState::Dirty,
+            Dirty => FreeState::Dirty,
+        };
+
+        self.alloc.free_quant(addrs.iter().copied(), free_state);
+        for &addr in addrs {
+            self.gate_buf.push(Inst::QFree(addr, free_state));
         }
     }
 }
