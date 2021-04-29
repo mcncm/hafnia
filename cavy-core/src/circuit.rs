@@ -258,35 +258,6 @@ impl From<CGate> for Inst {
     }
 }
 
-impl FmtWith<Qasm> for QGate {
-    fn fmt(&self, _qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use QGate::*;
-        match self {
-            X(tgt) => write!(f, "x q[{}];", tgt),
-            T { tgt, conj } => write!(f, "{} q[{}];", if *conj { "tdg" } else { "t" }, tgt),
-            H(tgt) => write!(f, "h q[{}];", tgt),
-            Z(tgt) => write!(f, "z q[{}];", tgt),
-            CX { tgt, ctrl } => write!(f, "cx q[{}], q[{}];", ctrl, tgt),
-            SWAP { .. } => todo!(),
-        }
-    }
-}
-
-impl FmtWith<Qasm> for Inst {
-    fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Inst::QGate(g) => write!(f, "{}", g.fmt_with(qasm)),
-            Inst::Meas(src, tgt) => write!(f, "measure q[{}] -> c[{}]", src, tgt),
-            Inst::Out(io) => {
-                // TODO OpenQASM doesn't support this kind of operation, does it? What
-                // should we do here?
-                write!(f, "// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
-            }
-            _ => Ok(()),
-        }
-    }
-}
-
 /// A simple circuit struct. This backend data structure keeps changing, but it
 #[derive(Debug)]
 pub struct CircuitBuf {
