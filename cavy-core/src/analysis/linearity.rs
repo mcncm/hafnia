@@ -198,6 +198,7 @@ impl Lattice for MoveState {
             // FIXME Ach, two lookups. This can be done with `raw_entry_mut`,
             // which is an unstable library feature.
             if double_moves.get(place).is_none() {
+                println!("double move");
                 double_moves.insert(place.clone(), moves.clone());
             }
         }
@@ -241,7 +242,11 @@ impl DataflowAnalysis<'_, '_, Forward> for LinearityAnalysis {
             }
             RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
             RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
-            RvalueKind::Ref(_, _) => todo!(),
+            RvalueKind::Ref(_, _) => {
+                // TODO Well, this really is what it's all about, isn't it? For
+                // now, I suppose, we'll not do anything here at all, and let
+                // references move around freely.
+            }
         }
         state.move_into(&place);
     }

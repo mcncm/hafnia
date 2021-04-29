@@ -250,7 +250,7 @@ pub mod latex {
                     }
                     Ok(())
                 }
-                IoLabel(io) => write!(f, "\\push{{ \\tt {}[{}] }}", io.name, io.elem),
+                IoLabel(io) => write!(f, "\\push{{\\tt \\enspace {} [{}] }}", io.name, io.elem),
             }
         }
     }
@@ -532,8 +532,15 @@ pub mod latex {
             self.wires[src].liveness = Dead;
         }
 
-        fn push_io_out(&mut self, _io: &circuit::IoOutGate) {
-            todo!()
+        fn push_io_out(&mut self, io: &circuit::IoOutGate) {
+            let wire = self.cwire(io.addr);
+            let io = IoLabelData {
+                // Nice, I get to clone it *again*! (See `dynamic/gates.rs`)
+                name: io.name.clone(),
+                elem: io.elem,
+            };
+            let elem = Elem::IoLabel(Box::new(io));
+            self.insert_single(wire, elem);
         }
 
         fn insert_single(&mut self, wire: usize, elem: Elem) {

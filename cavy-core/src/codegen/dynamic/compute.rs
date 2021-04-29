@@ -19,7 +19,7 @@ impl<'m> Interpreter<'m> {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
             RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
-            RvalueKind::Ref(_, _) => todo!(),
+            RvalueKind::Ref(_, rplace) => self.st.env.mem_copy(place, rplace),
             RvalueKind::Use(op) => self.compute_use(place, op),
         };
     }
@@ -90,7 +90,7 @@ impl<'m> Interpreter<'m> {
                 for addr in bits.cbits {
                     self.circ.push_cgate(CGate::Not(*addr), &self.st);
                 }
-                bits
+                bits.to_owned()
             }
             UnOpKind::Split => {
                 let rplace = self.unwrap_operand(right);
@@ -98,31 +98,28 @@ impl<'m> Interpreter<'m> {
                 for addr in bits.qbits {
                     self.circ.push_qgate(QGate::H(*addr), &self.st);
                 }
-                bits
+                bits.to_owned()
             }
-            UnOpKind::Linear => {
-                match right {
-                    Operand::Const(value) => {
-                        let allocation = self.initialize(lplace, value);
-                        self.st.env.insert(lplace, allocation.as_ref());
-                    }
-                    Operand::Copy(_) => {
-                        unimplemented!("Classical feedback not yet implemented")
-                    }
-                    Operand::Move(_) => {
-                        unimplemented!("Classical feedback not yet implemented")
-                    }
+            UnOpKind::Linear => match right {
+                Operand::Const(value) => {
+                    let allocation = self.initialize(lplace, value);
+                    allocation
                 }
-                // self.insert_bindings(&lplace, allocation);
-                return;
-            }
+                Operand::Copy(_) => {
+                    unimplemented!("Classical feedback not yet implemented")
+                }
+                Operand::Move(_) => {
+                    unimplemented!("Classical feedback not yet implemented")
+                }
+            },
             UnOpKind::Delin => {
                 let rplace = self.unwrap_operand(right);
-                let cbits = &self.alloc_for_place(lplace).cbits;
+                let allocation = self.alloc_for_place(lplace);
                 let qbits = self.st.env.bits_at(rplace).qbits;
-                self.circ.meas(qbits, cbits, &self.st);
-                return;
+                self.circ.meas(qbits, &allocation.cbits, &self.st);
+                allocation
             }
         };
+        self.st.env.insert(lplace, bitset.as_ref());
     }
 }

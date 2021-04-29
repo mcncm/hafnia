@@ -228,7 +228,7 @@ impl MaxBits for Inst {
             Inst::QGate(g) => g.max_qbit(),
             Inst::CGate(g) => g.max_qbit(),
             Inst::Meas(u, _) => Some(*u),
-            Inst::Out(_) => todo!(),
+            Inst::Out(_) => None,
         }
     }
 
@@ -241,7 +241,7 @@ impl MaxBits for Inst {
             Inst::QGate(g) => g.max_cbit(),
             Inst::CGate(g) => g.max_cbit(),
             Inst::Meas(_, u) => Some(*u),
-            Inst::Out(_) => todo!(),
+            Inst::Out(io) => Some(io.addr),
         }
     }
 }

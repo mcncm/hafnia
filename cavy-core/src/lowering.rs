@@ -367,7 +367,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    fn error<T: 'static + Diagnostic>(&mut self, err: T) -> Maybe<()> {
+    fn error<E: 'static + Diagnostic, T>(&mut self, err: E) -> Maybe<T> {
         Err(self.errors.push(err))
     }
 
@@ -538,8 +538,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    /// Lower an expression, generating a new temp variable to store it in.
+    /// Lower an expression, possibly generating new temp variables to store it in.
     fn lower_expr(&mut self, expr: &Expr) -> Maybe<Place> {
+        // We don't want to generate new temp variables for (lexical)
+        // variables--they'll get lost! Otherwise, this would be a problem when
+        // we take references.
+        if let ExprKind::Ident(ref ident) = expr.data {
+            return self.resolve_ident(ident);
+        }
         let ty = self.type_expr(expr)?;
         let place = self.gr.auto_place(ty);
         self.lower_into(&place, expr)?;
@@ -592,10 +598,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         right: &Expr,
         span: Span,
     ) -> Maybe<()> {
-        // Should not be here, of course
-        let arg_ty = self.gamma.get(&right.node).unwrap();
-        let r_place = self.gr.auto_place(*arg_ty);
-        self.lower_into(&r_place, right)?;
+        let r_place = self.lower_expr(right)?;
 
         let right = self.operand_of(r_place);
         let rhs = Rvalue {
@@ -626,7 +629,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             // This unwrap *should* be safe because the name is validated during
             // typechecking
             ExprKind::Ident(name) => (*self.st.get(&name.data).unwrap()).into(),
-            ExprKind::Field(root, field) => self.unroll_fields(root, field)?,
+            ExprKind::Field(root, field) => self.resolve_fields(root, field)?,
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
 
@@ -694,28 +697,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     fn lower_into_ident(&mut self, place: Place, ident: &Ident) -> Maybe<()> {
         // NOTE Maybe this should lower unconditionally, and we should check if
         // things are declared before they're assigned as an analysis pass?
-        let rhs = match self.st.get(&ident.data) {
-            Some(id) => {
-                // FIXME temporarily simply convert to a place
-                let operand = self.operand_of((*id).into());
-                Rvalue {
-                    span: ident.span,
-                    data: RvalueKind::Use(operand),
-                }
-            }
-            None => {
-                return self.error(errors::UnboundName {
-                    span: ident.span,
-                    name: ident.data,
-                });
-            }
+        let rplace = self.resolve_ident(ident)?;
+        let operand = self.operand_of(rplace);
+        let rhs = Rvalue {
+            span: ident.span,
+            data: RvalueKind::Use(operand),
         };
         self.assn_stmt(place, rhs);
         Ok(())
     }
 
+    // Ok, maybe not the best function name, but this is how we get the place
+    // that an identifier refers to.
+    fn resolve_ident(&mut self, ident: &Ident) -> Maybe<Place> {
+        match self.st.get(&ident.data) {
+            Some(id) => Ok(Place::from(*id)),
+            None => self.error(errors::UnboundName {
+                span: ident.span,
+                name: ident.data,
+            }),
+        }
+    }
+
     fn lower_into_field(&mut self, place: Place, head: &Expr, field: &Field) -> Maybe<()> {
-        let rhs = self.unroll_fields(head, field)?;
+        let rhs = self.resolve_fields(head, field)?;
         let rhs = Rvalue {
             // FIXME Throughout this module, there are a lot of places where I
             // should be propagating spans downward, but I end up dropping,
@@ -727,9 +732,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         Ok(())
     }
 
-    /// An odd method, different from all the others of this struct. The
-    /// goal is to unroll a linked-list-like sequence of field accesses into a single path
-    fn unroll_fields(&mut self, head: &Expr, field: &Field) -> Maybe<Place> {
+    /// An odd method, different from all the others of this struct--except,
+    /// now, `resolve_ident`. The goal is to unroll a linked-list-like sequence
+    /// of field accesses into a single path
+    fn resolve_fields(&mut self, head: &Expr, field: &Field) -> Maybe<Place> {
         let head_ty = self.type_expr(head)?;
         let mut place = match &head.data {
             ExprKind::Ident(ident) => {
@@ -738,7 +744,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 let id = self.st.get(&ident.data).unwrap();
                 (*id).into()
             }
-            ExprKind::Field(head, field) => self.unroll_fields(head, &field)?,
+            ExprKind::Field(head, field) => self.resolve_fields(head, &field)?,
             _ => {
                 let head_place = self.gr.auto_place(head_ty);
                 self.lower_into(&head_place, head)?;
@@ -967,9 +973,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         span: Span,
     ) -> Maybe<()> {
         // Lower the rhs
-        let arg_ty = self.gamma.get(&expr.node).unwrap();
-        let r_place = self.gr.auto_place(*arg_ty);
-        self.lower_into(&r_place, expr)?;
+        let r_place = self.lower_expr(expr)?;
 
         // No lifetime annotation in a borrow expression
         if let Some(lt) = &annot.lifetime {

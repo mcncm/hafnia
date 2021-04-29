@@ -15,6 +15,24 @@ impl<'m> CircAssembler<'m> {
         self.gate_buf.push(gate);
     }
 
+    pub fn push_io(&mut self, io: &IoStmtKind, st: &InterpreterState) {
+        match io {
+            IoStmtKind::In => todo!(),
+            IoStmtKind::Out { place, symb } => {
+                let bits = st.env.bits_at(place);
+                for (i, &bit) in bits.cbits.iter().enumerate() {
+                    let name = self.ctx.symbols[*symb].clone(); // blegh
+                    let io = crate::circuit::IoOutGate {
+                        addr: bit,
+                        name,
+                        elem: i,
+                    };
+                    self.gate_buf.push(Inst::Out(Box::new(io)));
+                }
+            }
+        };
+    }
+
     /// Measure some qubits and store them in classical bits
     pub fn meas(&mut self, srcs: &[Addr], tgts: &[Addr], _st: &InterpreterState) {
         debug_assert!(srcs.len() == tgts.len());
