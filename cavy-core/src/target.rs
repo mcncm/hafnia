@@ -64,7 +64,8 @@ pub mod qasm {
     impl FmtWith<Qasm> for CircuitBuf {
         // It's too bad that this doesn't consume the circuit. I should find a
         // way to do that, by calling `circ.into_iter()` instead of implementing
-        // `FmtWith<Qasm>` for CircuitBuf. The problem is that, then, there's no
+        // `FmtWith<Qasm>` for CircuitBuf. Plus, the headers logically "belong
+        // to" the target data, not the circuit. The problem is that, there's no
         // way to format the iterator, because `.next()` mutates it.
         fn fmt(&self, qasm: &Qasm, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f, "{}", qasm.headers())?;
@@ -81,7 +82,7 @@ pub mod qasm {
 /// The LaTeX backend, which uses quantikz.
 pub mod latex {
     use std::{
-        fmt,
+        fmt, iter,
         ops::{Index, IndexMut, RangeInclusive},
     };
 
@@ -89,15 +90,13 @@ pub mod latex {
 
     use super::*;
 
-    // TODO the public interface and private implementation are a bit mixed
-    // here: there is some functionality in the `diagram` function of `Latex`
-    // that should probably go in the `new` constructor of `LayoutArray`.
-
     /// This backend emits a circuit in quantikz format
     #[derive(Debug)]
     pub struct LaTeX {
         /// Include preamble and `\begin{document}...\end{document}`?
         pub standalone: bool,
+        /// Instead of writing initial `X` gates, write the nominal input state
+        pub initial_kets: bool,
     }
 
     impl LaTeX {
@@ -107,11 +106,79 @@ pub mod latex {
         }
     }
 
+    // == Range queries ==
+
+    /// An inclusive interval
+    struct Interval<K: Ord, V> {
+        low: K,
+        high: K,
+        data: V,
+    }
+
+    impl<K: Ord, V> Interval<K, V> {
+        fn contains(&self, k: &K) -> bool {
+            k >= &self.low && k <= &self.high
+        }
+
+        fn overlaps(&self, other: &RangeInclusive<K>) -> bool {
+            self.contains(other.start()) || self.contains(other.end())
+        }
+    }
+
+    // FIXME: This implementation does the naive O(n) things, which means our
+    // insertions will become O(n^2). If that starts to become a problem, you
+    // should use a proper interval tree.
+    /// Insert and query intervals with inclusive endpoints. Queries return
+    /// sorted, unique values.
+    struct IntervalMap<K: Ord + Copy, V: Ord + Copy> {
+        intervals: Vec<Interval<K, V>>,
+    }
+
+    impl<K: Ord + Copy, V: Ord + Copy> IntervalMap<K, V> {
+        fn new() -> Self {
+            Self {
+                intervals: Vec::new(),
+            }
+        }
+
+        fn insert(&mut self, range: RangeInclusive<K>, v: V) {
+            let (low, high) = (*range.start(), *range.end());
+            let interval = Interval { low, high, data: v };
+            self.intervals.push(interval);
+        }
+
+        fn get_by<F>(&self, f: F) -> Vec<V>
+        where
+            F: Fn(&&Interval<K, V>) -> bool,
+        {
+            let mut intervals: Vec<_> = self
+                .intervals
+                .iter()
+                .filter(f)
+                .map(|int| int.data)
+                .collect();
+            intervals.sort();
+            intervals.dedup();
+            intervals
+        }
+
+        /// Get all the values at which a key overlaps
+        fn get_contained(&self, k: &K) -> Vec<V> {
+            self.get_by(|int| int.contains(k))
+        }
+
+        fn get_overlaps(&self, k: RangeInclusive<K>) -> Vec<V> {
+            self.get_by(|int| int.overlaps(&k))
+        }
+    }
+
+    // == Layout arrays ==
+
     /// Whether or not a wire has a live bit on it. Note that *might* one day
     /// want to be able to transform qubit wires into cbit wires for a more
     /// visually appealing layout, so *each cell* has the possibility of `LiveQ`
     /// or `LiveC`.
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Liveness {
         // A live quantum wire
         LiveQ,
@@ -129,20 +196,21 @@ pub mod latex {
     /// blocking element, and the wire may be live or dead. In `Blocked` there
     /// is no gate, but the cell is obstructed, as by a vertical wire, and the
     /// wire may be live or dead.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     enum LayoutState<T> {
         Occupied(T),
         Free(Liveness),
-        Blocked(Liveness),
     }
 
     // And let's bring this into module scope, too.
     use LayoutState::*;
 
     /// The kinds of elements that will occupy our circuit
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     #[rustfmt::skip]
     enum Elem {
+        // Ket state vectors
+        Ket(&'static str),
         // Quantum gates
         X, Z, H, T, TDag,
         // A control label with a distance to its target
@@ -155,7 +223,7 @@ pub mod latex {
         IoLabel(Box<IoLabelData>),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct IoLabelData {
         /// The name of the IO object being written to
         name: String,
@@ -167,6 +235,7 @@ pub mod latex {
         fn fmt(&self, _data: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             use Elem::*;
             match self {
+                Ket(s) => write!(f, "\\lstick{{$\\ket{{{}}}$}}", s),
                 X => f.write_str(r"\gate{X}"),
                 Z => f.write_str(r"\gate{Z}"),
                 H => f.write_str(r"\gate{H}"),
@@ -188,25 +257,108 @@ pub mod latex {
 
     /// The circuit, as we build it, will be composed of a vector of `Wire`s
     struct Wire {
-        cells: Vec<LayoutState<Elem>>,
-        /// On each wire, the index of the first `Free` cell, of which there is
-        /// guaranteed to be at least one.
-        first_free: usize,
+        pub cells: Vec<LayoutState<Elem>>,
+        /// The sorted moments on this wire that are blocked by some vertical
+        /// element
+        blocked: Vec<usize>,
+        /// The next free cell, computed from the `blocked` list
+        next_free: usize,
+        /// The first subsequent *blocked* cell, if there is one.
+        next_blocked: Option<usize>,
+        /// Is the list of blocked moments acceptable for use?
+        blocked_valid: bool,
         /// The current liveness state, for new cells
-        liveness: Liveness,
+        pub liveness: Liveness,
     }
 
     impl Wire {
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self {
-                cells: vec![Blocked(Dead), Free(Dead)],
-                first_free: 1,
-                liveness: LiveQ,
+                cells: vec![Free(Dead)],
+                blocked: Vec::new(),
+                next_free: 1,
+                next_blocked: None,
+                blocked_valid: true,
+                liveness: Dead,
             }
         }
 
-        fn len(&self) -> usize {
+        pub fn len(&self) -> usize {
             self.cells.len()
+        }
+
+        fn set_blocked(&mut self, blocked: Vec<usize>) {
+            debug_assert!(!self.blocked_valid);
+            self.blocked = blocked;
+            self.blocked_valid = true;
+            self.compute_next_free();
+        }
+
+        /// Extend the wire to the given length with empty cells
+        pub fn extend_to(&mut self, length: usize) {
+            let diff = length.saturating_sub(self.len());
+            self.cells
+                .extend(iter::repeat(Free(self.liveness)).take(diff));
+        }
+
+        /// Compute and set the `next_free` field. This should be considered a private function.
+        fn compute_next_free(&mut self) {
+            debug_assert!(self.blocked_valid);
+            let idx = match self.blocked.binary_search(&self.len()) {
+                // If len is blocked, must to search ahead from the blocked
+                // index.
+                Ok(idx) => {
+                    if idx == self.blocked.len() {
+                        self.next_free = self.len() + 1;
+                        self.next_blocked = None;
+                    }
+                    idx
+                }
+                // If the current length isn't a blocked index, I can just push to the array.
+                Err(idx) => {
+                    self.next_free = self.len();
+                    self.next_blocked = self.blocked.get(idx).cloned();
+                    return;
+                }
+            };
+            // At least two elements in `self.blocked`
+            for window in self.blocked[idx..].windows(2) {
+                let window_len = window[1] - window[0];
+                if window_len > 1 {
+                    self.next_blocked = Some(window[1]);
+                    self.next_free = window[0] + 1;
+                    return;
+                }
+            }
+            // Final case: no gaps between the blockages. Can unwrap because if
+            // `self.blocked` were empty, would have returned len.
+            self.next_free = self.blocked.last().unwrap() + 1;
+            self.next_blocked = None;
+        }
+
+        pub fn invalidate_blocked(&mut self) {
+            self.blocked_valid = false;
+        }
+
+        /// The blocked state might not be valid at the time we push, but it
+        /// also doesn't have access to the blocked intervals list. So, we pass
+        /// in a closure to allow it to retrieve them.
+        pub fn push<F>(&mut self, cell: Elem, f: F)
+        where
+            F: Fn() -> Vec<usize>,
+        {
+            if !self.blocked_valid {
+                self.set_blocked(f());
+            }
+            debug_assert!(self.blocked_valid);
+
+            self.extend_to(self.next_free);
+            self.cells.push(Occupied(cell));
+        }
+
+        /// This name is just a warning
+        pub fn unchecked_push(&mut self, cell: Elem) {
+            self.cells.push(Occupied(cell));
         }
     }
 
@@ -237,6 +389,8 @@ pub mod latex {
         latex: &'l LaTeX,
         /// The wire array itself
         wires: Vec<Wire>,
+        /// Blocked intervals of the array
+        blocked: IntervalMap<usize, usize>,
         /// The index of the first classical wire
         fst_cwire: usize,
         // NOTE: Might want an auxiliary data structure to track blocked columns
@@ -256,22 +410,14 @@ pub mod latex {
             // It is also an invariant that there's at least one wire, that
             // should be enforced by `new`, although it isn't yet in a *natural* way.
             debug_assert!(qwires + cwires > 0);
-            let wires = std::iter::repeat_with(|| Wire::new())
+            let wires = iter::repeat_with(|| Wire::new())
                 .take(qwires + cwires)
                 .collect();
             Self {
                 latex,
                 wires,
+                blocked: IntervalMap::new(),
                 fst_cwire: qwires,
-            }
-        }
-
-        // NOTE: Is it really necessary to maintain the invariant that all the
-        // wires are the same length at all times? We do extra work checking for
-        // empty moments on wires.
-        fn add_moment(&mut self) {
-            for wire in self.wires.iter_mut() {
-                wire.cells.push(Free(wire.liveness));
             }
         }
 
@@ -300,6 +446,13 @@ pub mod latex {
         #[inline(always)]
         fn dist(src: usize, tgt: usize) -> isize {
             (tgt as isize) - (src as isize)
+        }
+
+        fn block_interval(&mut self, range: RangeInclusive<usize>, moment: usize) {
+            self.blocked.insert(range.clone(), moment);
+            for wire in range {
+                self.wires[wire].invalidate_blocked();
+            }
         }
 
         fn push_inst(&mut self, inst: circuit::Inst) {
@@ -337,9 +490,24 @@ pub mod latex {
                 }
                 SWAP { .. } => todo!(),
             };
-            let wire = self.qwire(wire);
-            self.wires[wire].liveness = LiveQ;
-            self.insert_single(wire, elem);
+
+            let wire_idx = self.qwire(wire);
+            let wire = &mut self.wires[wire];
+
+            let prev = wire.next_free - 1;
+            if self.latex.initial_kets && wire.liveness == Dead {
+                if let Elem::X = elem {
+                    // NOTE: Does this violate any important invariants? Could
+                    // the previous wire be blocked?
+                    wire[prev] = Occupied(Elem::Ket("1"));
+                    wire.liveness = LiveQ;
+                    return;
+                } else {
+                    wire[prev] = Occupied(Elem::Ket("0"));
+                }
+            }
+            wire.liveness = LiveQ;
+            self.insert_single(wire_idx, elem);
         }
 
         fn push_cgate(&mut self, gate: CGate) {
@@ -357,11 +525,11 @@ pub mod latex {
 
         fn push_meas(&mut self, src: usize, tgt: usize) {
             let dist = Self::dist(src, tgt);
+            let src_pair = (src, Elem::Meter(Some(dist)));
+            let tgt_pair = (tgt, Elem::Targ);
+            self.insert_multiple(vec![src_pair, tgt_pair]);
             self.wires[tgt].liveness = LiveC;
             self.wires[src].liveness = Dead;
-            let src = (src, Elem::Meter(Some(dist)));
-            let tgt = (tgt, Elem::Targ);
-            self.insert_multiple(vec![src, tgt])
         }
 
         fn push_io_out(&mut self, _io: &circuit::IoOutGate) {
@@ -369,86 +537,56 @@ pub mod latex {
         }
 
         fn insert_single(&mut self, wire: usize, elem: Elem) {
-            let arr_len = self.len(); // compute first for borrowck
-            let wire = &mut self.wires[wire];
-            let mut moment = wire.first_free;
-            wire[moment] = LayoutState::Occupied(elem);
-
-            while moment < arr_len - 1 {
-                moment += 1;
-                if let Free(_) = wire[moment] {
-                    wire.first_free = moment;
-                    return;
-                }
-            }
-
-            // There are no empty cells on this wire!
-            wire.first_free = arr_len;
-            self.add_moment();
+            let blocked = &self.blocked;
+            self.wires[wire].push(elem, || blocked.get_contained(&wire));
         }
 
-        /// Returns true if and only if the range of wires between `lower` and
-        /// `upper` (inclusive!) is all free.
-        fn range_free(&self, moment: usize, range: RangeInclusive<usize>) -> bool {
-            self.wires[range]
+        /// Note that, unlike `insert_single`, the "free slots" aren't
+        /// effectively cached for multiple-wire gates. This could get slow.
+        fn insert_multiple(&mut self, mut elems: Vec<(usize, Elem)>) {
+            debug_assert!(elems.len() >= 2);
+            elems.sort_by_key(|wire| wire.0);
+            let min = elems[0].0;
+            let max = elems[1].0;
+
+            // Find a valid range in which to insert this
+            let overlaps = self.blocked.get_overlaps(min..=max);
+            let longest = elems
                 .iter()
-                .all(|wire| matches!(wire[moment], Free(_)))
-        }
-
-        fn insert_multiple(&mut self, elems: Vec<(usize, Elem)>) {
-            // FIXME This method is pretty unweildy and inelegant. It still
-            // doesn't always find the optimal layout, and its asymptotic isn't
-            // great. There's probably a lovely dynamic programming algorithm
-            // that fixes everything.
-
-            // NOTE: is there a single iterator
-            // adapter in the standard library for getting both the min and max
-            // in one go?
-            let min = *elems.iter().map(|(wire, _)| wire).min().unwrap();
-            let max = *elems.iter().map(|(wire, _)| wire).max().unwrap();
-
-            // If the last moment isn't free, we’ll have to add another one.
-            let moment = if !self.range_free(self.len() - 1, min..=max) {
-                self.add_moment();
-                self.len() - 1
-            } else {
-                // Now we'll do the second-most-naive thing after always inserting
-                // in the last moment: We'll start at the last moment, then walk
-                // backwards until the last moment in which the gate fits, like a
-                // Tetris game. It would be slightly better still to step *over*
-                // intermediate gates. Note that this makes the whole layout
-                // algorithm something like O(depth^2 * width), which is horrible.
-                let mut moment = self.len() - 1;
-                while self.range_free(moment - 1, min..=max) {
-                    moment -= 1;
-                }
-                moment
-            };
-            // Now, if we're *still* at the end we need to add a new moment.
-            if moment == self.len() - 1 {
-                self.add_moment()
-            }
-
-            for (wire, elem) in elems.into_iter() {
-                let wire = &mut self.wires[wire];
-                wire[moment] = Occupied(elem);
-                wire.first_free = moment + 1;
-            }
-
-            // We'll also do this suboptimally: we'll do a second pass
-            // through the range, changing everything still free into Blocked.
-            // We *could* do this in a single pass if we sorted `gates`. Note
-            // that the range is *ex*clusive, because we can’t have the
-            // ends of a CNOT being free.
-            for wire in (min + 1)..max {
-                let wire = &mut self.wires[wire];
-                if let Free(ln) = wire[moment] {
-                    wire[moment] = Blocked(ln);
-                    if wire.first_free == moment {
-                        wire.first_free += 1;
+                .map(|(wire, _)| self.wires[*wire].len())
+                .max()
+                .unwrap();
+            let moment = match overlaps.binary_search(&longest) {
+                // in the overlaps set, must go farther ahead.
+                Ok(mut idx) => loop {
+                    let idx_wire = overlaps[idx]; // double lookup
+                    let next = idx + 1;
+                    if let Some(next_wire) = overlaps.get(next) {
+                        if next_wire - idx_wire >= 2 {
+                            break idx_wire + 1;
+                        }
+                    } else {
+                        // `idx` was the last index
+                        break idx_wire + 1;
                     }
-                }
+                    idx = next;
+                },
+                // Not in the overlaps set: can just push. No caching.
+                Err(_) => longest,
+            };
+
+            for (wire, elem) in elems {
+                // The single-wire invariants aren't checked when we push a multiple-wire gate!
+                let wire = &mut self.wires[wire];
+                wire.extend_to(moment);
+                wire.unchecked_push(elem);
             }
+
+            for wire in &mut self.wires[min..=max] {
+                wire.invalidate_blocked();
+            }
+
+            self.blocked.insert(min..=max, moment);
         }
     }
 
@@ -457,9 +595,9 @@ pub mod latex {
         fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
                 Occupied(elem) => write!(f, "{}", elem.fmt_with(latex)),
-                Free(Dead)  | Blocked(Dead)  => f.write_str(" "),
-                Free(LiveQ) | Blocked(LiveQ) => f.write_str(r"\qw"),
-                Free(LiveC) | Blocked(LiveC) => f.write_str(r"\cw"),
+                Free(Dead)  => f.write_str(" "),
+                Free(LiveQ) => f.write_str(r"\qw"),
+                Free(LiveC) => f.write_str(r"\cw"),
             }
         }
     }
