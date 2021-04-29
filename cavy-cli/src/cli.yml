@@ -18,6 +18,7 @@ args:
       about: Object language to target.
       required: false
       possible_values:
+        - summary
         - qasm
         - latex
         - latex_standalone

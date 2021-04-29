@@ -37,7 +37,7 @@ pub enum QGate {
     H(Addr),
     Z(Addr),
     CX { ctrl: Addr, tgt: Addr },
-    SWAP { fst: Addr, snd: Addr },
+    SWAP(Addr, Addr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,7 +350,7 @@ impl std::fmt::Display for QGate {
             H(q) => write!(f, "H {}", q),
             Z(q) => write!(f, "Z {}", q),
             CX { tgt, ctrl } => write!(f, "CX {} {}", ctrl, tgt),
-            SWAP { fst, snd } => write!(f, "SWAP {} {}", fst, snd),
+            SWAP(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
         }
     }
 }

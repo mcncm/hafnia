@@ -104,6 +104,7 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
             standalone: true,
             initial_kets: true,
         }),
+        Some("summary") => Box::new(target::summary::Summary {}),
         Some(_) => unreachable!(),
         None => Box::new(target::qasm::Qasm {}),
     }

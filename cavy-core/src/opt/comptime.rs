@@ -162,15 +162,6 @@ impl Interpreter {
                     self.env.insert(place, c.clone());
                     Evaluated::Yes
                 }
-                (Move(u_place), Move(v_place)) => {
-                    if let (Some(u_val), Some(v_val)) =
-                        (self.operand_value(u), self.operand_value(v))
-                    {
-                        self.env.insert(u_place, v_val);
-                        self.env.insert(v_place, u_val);
-                    }
-                    Evaluated::Yes
-                }
                 _ => Evaluated::No,
             },
 

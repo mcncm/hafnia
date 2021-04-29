@@ -14,5 +14,5 @@ name = "cavyc"
 path = "src/main.rs"
 
 [dependencies]
-cavy-core = { path = "../cavy-core" }
+cavy-core = { path = "../cavy-core", features = ["summary"] }
 clap = { version = "3.0.0-beta.1", features = ["yaml"] }

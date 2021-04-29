@@ -60,6 +60,8 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_binop(&mut self, place: &Place, op: &BinOpKind, left: &Operand, right: &Operand) {
+        let lplace = self.unwrap_operand(left);
+        let rplace = self.unwrap_operand(right);
         use BinOpKind::*;
         match op {
             Equal => todo!(),
@@ -71,7 +73,13 @@ impl<'m> Interpreter<'m> {
             Mod => todo!(),
             Less => todo!(),
             Greater => todo!(),
-            Swap => todo!(),
+            Swap => {
+                let lbits = self.st.env.bits_at(lplace);
+                let rbits = self.st.env.bits_at(rplace);
+                for (laddr, raddr) in lbits.qbits.iter().zip(rbits.qbits.iter()) {
+                    self.circ.push_qgate(QGate::SWAP(*laddr, *raddr), &self.st);
+                }
+            }
             And => todo!(),
             Or => todo!(),
             Xor => todo!(),

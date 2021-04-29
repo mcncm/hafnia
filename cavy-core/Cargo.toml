@@ -6,6 +6,13 @@ name = "cavy-core"
 version = "0.1.0"
 
 [dependencies]
+serde = { version = "1.0", optional = true }
+serde_json = { version = "1.0", features = ["preserve_order"], optional = true }
+
+[features]
+default = []
+# The non-default "summary" target that is included in the CLI.
+summary = ["serde", "serde_json"]
 
 [dependencies.cavy-macros]
 path = "../cavy-macros"

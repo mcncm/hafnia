@@ -17,3 +17,4 @@ path = "../cavy-inline"
 default = ["inline"]
 inline = ["cavy-inline"]
 nightly-features = ["cavy-inline/nightly-features"]
+summary = ["cavy-core/summary"]
