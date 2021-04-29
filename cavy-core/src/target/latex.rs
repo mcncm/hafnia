@@ -150,11 +150,14 @@ enum Elem {
     Swap(isize),
     // A control target
     Targ,
+    // A classical control target. With some target options, this uses a custom command
+    // in order to have no incoming wires.
+    CTarg(Option<isize>),
     // A swap target
     TargX,
     // An arrow indicating trashing a qubit
     Trash,
-    // A meter with an optional distance to its target
+    // A meter with an optional control line
     Meter(Option<isize>),
     // A label for IO data
     IoLabel(Box<IoLabelData>),
@@ -169,10 +172,17 @@ struct IoLabelData {
 }
 
 impl FmtWith<LaTeX> for Elem {
-    fn fmt(&self, _data: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Elem::*;
         match self {
-            Ket(s) => write!(f, "\\lstick{{$\\ket{{{}}}$}}", s),
+            Ket(s) => {
+                if let Package::Qcircuit = latex.package {
+                    write!(f, r"\lstick{{\ket{{{}}}}}", s)
+                } else {
+                    // Package is Quantikz
+                    write!(f, r"\lstick{{$\ket{{{}}}$}}", s)
+                }
+            }
             X => f.write_str(r"\gate{X}"),
             Z => f.write_str(r"\gate{Z}"),
             H => f.write_str(r"\gate{H}"),
@@ -180,17 +190,29 @@ impl FmtWith<LaTeX> for Elem {
             TDag => f.write_str(r"\gate{T^\dag}"),
             Ctrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
             Targ => f.write_str(r"\targ{}"),
+            CTarg(dist) => {
+                if latex.standalone {
+                    f.write_str(r"\nwtarg{}")?;
+                } else {
+                    f.write_str(r"\cw")?;
+                }
+
+                if let Some(dist) = dist {
+                    write!(f, r"\cwx{{{}}}", dist)?;
+                }
+                Ok(())
+            }
             Swap(dist) => write!(f, r"\swap{{{}}}", dist),
             TargX => f.write_str(r"\targX{}"),
             Trash => f.write_str(r"\trash{}"),
             Meter(targ) => {
                 f.write_str(r"\meter{}")?;
-                if let Some(dist) = targ {
-                    write!(f, r" \vcw{{{}}}", dist)?;
+                if let (Package::Quantikz, Some(dist)) = (&latex.package, targ) {
+                    write!(f, r"\meter \vcw{{{}}}", dist)?;
                 }
                 Ok(())
             }
-            IoLabel(io) => write!(f, "\\push{{\\tt \\enspace {} [{}] }}", io.name, io.elem),
+            IoLabel(io) => write!(f, r"\push{{\tt \enspace {} [{}] }} \cw", io.name, io.elem),
         }
     }
 }
@@ -439,6 +461,7 @@ impl<'l> LayoutArray<'l> {
             Z(u) => (u, Elem::Z),
             CX { ctrl, tgt } => {
                 let dist = Self::dist(ctrl, tgt);
+                // TODO: might have qcircuit/quantikz dependence
                 let ctrl = (ctrl, Elem::Ctrl(dist));
                 let tgt = (tgt, Elem::Targ);
                 self.insert_multiple(vec![ctrl, tgt]);
@@ -475,7 +498,7 @@ impl<'l> LayoutArray<'l> {
     fn push_cgate(&mut self, gate: CGate) {
         use CGate::*;
         let (wire, elem) = match gate {
-            Not(u) => (u, Elem::Targ),
+            Not(u) => (u, Elem::CTarg(None)),
             Copy(_, _) => todo!(),
             Cnot(_, _) => todo!(),
             Control(_, _) => todo!(),
@@ -485,13 +508,18 @@ impl<'l> LayoutArray<'l> {
         self.insert_single(wire, elem);
     }
 
-    fn push_meas(&mut self, src: usize, tgt: usize) {
-        let dist = Self::dist(src, tgt);
-        let src_pair = (src, Elem::Meter(Some(dist)));
-        let tgt_pair = (tgt, Elem::Targ);
-        self.insert_multiple(vec![src_pair, tgt_pair]);
-        self.wires[tgt].liveness = LiveC;
-        self.wires[src].liveness = Dead;
+    fn push_meas(&mut self, src_wire: usize, tgt_wire: usize) {
+        let mut dist = Self::dist(src_wire, tgt_wire);
+        if let Package::Qcircuit = self.latex.package {
+            dist *= -1;
+        }
+        let src = (src_wire, Elem::Meter(Some(dist)));
+        // The distance is only used if needed--no harm to include it
+        // unconditionally.
+        let tgt = (tgt_wire, Elem::CTarg(Some(-dist)));
+        self.insert_multiple(vec![src, tgt]);
+        self.wires[tgt_wire].liveness = LiveC;
+        self.wires[src_wire].liveness = Dead;
     }
 
     fn push_io_out(&mut self, io: &circuit::IoOutGate) {
@@ -559,6 +587,8 @@ impl<'l> LayoutArray<'l> {
     }
 }
 
+// == Formatting of layout arrays for quantikz and qcircuit ==
+
 impl FmtWith<LaTeX> for LayoutState<Elem> {
     #[rustfmt::skip]
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -597,20 +627,41 @@ impl FmtWith<LaTeX> for LayoutArray<'_> {
     }
 }
 
+// == Headers, etc. ==
+
 impl LaTeX {
     /// Escapes a string by replacing underscores with `\_`
     fn escape(s: &str) -> String {
         str::replace(s, "_", r"\_")
     }
 
+    fn has_nwtarg(&self) -> bool {
+        if let Package::Qcircuit = self.package {
+            self.standalone
+        } else {
+            false
+        }
+    }
+
     fn fmt_header(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.standalone {
             return Ok(());
         }
-        f.write_str(
-            r"\documentclass{standalone}
-",
-        )?;
+
+        let class_options = {
+            if let Package::Qcircuit = self.package {
+                // `qcircuit` ket labels are off the margins in `standalone`.
+                if self.initial_kets {
+                    "[border={25pt 5pt 5pt 5pt}]"
+                } else {
+                    "[border=5pt]"
+                }
+            } else {
+                ""
+            }
+        };
+        writeln!(f, "\\documentclass{}{{standalone}}", class_options)?;
+
         self.fmt_tex_packages(f)?;
         f.write_str(
             r"\begin{document}
@@ -618,21 +669,27 @@ impl LaTeX {
         )
     }
 
-    #[rustfmt::skip]
+    // #[rustfmt::skip]
     fn fmt_tex_packages(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let packages = match self.package {
-            Package::Qcircuit => r"\usepackage{qcircuit}
-",
-            Package::Quantikz => r"\usepackage{tikz}
+        match self.package {
+            Package::Qcircuit => {
+                let options = if self.initial_kets { "[braket,qm]" } else { "" };
+                let nwtarg_cmd = include_str!("nwtarg.tex");
+                writeln!(f, "\\usepackage{}{{qcircuit}}\n{}", options, nwtarg_cmd)?;
+            }
+            Package::Quantikz => f.write_str(
+                r"\usepackage{tikz}
 \usetikzlibrary{quantikz}
 ",
-            Package::Yquant => r"\usepackage{tikz}
+            )?,
+            Package::Yquant => f.write_str(
+                r"\usepackage{tikz}
 \usepackage{yquant}
 ",
+            )?,
         };
         let common = r"\usepackage[T1]{fontenc}
 ";
-        f.write_str(packages)?;
         f.write_str(common)
     }
 
@@ -668,7 +725,10 @@ impl LaTeX {
         if !self.standalone {
             return Ok(());
         }
-        f.write_str(r"\end{document}")
+        f.write_str(
+            r"\end{document}
+",
+        )
     }
 }
 
