@@ -9,8 +9,10 @@ args:
   - object:
       short: o
       value_name: OBJECT
-      about: Write the compiler output into <OBJECT>
+      about: Write the compiler output into <OBJECT>.
       required: false
+
+  # Target options
   - target:
       short: t
       long: target
@@ -18,10 +20,53 @@ args:
       about: Object language to target.
       required: false
       possible_values:
-        - summary
-        - qasm
-        - latex
-        - latex_standalone
+        - "summary"
+        - "qasm"
+        - "latex"
+        - "null"
+      default_value: "qasm"
+  - standalone:
+      long: standalone
+      about: Compiles LaTeX output as a standalone document.
+  - initial_kets:
+      long: initial-kets
+      about: Replace initial `X` gates with ket states.
+  - package:
+      long: package
+      value_name: PACKAGE
+      required: false
+      possible_values:
+        - "qcircuit"
+        - "quantikz"
+        - "yquant"
+      default_value: "qcircuit"
+      about: <PACKAGE> is the LaTeX package used for circuit output.
+      
+
+  # Compile phase options
+  - debug:
+      short: d
+      long: debug
+      about: Runs the compiler in debug mode
+  - phase:
+      long: phase
+      required: false
+      value_name: PHASE
+      about: <PHASE> is the last phase of the compiler to run.
+      possible_values:
+        - "tokenize"
+        - "parse"
+        - "typecheck"
+        - "analysis"
+        - "optimization"
+        - "translation"
+        - "codegen"
+      default_value: "codegen"
+  - typecheck:
+      long: typecheck
+      about: Run the static type-checking pass.
+
+  # Optimization options
   - opt:
       short: O
       long: opt
@@ -32,51 +77,33 @@ args:
         - "1"
         - "2"
         - "3"
+      default_value: "3"
       required: false
   - no_comptime:
       long: no-comptime
-      about: Compile without constant propagation
-  - debug:
-      short: d
-      long: debug
-      about: Runs the compiler in debug mode
-  - phase:
-      long: phase
-      required: false
-      value_name: PHASE
-      about: <PHASE> is the last phase of the compiler to run
-      possible_values:
-        - "tokenize"
-        - "parse"
-        - "typecheck"
-        - "analysis"
-        - "optimization"
-        - "translation"
-        - "codegen"
-  - typecheck:
-      long: typecheck
-      about: Run the static type-checking pass
+      about: Compile without constant propagation.
 
   # Architectural options
   - qbcount:
       short: q
       long: qbcount
       value_name: QBCOUNT
-      about: <QBCOUNT> is the number of physical qubits
+      about: <QBCOUNT> is the number of physical qubits.
       required: false
   - qram_size:
       long: qram-size
       value_name: QRAM_SIZE
-      about: <QRAM_SIZE> is the number of addressable random access qubits
+      about: <QRAM_SIZE> is the number of addressable random access qubits.
   - feedback:
       long: feedback
-      about: Enables classical feedback
+      about: Enables classical feedback.
   - meas_mode:
       short: m
       long: meas-mode
       value_name: MODE
-      about: <MODE> determines the state of a hardware qubit after a projective measurement
+      about: <MODE> determines the state of a hardware qubit after a projective measurement.
       possible_values:
         - "demolition"
         - "nondemolition"
         - "dirty"
+      default_value: "demolition"

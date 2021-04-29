@@ -12,6 +12,20 @@ use crate::circuit::{self, CGate, FreeState, Inst, QGate};
 
 use super::*;
 
+/// LaTeX quantum circuit packages
+#[derive(Debug)]
+pub enum Package {
+    Qcircuit,
+    Quantikz,
+    Yquant,
+}
+
+impl Default for Package {
+    fn default() -> Self {
+        Self::Qcircuit
+    }
+}
+
 /// This backend emits a circuit in quantikz format
 #[derive(Debug)]
 pub struct LaTeX {
@@ -19,6 +33,8 @@ pub struct LaTeX {
     pub standalone: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
     pub initial_kets: bool,
+    /// The quantum circuit package to use for rendering
+    pub package: Package,
 }
 
 impl LaTeX {

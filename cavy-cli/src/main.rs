@@ -21,8 +21,7 @@ fn get_opt(argmatches: &ArgMatches) -> OptConfig {
         Some("1") => 1,
         Some("2") => 2,
         Some("3") => 3,
-        Some(_) => unreachable!(),
-        None => 0,
+        _ => unreachable!(),
     };
 
     let comptime = !argmatches.is_present("no_comptime");
@@ -41,8 +40,7 @@ fn get_phase(argmatches: &ArgMatches) -> PhaseConfig {
         Some("optimization") => Phase::Optimization,
         Some("translation") => Phase::Translation,
         Some("codegen") => Phase::CodeGen,
-        Some(_) => unreachable!(),
-        None => Phase::CodeGen,
+        _ => unreachable!(),
     };
 
     // If we've gone on to a late-enough pass, should we do the typechecking
@@ -93,20 +91,27 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
 }
 
 fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
+    use target::{latex, qasm, summary};
+
+    let standalone = argmatches.is_present("standalone");
+    let initial_kets = argmatches.is_present("initial_kets");
+    let package = match argmatches.value_of("package") {
+        Some("qcircuit") => latex::Package::Qcircuit,
+        Some("quantikz") => latex::Package::Quantikz,
+        Some("yquant") => latex::Package::Yquant,
+        _ => unreachable!(),
+    };
+
     match argmatches.value_of("target") {
-        Some("qasm") => Box::new(target::qasm::Qasm {}),
+        Some("qasm") => Box::new(qasm::Qasm {}),
         // Need to start thinking about abstracting all this a little more
-        Some("latex") => Box::new(target::latex::LaTeX {
-            standalone: false,
-            initial_kets: true,
+        Some("latex") => Box::new(latex::LaTeX {
+            standalone,
+            initial_kets,
+            package,
         }),
-        Some("latex_standalone") => Box::new(target::latex::LaTeX {
-            standalone: true,
-            initial_kets: true,
-        }),
-        Some("summary") => Box::new(target::summary::Summary {}),
-        Some(_) => unreachable!(),
-        None => Box::new(target::qasm::Qasm {}),
+        Some("summary") => Box::new(summary::Summary {}),
+        _ => unreachable!(),
     }
 }
 
