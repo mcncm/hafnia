@@ -37,13 +37,6 @@ pub struct LaTeX {
     pub package: Package,
 }
 
-impl LaTeX {
-    /// Escapes a string by replacing underscores with `\_`
-    fn escape(s: &str) -> String {
-        str::replace(s, "_", r"\_")
-    }
-}
-
 // == Range queries ==
 
 /// An inclusive interval
@@ -594,36 +587,99 @@ impl FmtWith<LaTeX> for Wire {
 
 impl FmtWith<LaTeX> for LayoutArray<'_> {
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if latex.standalone {
-            writeln!(f, "{}", LaTeX::HEADER)?;
-        }
-        writeln!(f, "{}", LaTeX::BEGIN_ENV)?;
         if let Some((last, head)) = &self.wires.split_last() {
             for wire in head.iter() {
                 writeln!(f, "{}\\\\", wire.fmt_with(latex))?;
             }
             writeln!(f, "{}", last.fmt_with(latex))?;
         }
-        writeln!(f, "{}", LaTeX::END_ENV)?;
-        if latex.standalone {
-            writeln!(f, "{}", LaTeX::FOOTER)?;
-        }
         Ok(())
     }
 }
 
 impl LaTeX {
-    const HEADER: &'static str = r"\documentclass{standalone}
-\usepackage{tikz}
+    /// Escapes a string by replacing underscores with `\_`
+    fn escape(s: &str) -> String {
+        str::replace(s, "_", r"\_")
+    }
+
+    fn fmt_header(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.standalone {
+            return Ok(());
+        }
+        f.write_str(
+            r"\documentclass{standalone}
+",
+        )?;
+        self.fmt_tex_packages(f)?;
+        f.write_str(
+            r"\begin{document}
+",
+        )
+    }
+
+    #[rustfmt::skip]
+    fn fmt_tex_packages(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let packages = match self.package {
+            Package::Qcircuit => r"\usepackage{qcircuit}
+",
+            Package::Quantikz => r"\usepackage{tikz}
 \usetikzlibrary{quantikz}
-\usepackage[T1]{fontenc}
-\begin{document}";
+",
+            Package::Yquant => r"\usepackage{tikz}
+\usepackage{yquant}
+",
+        };
+        let common = r"\usepackage[T1]{fontenc}
+";
+        f.write_str(packages)?;
+        f.write_str(common)
+    }
 
-    const FOOTER: &'static str = r"\end{document}";
+    #[rustfmt::skip]
+    fn fmt_circuit_begin(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let circuit_begin = match self.package {
+            Package::Qcircuit => r"\Qcircuit @C=1em @R=0.7em {
+",
+            Package::Quantikz => r"\begin{quantikz}
+",
+            Package::Yquant =>   r"\begin{tikzpicture}
+\begin{yquant}
+",
+        };
+        f.write_str(circuit_begin)
+    }
 
-    const BEGIN_ENV: &'static str = r"\begin{quantikz}";
+    #[rustfmt::skip]
+    fn fmt_circuit_end(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let circuit_end = match self.package {
+            Package::Qcircuit => r"}
+",
+            Package::Quantikz => r"\end{quantikz}
+",
+            Package::Yquant =>   r"\end{tikzpicture}
+\end{yquant}
+",
+        };
+        f.write_str(circuit_end)
+    }
 
-    const END_ENV: &'static str = r"\end{quantikz}";
+    fn fmt_footer(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.standalone {
+            return Ok(());
+        }
+        f.write_str(r"\end{document}")
+    }
+}
+
+impl FmtWith<LayoutArray<'_>> for LaTeX {
+    fn fmt(&self, array: &LayoutArray, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_header(f)?;
+        self.fmt_circuit_begin(f)?;
+        write!(f, "{}", array.fmt_with(self))?;
+        self.fmt_circuit_end(f)?;
+        self.fmt_footer(f)
+    }
 }
 
 impl Target for LaTeX {
@@ -637,6 +693,6 @@ impl Target for LaTeX {
             layout_array.push_inst(inst);
         }
 
-        format!("{}", layout_array.fmt_with(self))
+        format!("{}", self.fmt_with(&layout_array))
     }
 }
