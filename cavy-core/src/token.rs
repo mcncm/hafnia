@@ -20,7 +20,7 @@ pub enum Lexeme {
     // keywords
     If, Else, Match, For, Let, Mut, In, Fn, FFn, Type, Struct,
     Enum, Impl, Io, True, False, Bool, U4, U8, U16, U32, Ord,
-    Unsafe, Assert,
+    Unsafe, Assert, Drop,
 
     // literals
     Nat(Unsigned, Option<Uint>),
@@ -129,6 +129,7 @@ impl fmt::Display for Lexeme {
             Ord => "ord",
             Unsafe => "unsafe",
             Assert => "assert",
+            Drop => "drop",
         };
         f.write_str(s)
     }

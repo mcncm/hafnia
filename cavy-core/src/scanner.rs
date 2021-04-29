@@ -50,6 +50,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "ord" => Lexeme::Ord,
         "unsafe" => Lexeme::Unsafe,
         "assert" => Lexeme::Assert,
+        "drop" => Lexeme::Drop,
         _ => return None,
     };
     Some(lexeme)

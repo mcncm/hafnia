@@ -85,6 +85,7 @@ fn simpl_stmt(stmt: &mut Stmt, interp: &mut Interpreter) {
             }
         }
         StmtKind::Assert(_) => {}
+        StmtKind::Drop(_) => {}
         StmtKind::Io(_) => {}
         StmtKind::Nop => {}
     }

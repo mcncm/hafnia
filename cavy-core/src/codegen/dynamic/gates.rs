@@ -5,6 +5,7 @@ use crate::{
 
 use super::{mem::*, *};
 
+// This impl should deal with received *bits*.
 impl<'m> CircAssembler<'m> {
     // This method needs mutable access to the circuit as well as the allocator.
     pub fn push_qgate(&mut self, gate: QGate, _st: &InterpreterState) {
@@ -15,6 +16,8 @@ impl<'m> CircAssembler<'m> {
         self.gate_buf.push(gate);
     }
 
+    // NOTE: maybe this method shouldn't be in this module, given that it's
+    // translating from a place?
     pub fn push_io(&mut self, io: &IoStmtKind, st: &InterpreterState) {
         match io {
             IoStmtKind::In => todo!(),
@@ -31,6 +34,18 @@ impl<'m> CircAssembler<'m> {
                 }
             }
         };
+    }
+
+    // NOTE: maybe this method shouldn't be in this module, given that it's
+    // translating from a place?
+    pub fn push_drop(&mut self, place: &Place, st: &InterpreterState) {
+        let bits = st.env.bits_at(place);
+        for qbit in bits.qbits {
+            self.gate_buf.push(Inst::QFree(*qbit, FreeState::Dirty));
+        }
+        for cbit in bits.cbits {
+            self.gate_buf.push(Inst::CFree(*cbit, FreeState::Dirty));
+        }
     }
 
     /// Measure some qubits and store them in classical bits

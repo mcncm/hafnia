@@ -998,6 +998,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         match &stmt.data {
             StmtKind::Io(io) => self.lower_io_stmt(io, stmt.span),
             StmtKind::Assert(expr) => self.lower_assert_stmt(expr, stmt.span),
+            StmtKind::Drop(expr) => self.lower_drop_stmt(expr, stmt.span),
             StmtKind::Expr(expr) | StmtKind::ExprSemi(expr) => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
@@ -1035,13 +1036,19 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_assert_stmt(&mut self, expr: &Expr, span: Span) -> Maybe<()> {
-        // NOTE: maybe these three statements should be broken out into a
-        // `lower_expr` (note no `into`) method
-        let ty = self.type_expr(expr)?;
-        let place = self.gr.auto_place(ty);
-        self.lower_into(&place, expr)?;
+        let place = self.lower_expr(expr)?;
         self.push_stmt(span, mir::StmtKind::Assert(place));
         Ok(())
+    }
+
+    fn lower_drop_stmt(&mut self, expr: &Expr, span: Span) -> Maybe<()> {
+        if let ExprKind::Ident(_) | ExprKind::Field(_, _) = expr.data {
+            let place = self.lower_expr(expr)?;
+            self.push_stmt(span, mir::StmtKind::Drop(place));
+            Ok(())
+        } else {
+            self.error(errors::DroppedNonVariable { span })
+        }
     }
 
     fn lower_decl(
@@ -1060,10 +1067,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             // This should work, rather than emit an error, if we ever
             // have proper type inferece!
             (None, None) => {
-                return Err(self.errors.push(errors::InferenceFailure {
+                return self.error(errors::InferenceFailure {
                     span: lhs_span,
                     name: lhs_data,
-                }))
+                })
             }
             (Some(ty), _) => self.resolve_annot(ty)?,
             (_, Some(rhs)) => self.type_inner(rhs)?,
@@ -1862,5 +1869,13 @@ mod errors {
         pub span: Span,
         #[ctx]
         pub name: SymbolId,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "`drop` statements can only take variables and paths"]
+    pub struct DroppedNonVariable {
+        #[span]
+        #[msg = "must be of the form `x`, or `y.0.a`"]
+        pub span: Span,
     }
 }

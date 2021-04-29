@@ -328,6 +328,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         match self.peek_lexeme() {
             Some(Io) => Ok(self.io_stmt()?),
             Some(Assert) => Ok(self.assert_stmt()?),
+            Some(Drop) => Ok(self.drop_stmt()?),
             Some(Let) => Ok(self.local()?),
             // Must be an expression next! Note that it's not possible to find
             // an item in this position, since this method is *only* called
@@ -677,6 +678,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let stmt = Stmt {
             span,
             data: StmtKind::Assert(expr),
+        };
+        Ok(stmt)
+    }
+
+    fn drop_stmt(&mut self) -> Maybe<Stmt> {
+        let span = self.next().unwrap().span;
+        let expr = Box::new(self.expression()?);
+        let span = span.join(&self.consume(Lexeme::Semicolon)?.span).unwrap();
+        let stmt = Stmt {
+            span,
+            data: StmtKind::Drop(expr),
         };
         Ok(stmt)
     }

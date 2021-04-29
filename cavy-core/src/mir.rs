@@ -438,6 +438,8 @@ pub enum StmtKind {
     Assn(Place, Rvalue),
     /// (Unsafely) the state of a value (...as zero only, for now)
     Assert(Place),
+    /// Drop a named variable
+    Drop(Place),
     /// Read from or return a value to the host machine
     Io(IoStmtKind),
     /// Handy for deleting statements in O(1) time.
@@ -575,6 +577,7 @@ impl fmt::Display for Stmt {
         match &self.kind {
             StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
             StmtKind::Assert(place) => write!(f, "assert {};", place),
+            StmtKind::Drop(place) => write!(f, "assert {};", place),
             StmtKind::Io(io) => {
                 match io {
                     IoStmtKind::In => unimplemented!(),

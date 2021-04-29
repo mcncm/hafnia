@@ -43,6 +43,9 @@ pub mod null {
     }
 }
 
+/// This module and target are feature-gated because they depend on serde. It
+/// would be nice not to have to add a dependency to all builds just because
+/// it's used in this one place.
 #[cfg(feature = "summary")]
 pub mod summary {
     use crate::circuit::{CGate, FreeState, Inst, QGate};
@@ -165,7 +168,7 @@ pub mod latex {
         ops::{Index, IndexMut, RangeInclusive},
     };
 
-    use crate::circuit::{self, CGate, Inst, QGate};
+    use crate::circuit::{self, CGate, FreeState, Inst, QGate};
 
     use super::*;
 
@@ -300,6 +303,8 @@ pub mod latex {
         Targ,
         // A swap target
         TargX,
+        // An arrow indicating trashing a qubit
+        Trash,
         // A meter with an optional distance to its target
         Meter(Option<isize>),
         // A label for IO data
@@ -328,6 +333,7 @@ pub mod latex {
                 Targ => f.write_str(r"\targ{}"),
                 Swap(dist) => write!(f, r"\swap{{{}}}", dist),
                 TargX => f.write_str(r"\targX{}"),
+                Trash => f.write_str(r"\trash{}"),
                 Meter(targ) => {
                     f.write_str(r"\meter{}")?;
                     if let Some(dist) = targ {
@@ -545,12 +551,28 @@ pub mod latex {
                 Inst::CInit(_) => {}
                 Inst::CFree(_, _) => {}
                 Inst::QInit(_) => {}
-                Inst::QFree(_, _) => {}
+                Inst::QFree(s, wire) => self.push_free(wire, s),
                 Inst::QGate(g) => self.push_qgate(g),
                 Inst::CGate(g) => self.push_cgate(g),
                 Inst::Meas(s, t) => self.push_meas(self.qwire(s), self.cwire(t)),
                 Inst::Out(io) => self.push_io_out(&io),
             }
+        }
+
+        fn push_free(&mut self, s: FreeState, wire: usize) {
+            let wire = self.qwire(wire);
+            match s {
+                FreeState::Clean => {}
+                FreeState::Dirty => {
+                    // NOTE: the quantikz `\trash{}` command seems not to work.
+                    // I cannot get it to compile. Not sure if this is a problem
+                    // with my installation or the package, but even the
+                    // examples don't work.
+
+                    // self.insert_single(wire, Elem::Trash),
+                }
+            }
+            self.wires[wire].liveness = Dead;
         }
 
         fn push_qgate(&mut self, gate: QGate) {

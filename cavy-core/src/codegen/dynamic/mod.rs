@@ -185,6 +185,7 @@ impl<'a> Interpreter<'a> {
                 // local data alone, if you have any join points.
                 todo!();
             }
+            StmtKind::Drop(place) => self.circ.push_drop(place, &self.st),
             StmtKind::Io(io) => {
                 self.circ.push_io(io, &self.st);
             }

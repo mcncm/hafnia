@@ -626,6 +626,8 @@ pub enum StmtKind {
     Io(Box<IoStmtKind>),
     /// An assertion
     Assert(Box<Expr>),
+    /// A drop statement,
+    Drop(Box<Expr>),
     /// An expression without a semicolon.
     Expr(Box<Expr>),
     /// An expression with a semicolon.
