@@ -3,7 +3,7 @@
 //! would be nice not to have to add a dependency to all builds just because
 //! it's used in this one place.
 
-use crate::circuit::{CGate, FreeState, Inst, QGate};
+use crate::circuit::*;
 use crate::session::Statistics;
 use serde_json::{json, Map};
 
@@ -25,10 +25,14 @@ impl Target for Summary {
         let qbits = circ.qbit_size();
         let cbits = circ.cbit_size();
 
-        zero! {
-            xgates tgates hgates zgates cxgates swapgates
+        zero! [
+            sqgates
+                xgates tgates hgates zgates
+            mqgates
+                swapgates cxgates czgates cswapgates
+
             clean_frees dirty_frees
-        };
+        ];
 
         for inst in circ.into_iter() {
             match inst {
@@ -39,23 +43,39 @@ impl Target for Summary {
                     FreeState::Clean => clean_frees += 1,
                     FreeState::Dirty => dirty_frees += 1,
                 },
-                Inst::QGate(g) => match g {
-                    QGate::X(_) => xgates += 1,
-                    QGate::T { .. } => tgates += 1,
-                    QGate::H(_) => hgates += 1,
-                    QGate::Z(_) => zgates += 1,
-                    QGate::CX { .. } => cxgates += 1,
-                    QGate::SWAP(_, _) => swapgates += 1,
-                },
+                Inst::QGate(g) => {
+                    use BaseGateQ::*;
+                    if g.ctrls.len() > 0 || g.is_swap() {
+                        mqgates += 1;
+
+                        if g.is_cx() {
+                            cxgates += 1;
+                        } else if g.is_cz() {
+                            czgates += 1;
+                        } else if g.is_cswap() {
+                            cswapgates += 1;
+                        } else if g.is_swap() {
+                            swapgates += 1;
+                        }
+
+                        continue;
+                    }
+
+                    sqgates += 1;
+                    match g.base {
+                        X(_) => xgates += 1,
+                        H(_) => hgates += 1,
+                        Z(_) => zgates += 1,
+                        T(_) => tgates += 1,
+                        TDag(_) => tgates += 1,
+                        Swap(_, _) => unreachable!(),
+                    }
+                }
                 Inst::CGate(_) => {}
                 Inst::Meas(_, _) => {}
                 Inst::Out(_) => {}
             }
         }
-
-        let single_qubit_gates = xgates + tgates + hgates + zgates;
-        let two_qubit_gates = cxgates + swapgates;
-        let total_gates = single_qubit_gates + two_qubit_gates;
 
         let mut stats = json!({
             "bits": {
@@ -64,15 +84,21 @@ impl Target for Summary {
                 "total": qbits + cbits,
             },
             "gates": {
-                "X": xgates,
-                "T": tgates,
-                "H": hgates,
-                "Z": zgates,
-                "CX": cxgates,
-                "SWAP": swapgates,
-                "single-qubit": single_qubit_gates,
-                "two-qubit": two_qubit_gates,
-                "total": total_gates,
+                "sqgates": {
+                    "x": xgates,
+                    "t": tgates,
+                    "h": hgates,
+                    "z": zgates,
+                    "total": sqgates,
+                },
+                "mqgates": {
+                    "cx": cxgates,
+                    "cz": czgates,
+                    "swap": swapgates,
+                    "cswap": cswapgates,
+                    "total": mqgates
+                },
+                "total": sqgates + mqgates,
             },
             "frees": {
                 "clean": clean_frees,

@@ -8,7 +8,7 @@ use std::{
     ops::{Index, IndexMut, RangeInclusive},
 };
 
-use crate::circuit::{self, CGate, FreeState, Inst, QGate};
+use crate::circuit::*;
 
 use super::*;
 
@@ -198,7 +198,7 @@ impl FmtWith<LaTeX> for Elem {
                 }
 
                 if let Some(dist) = dist {
-                    write!(f, r"\cwx{{{}}}", dist)?;
+                    write!(f, r"\cwx[{}]", dist)?;
                 }
                 Ok(())
             }
@@ -417,7 +417,7 @@ impl<'l> LayoutArray<'l> {
         }
     }
 
-    fn push_inst(&mut self, inst: circuit::Inst) {
+    fn push_inst(&mut self, inst: Inst) {
         match inst {
             Inst::CInit(_) => {}
             Inst::CFree(_, _) => {}
@@ -446,28 +446,19 @@ impl<'l> LayoutArray<'l> {
         self.wires[wire].liveness = Dead;
     }
 
-    fn push_qgate(&mut self, gate: QGate) {
-        use QGate::*;
-        let (wire, elem) = match gate {
+    fn push_qgate(&mut self, gate: GateQ) {
+        if gate.ctrls.len() > 0 {
+            todo!();
+        }
+
+        use BaseGateQ::*;
+        let (wire, elem) = match gate.base {
             X(u) => (u, Elem::X),
-            T { tgt, conj } => {
-                if conj {
-                    (tgt, Elem::TDag)
-                } else {
-                    (tgt, Elem::T)
-                }
-            }
             H(u) => (u, Elem::H),
             Z(u) => (u, Elem::Z),
-            CX { ctrl, tgt } => {
-                let dist = Self::dist(ctrl, tgt);
-                // TODO: might have qcircuit/quantikz dependence
-                let ctrl = (ctrl, Elem::Ctrl(dist));
-                let tgt = (tgt, Elem::Targ);
-                self.insert_multiple(vec![ctrl, tgt]);
-                return;
-            }
-            SWAP(u, v) => {
+            T(u) => (u, Elem::T),
+            TDag(u) => (u, Elem::TDag),
+            Swap(u, v) => {
                 let dist = Self::dist(u, v);
                 let fst = (u, Elem::Swap(dist));
                 let snd = (v, Elem::TargX);
@@ -495,13 +486,17 @@ impl<'l> LayoutArray<'l> {
         self.insert_single(wire_idx, elem);
     }
 
-    fn push_cgate(&mut self, gate: CGate) {
-        use CGate::*;
-        let (wire, elem) = match gate {
-            Not(u) => (u, Elem::CTarg(None)),
-            Copy(_, _) => todo!(),
-            Cnot(_, _) => todo!(),
-            Control(_, _) => todo!(),
+    fn push_cgate(&mut self, gate: GateC) {
+        if gate.ctrls.len() > 0 {
+            todo!();
+        }
+
+        use BaseGate::*;
+        use BaseGateC::*;
+        let (wire, elem) = match gate.base {
+            C(Not(u)) => (u, Elem::CTarg(None)),
+            C(Copy(_, _)) => todo!(),
+            Q(_) => todo!(),
         };
         let wire = self.cwire(wire);
         self.wires[wire].liveness = LiveC;
@@ -515,14 +510,14 @@ impl<'l> LayoutArray<'l> {
         }
         let src = (src_wire, Elem::Meter(Some(dist)));
         // The distance is only used if needed--no harm to include it
-        // unconditionally.
-        let tgt = (tgt_wire, Elem::CTarg(Some(-dist)));
+        // unconditionally. Note the *opposite* sign convention.
+        let tgt = (tgt_wire, Elem::CTarg(Some(dist)));
         self.insert_multiple(vec![src, tgt]);
         self.wires[tgt_wire].liveness = LiveC;
         self.wires[src_wire].liveness = Dead;
     }
 
-    fn push_io_out(&mut self, io: &circuit::IoOutGate) {
+    fn push_io_out(&mut self, io: &IoOutGate) {
         let wire = self.cwire(io.addr);
         let io = IoLabelData {
             // Nice, I get to clone it *again*! (See `dynamic/gates.rs`)

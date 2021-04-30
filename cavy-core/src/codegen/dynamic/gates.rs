@@ -1,6 +1,6 @@
 use crate::{
     arch::MeasurementMode,
-    circuit::{CGate, FreeState, Inst, QGate},
+    circuit::{BaseGateC, BaseGateQ, FreeState, GateC, GateQ, Inst},
 };
 
 use super::{mem::*, *};
@@ -8,12 +8,12 @@ use super::{mem::*, *};
 // This impl should deal with received *bits*.
 impl<'m> CircAssembler<'m> {
     // This method needs mutable access to the circuit as well as the allocator.
-    pub fn push_qgate(&mut self, gate: QGate, _st: &InterpreterState) {
-        self.gate_buf.push(gate);
+    pub fn push_qgate(&mut self, gate: BaseGateQ, _st: &InterpreterState) {
+        self.gate_buf.push(GateQ::from(gate));
     }
 
-    pub fn push_cgate(&mut self, gate: CGate, _st: &InterpreterState) {
-        self.gate_buf.push(gate);
+    pub fn push_cgate(&mut self, gate: BaseGateC, _st: &InterpreterState) {
+        self.gate_buf.push(GateC::from(gate));
     }
 
     // NOTE: maybe this method shouldn't be in this module, given that it's

@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::circuit::{Inst, QGate};
+use crate::circuit::{BaseGateQ, GateQ, Inst};
 use std::fmt;
 
 /// There is a version 3 of QASM, but we’re only going to use 2.0 for now, since
@@ -20,16 +20,28 @@ impl Qasm {
     }
 }
 
-impl FmtWith<Qasm> for QGate {
+impl FmtWith<Qasm> for BaseGateQ {
     fn fmt(&self, _qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use QGate::*;
+        use BaseGateQ::*;
         match self {
-            X(tgt) => write!(f, "x q[{}];", tgt),
-            T { tgt, conj } => write!(f, "{} q[{}];", if *conj { "tdg" } else { "t" }, tgt),
-            H(tgt) => write!(f, "h q[{}];", tgt),
-            Z(tgt) => write!(f, "z q[{}];", tgt),
-            CX { tgt, ctrl } => write!(f, "cx q[{}], q[{}];", ctrl, tgt),
-            SWAP { .. } => todo!(),
+            X(tgt) => write!(f, "x q[{}]", tgt),
+            H(tgt) => write!(f, "h q[{}]", tgt),
+            Z(tgt) => write!(f, "z q[{}]", tgt),
+            T(tgt) => write!(f, "t q[{}]", tgt),
+            TDag(tgt) => write!(f, "tdg q[{}]", tgt),
+            Swap { .. } => todo!(),
+        }
+    }
+}
+
+impl FmtWith<Qasm> for GateQ {
+    fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use BaseGateQ::*;
+        match (self.ctrls.len(), self.base) {
+            (0, _) => write!(f, "{}", self.base.fmt_with(qasm)),
+            (1, X(tgt)) => write!(f, "cx q[{}], q[{}]", self.ctrls[0], tgt),
+            // Unsupported gate
+            _ => unreachable!(),
         }
     }
 }
@@ -37,12 +49,12 @@ impl FmtWith<Qasm> for QGate {
 impl FmtWith<Qasm> for Inst {
     fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Inst::QGate(g) => write!(f, "{}", g.fmt_with(qasm)),
-            Inst::Meas(src, tgt) => write!(f, "measure q[{}] -> c[{}]", src, tgt),
+            Inst::QGate(g) => writeln!(f, "{};", g.fmt_with(qasm)),
+            Inst::Meas(src, tgt) => writeln!(f, "measure q[{}] -> c[{}];", src, tgt),
             Inst::Out(io) => {
                 // TODO OpenQASM doesn't support this kind of operation, does it? What
                 // should we do here?
-                write!(f, "// copy c[{}] __out_{}[{}] ", io.addr, io.name, io.elem)
+                writeln!(f, "// copy c[{}] __out_{}[{}]; ", io.addr, io.name, io.elem)
             }
             _ => Ok(()),
         }
@@ -60,7 +72,7 @@ impl FmtWith<Qasm> for CircuitBuf {
         writeln!(f, "qreg q[{}];", self.qbit_size())?;
         writeln!(f, "creg c[{}];", self.cbit_size())?;
         for inst in self.iter() {
-            writeln!(f, "{}", inst.fmt_with(qasm))?;
+            write!(f, "{}", inst.fmt_with(qasm))?;
         }
         Ok(())
     }

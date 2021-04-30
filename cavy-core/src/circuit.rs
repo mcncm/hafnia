@@ -25,31 +25,72 @@ pub struct IoOutGate {
     pub elem: usize,
 }
 
-// NOTE: if you change the layout of this enum, its method `qubits` is sure to
-// break, on account of the pointer arithmetic inside it.
-/// These are gates from which most ordinary circuits will be built.
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum QGate {
+/// The base gates from which we will build circuits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseGateQ {
     X(Addr),
-    T { tgt: Addr, conj: bool },
     H(Addr),
     Z(Addr),
-    CX { ctrl: Addr, tgt: Addr },
-    SWAP(Addr, Addr),
+    T(Addr),
+    TDag(Addr),
+    // This might "really" belong in `GateQ`, but it makes control unrolling a
+    // bit challenging.
+    Swap(Addr, Addr),
 }
 
+/// These are gates that might decompose into more primitive base gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum CGate {
+pub struct GateQ {
+    pub ctrls: Vec<Addr>,
+    pub base: BaseGateQ,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseGateC {
     Not(Addr),
     /// The first address is the source bit; the second is the target bit
     Copy(Addr, Addr),
-    /// The first address is the source bit; the second is the target bit
-    Cnot(Addr, Addr),
-    /// Control a quantum gate on a classical bit
-    Control(Addr, Box<QGate>),
+}
+
+/// For classical-controlled gates, the target can be either a classical or
+/// quantum bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseGate {
+    C(BaseGateC),
+    Q(BaseGateQ),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateC {
+    pub ctrls: Vec<Addr>,
+    pub base: BaseGate,
+}
+
+impl From<BaseGateQ> for GateQ {
+    fn from(g: BaseGateQ) -> Self {
+        Self {
+            ctrls: vec![],
+            base: g,
+        }
+    }
+}
+
+impl From<BaseGateQ> for GateC {
+    fn from(g: BaseGateQ) -> Self {
+        Self {
+            ctrls: vec![],
+            base: BaseGate::Q(g),
+        }
+    }
+}
+
+impl From<BaseGateC> for GateC {
+    fn from(g: BaseGateC) -> Self {
+        Self {
+            ctrls: vec![],
+            base: BaseGate::C(g),
+        }
+    }
 }
 
 /// Is a freed bit clean (known pure state) or dirty (unknown, possibly
@@ -75,9 +116,9 @@ pub enum Inst {
     /// Set down a qubit rail
     QFree(Addr, FreeState),
     /// A quantum gate
-    QGate(QGate),
+    QGate(GateQ),
     /// A classical gate
-    CGate(CGate),
+    CGate(GateC),
     /// Measurement: the first address is the qubit measured; the second is the
     /// target classical bit
     Meas(Addr, Addr),
@@ -85,112 +126,83 @@ pub enum Inst {
     Out(Box<IoOutGate>),
 }
 
-impl CGate {
-    pub fn qbits(&self) -> &[Addr] {
-        if let CGate::Control(_, qg) = self {
-            qg.qbits()
-        } else {
-            &[]
-        }
-    }
-
-    pub fn cbits(&self) -> &[Addr] {
-        use CGate::*;
-        // NOTE: A ridiculous unsafe optimization that almost certainly yields no
-        // measurable performance benefits, and will lead to a bug as soon as I
-        // forget about it and change the data layout of `CGate`. This is
-        // basically bad engineering in the name of fun.
-        use std::mem::Discriminant;
-        let tgts = match self {
-            CGate::Not(_) => 1,
-            CGate::Copy(_, _) => 2,
-            CGate::Cnot(_, _) => 2,
-            CGate::Control(_, _) => 1,
-        };
-        // Safety: `CGate` is `#[repr(C)]`
-        unsafe {
-            let ptr = (self as *const Self as *const Discriminant<Self>).add(1);
-            std::slice::from_raw_parts(ptr as *const Addr, tgts)
+impl BaseGateQ {
+    pub fn conj(self) -> BaseGateQ {
+        use BaseGateQ::*;
+        match self {
+            T(u) => T(u),
+            TDag(u) => T(u),
+            _ => self,
         }
     }
 }
 
-impl QGate {
-    pub fn qbits(&self) -> &[Addr] {
-        use QGate::*;
-        // NOTE: A ridiculous unsafe optimization that almost certainly yields no
-        // measurable performance benefits, and will lead to a bug as soon as I
-        // forget about it and change the data layout of `QGate`. This is
-        // basically bad engineering in the name of fun.
-        use std::mem::Discriminant;
-        let tgts = match self {
-            X(_) => 1,
-            T { .. } => 1,
-            H(_) => 1,
-            Z(_) => 1,
-            CX { .. } => 2,
-            SWAP { .. } => 2,
-        };
-        // Safety: `QGate` is `#[repr(C)]`
-        unsafe {
-            let ptr = (self as *const Self as *const Discriminant<Self>).add(1);
-            std::slice::from_raw_parts(ptr as *const Addr, tgts)
-        }
+impl GateQ {
+    pub fn conj(&mut self) {
+        self.base = self.base.conj();
     }
 
-    pub fn conjugate(self) -> QGate {
-        use QGate::*;
-        match self {
-            T { tgt, conj } => T { tgt, conj: !conj },
-            _ => self,
-        }
+    pub fn is_cx(&self) -> bool {
+        matches!(self.base, BaseGateQ::X(_)) && self.ctrls.len() == 1
     }
 
-    #[rustfmt::skip]
-    fn controlled_on_one(self, ctrl: Addr) -> Vec<QGate> {
-        use QGate::*;
-        match self {
-            X(tgt) => vec![CX { ctrl, tgt }],
-            T { tgt: _, conj: _ } => todo!(),
-            H(_tgt) => todo!(),
-            Z(tgt) => vec![
-                H(tgt),
-                CX { ctrl, tgt },
-                H(tgt)
-            ],
-            // This is just applying a well-known identity for CCX.
-            CX { ctrl: inner_ctrl, tgt } => vec![
-                H(tgt),
-                CX { ctrl: inner_ctrl, tgt },
-                T { tgt, conj: true},
-                CX { ctrl, tgt },
-                T { tgt, conj: false },
-                CX { ctrl: inner_ctrl, tgt },
-                T { tgt, conj: true},
-                CX { ctrl, tgt },
-                T { tgt: inner_ctrl, conj: false },
-                T { tgt, conj: false },
-                CX { ctrl, tgt: inner_ctrl },
-                H(tgt),
-                T { tgt: ctrl, conj: false },
-                T { tgt: inner_ctrl, conj: true },
-                CX { ctrl, tgt: inner_ctrl },
-            ],
-            SWAP{ .. } => todo!(),
-        }
+    pub fn is_cz(&self) -> bool {
+        matches!(self.base, BaseGateQ::Z(_)) && self.ctrls.len() == 1
     }
 
-    /// Control on multiple qubits
-    pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = Addr>>) -> Vec<QGate> {
-        let mut inner_gates = vec![self];
-        for ctrl in ctrls {
-            inner_gates = inner_gates
-                .into_iter()
-                .flat_map(|gate| gate.controlled_on_one(ctrl))
-                .collect::<Vec<QGate>>()
-        }
-        inner_gates
+    pub fn is_swap(&self) -> bool {
+        matches!(self.base, BaseGateQ::Swap(_, _)) && self.ctrls.len() == 0
     }
+
+    pub fn is_cswap(&self) -> bool {
+        matches!(self.base, BaseGateQ::Swap(_, _)) && self.ctrls.len() == 1
+    }
+
+    // #[rustfmt::skip]
+    // fn controlled_on_one(self, ctrl: Addr) -> Vec<QGate> {
+    //     use QGate::*;
+    //     match self {
+    //         X(tgt) => vec![CX { ctrl, tgt }],
+    //         T { tgt: _, conj: _ } => todo!(),
+    //         H(_tgt) => todo!(),
+    //         Z(tgt) => vec![
+    //             H(tgt),
+    //             CX { ctrl, tgt },
+    //             H(tgt)
+    //         ],
+    //         // This is just applying a well-known identity for CCX.
+    //         CX { ctrl: inner_ctrl, tgt } => vec![
+    //             H(tgt),
+    //             CX { ctrl: inner_ctrl, tgt },
+    //             T { tgt, conj: true},
+    //             CX { ctrl, tgt },
+    //             T { tgt, conj: false },
+    //             CX { ctrl: inner_ctrl, tgt },
+    //             T { tgt, conj: true},
+    //             CX { ctrl, tgt },
+    //             T { tgt: inner_ctrl, conj: false },
+    //             T { tgt, conj: false },
+    //             CX { ctrl, tgt: inner_ctrl },
+    //             H(tgt),
+    //             T { tgt: ctrl, conj: false },
+    //             T { tgt: inner_ctrl, conj: true },
+    //             CX { ctrl, tgt: inner_ctrl },
+    //         ],
+    //         Swap{ .. } => todo!(),
+    //     }
+    // }
+
+    // /// Control on multiple qubits
+    // pub fn controlled_on(self, ctrls: Box<dyn Iterator<Item = Addr>>) -> Vec<QGate> {
+    //     let mut inner_gates = vec![self];
+    //     for ctrl in ctrls {
+    //         inner_gates = inner_gates
+    //             .into_iter()
+    //             .flat_map(|gate| gate.controlled_on_one(ctrl))
+    //             .collect::<Vec<QGate>>()
+    //     }
+    //     inner_gates
+    // }
 }
 
 pub trait MaxBits {
@@ -198,9 +210,17 @@ pub trait MaxBits {
     fn max_cbit(&self) -> Option<usize>;
 }
 
-impl MaxBits for QGate {
+impl MaxBits for BaseGateQ {
     fn max_qbit(&self) -> Option<usize> {
-        self.qbits().iter().cloned().max()
+        let max = *match self {
+            BaseGateQ::X(u) => u,
+            BaseGateQ::H(u) => u,
+            BaseGateQ::Z(u) => u,
+            BaseGateQ::T(u) => u,
+            BaseGateQ::TDag(u) => u,
+            BaseGateQ::Swap(u, v) => std::cmp::max(u, v),
+        };
+        Some(max)
     }
 
     fn max_cbit(&self) -> Option<usize> {
@@ -208,13 +228,53 @@ impl MaxBits for QGate {
     }
 }
 
-impl MaxBits for CGate {
+impl MaxBits for GateQ {
     fn max_qbit(&self) -> Option<usize> {
-        self.qbits().iter().cloned().max()
+        std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_qbit())
     }
 
     fn max_cbit(&self) -> Option<usize> {
-        self.cbits().iter().cloned().max()
+        None
+    }
+}
+
+impl MaxBits for BaseGateC {
+    fn max_qbit(&self) -> Option<usize> {
+        None
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        let max = *match self {
+            BaseGateC::Not(u) => u,
+            BaseGateC::Copy(u, v) => std::cmp::max(u, v),
+        };
+        Some(max)
+    }
+}
+
+impl MaxBits for BaseGate {
+    fn max_qbit(&self) -> Option<usize> {
+        match self {
+            BaseGate::C(x) => x.max_qbit(),
+            BaseGate::Q(x) => x.max_qbit(),
+        }
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        match self {
+            BaseGate::C(x) => x.max_qbit(),
+            BaseGate::Q(x) => x.max_qbit(),
+        }
+    }
+}
+
+impl MaxBits for GateC {
+    fn max_qbit(&self) -> Option<usize> {
+        self.base.max_qbit()
+    }
+
+    fn max_cbit(&self) -> Option<usize> {
+        std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_cbit())
     }
 }
 
@@ -246,14 +306,14 @@ impl MaxBits for Inst {
     }
 }
 
-impl From<QGate> for Inst {
-    fn from(g: QGate) -> Self {
+impl From<GateQ> for Inst {
+    fn from(g: GateQ) -> Self {
         Self::QGate(g)
     }
 }
 
-impl From<CGate> for Inst {
-    fn from(g: CGate) -> Self {
+impl From<GateC> for Inst {
+    fn from(g: GateC) -> Self {
         Self::CGate(g)
     }
 }
@@ -309,19 +369,16 @@ impl CircuitBuf {
 
 // === Formatting implementations
 
-impl std::fmt::Display for QGate {
+impl std::fmt::Display for BaseGateQ {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use QGate::*;
+        use BaseGateQ::*;
         match self {
             X(q) => write!(f, "X {}", q),
-            T { tgt, conj } => {
-                let conj = if *conj { "*" } else { "" };
-                write!(f, "T{} {}", conj, tgt)
-            }
             H(q) => write!(f, "H {}", q),
             Z(q) => write!(f, "Z {}", q),
-            CX { tgt, ctrl } => write!(f, "CX {} {}", ctrl, tgt),
-            SWAP(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
+            T(q) => write!(f, "T {}", q),
+            TDag(q) => write!(f, "T* {}", q),
+            Swap(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
         }
     }
 }

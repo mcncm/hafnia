@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    circuit::{CircuitBuf, QGate},
+    circuit::{CircuitBuf, GateQ},
     context::Context,
     mir::*,
     session::Config,

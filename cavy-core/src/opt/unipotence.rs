@@ -189,8 +189,8 @@ impl StrandChecker {
             UnOp(_, _) | Use(_) => return,
 
             // Must end a strand if one of its places appears in a binop or ref.
-            BinOp(_, _, _) => todo!(),
-            Ref(_, _) => todo!(),
+            BinOp(_, _, _) => return,
+            Ref(_, _) => return,
         };
 
         let mut strand = match self.strands.entry(rhs.clone()) {

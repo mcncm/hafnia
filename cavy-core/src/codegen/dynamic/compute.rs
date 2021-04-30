@@ -2,7 +2,7 @@
 
 use crate::{
     ast::{BinOpKind, UnOpKind},
-    circuit::{CGate, QGate},
+    circuit::{BaseGateC, BaseGateQ},
     mir::Operand,
     values::Value,
 };
@@ -38,7 +38,7 @@ impl<'m> Interpreter<'m> {
         for (i, b) in value.bits().iter().enumerate() {
             if *b {
                 let addr = allocation.qbits[i];
-                self.circ.push_qgate(QGate::X(addr), &self.st);
+                self.circ.push_qgate(BaseGateQ::X(addr), &self.st);
             }
         }
         allocation
@@ -77,7 +77,8 @@ impl<'m> Interpreter<'m> {
                 let lbits = self.st.env.bits_at(lplace);
                 let rbits = self.st.env.bits_at(rplace);
                 for (laddr, raddr) in lbits.qbits.iter().zip(rbits.qbits.iter()) {
-                    self.circ.push_qgate(QGate::SWAP(*laddr, *raddr), &self.st);
+                    self.circ
+                        .push_qgate(BaseGateQ::Swap(*laddr, *raddr), &self.st);
                 }
             }
             And => todo!(),
@@ -93,10 +94,10 @@ impl<'m> Interpreter<'m> {
                 let rplace = self.unwrap_operand(right);
                 let bits = self.st.env.bits_at(rplace);
                 for addr in bits.qbits {
-                    self.circ.push_qgate(QGate::X(*addr), &self.st);
+                    self.circ.push_qgate(BaseGateQ::X(*addr), &self.st);
                 }
                 for addr in bits.cbits {
-                    self.circ.push_cgate(CGate::Not(*addr), &self.st);
+                    self.circ.push_cgate(BaseGateC::Not(*addr), &self.st);
                 }
                 bits.to_owned()
             }
@@ -104,7 +105,7 @@ impl<'m> Interpreter<'m> {
                 let rplace = self.unwrap_operand(right);
                 let bits = self.st.env.bits_at(rplace);
                 for addr in bits.qbits {
-                    self.circ.push_qgate(QGate::H(*addr), &self.st);
+                    self.circ.push_qgate(BaseGateQ::H(*addr), &self.st);
                 }
                 bits.to_owned()
             }
