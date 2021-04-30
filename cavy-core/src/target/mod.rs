@@ -2,7 +2,7 @@
 //! This is all pretty unstable for the time being, so don’t rely on it too much
 //! externally.
 
-use crate::{circuit::CircuitBuf, util::FmtWith};
+use crate::{circuit::CircuitBuf, context::Context, util::FmtWith};
 
 pub mod latex;
 pub mod qasm;
@@ -15,7 +15,7 @@ pub type ObjectCode = String;
 /// This is a marker trait for compile targets. Must be `Send` in order to use
 /// `Box<dyn Target>` in FFI.
 pub trait Target: std::fmt::Debug + Send {
-    fn from(&self, circ: CircuitBuf) -> ObjectCode;
+    fn from(&self, circ: CircuitBuf, ctx: &Context) -> ObjectCode;
 }
 
 impl<T> Target for T
@@ -23,7 +23,7 @@ where
     CircuitBuf: FmtWith<T>,
     T: std::fmt::Debug + Send,
 {
-    fn from(&self, circ: CircuitBuf) -> ObjectCode {
+    fn from(&self, circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
         format!("{}", circ.fmt_with(self))
     }
 }
@@ -42,7 +42,7 @@ pub mod null {
     pub struct NullTarget();
 
     impl Target for NullTarget {
-        fn from(&self, _circ: CircuitBuf) -> ObjectCode {
+        fn from(&self, _circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
             String::new()
         }
     }

@@ -6,7 +6,7 @@ use crate::types::{CachedTypeInterner, TyId, Type};
 use crate::{cavy_errors::ErrorBuf, num::Uint};
 use crate::{interner_type, types::TypeSize};
 use crate::{
-    session::{Config, Phase},
+    session::{Config, Phase, Statistics},
     util::FmtWith,
 };
 use std::{collections::HashMap, fmt};
@@ -33,7 +33,9 @@ common_types! {
 /// arenas and interners, and so on, as well as notionally immutable
 /// configuration data all live in here.
 pub struct Context<'ctx> {
-    /// The 'immutable' state associated with the compilation process
+    /// Compiler performance data, etc.
+    pub stats: &'ctx mut Statistics,
+    /// The immutable state associated with the compilation process
     pub conf: &'ctx Config,
     /// The source code used by the compiler
     pub srcs: SrcStore,
@@ -46,7 +48,7 @@ pub struct Context<'ctx> {
 }
 
 impl<'ctx> Context<'ctx> {
-    pub fn new(conf: &'ctx Config) -> Self {
+    pub fn new(conf: &'ctx Config, stats: &'ctx mut Statistics) -> Self {
         let mut types = CachedTypeInterner::new();
         let common = CommonTypes {
             unit: types.intern(Type::unit()),
@@ -64,6 +66,7 @@ impl<'ctx> Context<'ctx> {
         };
         Self {
             conf,
+            stats,
             types,
             common,
             srcs: SrcStore::new(),
@@ -84,7 +87,21 @@ impl<'ctx> Context<'ctx> {
     }
 }
 
-/// ====== Display and formatting ======
+// === A handy macro for creating a Context struct ===
+
+/// Because you can't write a function of type `() -> Context`, but we sometimes
+/// would like to get one from nowhere without remembering the incantation, this
+/// macro automates the process of making a "default" context
+#[macro_export]
+macro_rules! default_context {
+    ($name:ident) => {
+        let mut stats = $crate::session::Statistics::new();
+        let conf = $crate::session::Config::default();
+        let mut $name = $crate::context::Context::new(&conf, &mut stats);
+    };
+}
+
+// === Display and formatting ===
 
 impl<'c> FmtWith<Context<'c>> for SymbolId {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {

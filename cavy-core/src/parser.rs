@@ -1315,7 +1315,7 @@ mod errors {
 mod tests {
     use super::*;
     use crate::ast::ExprKind::{self, *};
-    use crate::session::Config;
+    use crate::session::{Config, Statistics};
     use crate::token::Token;
     use Lexeme::*;
 
@@ -1392,8 +1392,7 @@ mod tests {
         // If there's only a list of lexemes, just try to parse it!
         ([$($lexeme:expr),+]) => {
             let tokens = vec![$(token($lexeme)),+];
-            let conf = Config::default();
-            let mut ctx = Context::new(&conf);
+            default_context!(ctx);
             let mut parser = Parser::new(tokens, &mut ctx);
             parser.expression().unwrap();
         };
@@ -1401,8 +1400,7 @@ mod tests {
         // against the S-expression it contains.
         ([$($lexeme:expr),+], $($s_expr:tt)+) => {
             let tokens = vec![$(token($lexeme)),+];
-            let conf = Config::default();
-            let mut ctx = Context::new(&conf);
+            default_context!(ctx);
             let mut parser = Parser::new(tokens, &mut ctx);
             let ast = parser.expression().unwrap();
             test_s_expr!(ast, $($s_expr)+);

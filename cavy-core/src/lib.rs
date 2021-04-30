@@ -16,6 +16,7 @@ pub mod cavy_errors;
 pub mod circuit;
 pub mod codegen;
 pub mod compile;
+#[macro_use]
 pub mod context;
 pub mod mir;
 pub mod opt;

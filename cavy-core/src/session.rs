@@ -1,5 +1,5 @@
 //! Data maintained for a whole compilation session: compiler flags, error
-//! handlers, and so on.
+//! handlers (not currently included here), and so on.
 
 use crate::{
     arch::Arch,
@@ -12,9 +12,12 @@ pub use crate::opt::OptFlags;
 
 use std::path::PathBuf;
 
+/// Compilation phases
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Phase {
+    /// After scanning the program text
     Tokenize,
+    /// After parsing to the AST
     Parse,
     /// After typechecking and lowering to MIR
     Typecheck,
@@ -68,10 +71,51 @@ pub struct Config {
     pub debug: bool,
     /// Architecture data
     pub arch: Arch,
-    /// Compile target data
-    pub target: Box<dyn Target>,
     /// Optimization settings.
     pub opt: OptConfig,
     /// Which compilation phases to run
     pub phase_config: PhaseConfig,
+}
+
+// == Compiler statistics
+use std::time::Instant;
+
+#[derive(Debug)]
+pub struct Event {
+    pub label: &'static str,
+    instant: Instant,
+}
+
+impl Event {
+    /// Time difference in micros
+    pub fn delta(&self, other: &Event) -> u128 {
+        (self.instant - other.instant).as_micros()
+    }
+}
+
+impl From<&'static str> for Event {
+    fn from(label: &'static str) -> Self {
+        Self {
+            label,
+            instant: Instant::now(),
+        }
+    }
+}
+
+/// Compiler statistics for performance analysis and optimization
+#[derive(Debug)]
+pub struct Statistics {
+    pub events: Vec<Event>,
+}
+
+impl Statistics {
+    pub fn new() -> Self {
+        Self {
+            events: vec![Event::from("init")],
+        }
+    }
+
+    pub fn tick(&mut self, label: &'static str) {
+        self.events.push(Event::from(label));
+    }
 }

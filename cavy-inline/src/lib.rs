@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "nightly-features", feature(proc_macro_diagnostic))]
 #![cfg_attr(feature = "nightly-features", feature(proc_macro_span))]
 
-use cavy_core::{circuit::CircuitBuf, compile, context::Context, session::Config};
+use cavy_core::{circuit::CircuitBuf, compile, default_context};
 use proc_macro::TokenStream;
 use quote::quote;
 
@@ -22,8 +22,7 @@ mod nightly;
 /// options.
 #[proc_macro]
 pub fn inline_cavy(input: TokenStream) -> TokenStream {
-    let conf = Config::default();
-    let mut ctx = Context::new(&conf);
+    default_context!(ctx);
     let src = stringify(input);
     let id = ctx.srcs.insert_input(&src.0);
     let circ = compile::compile_circuit(id, &mut ctx);

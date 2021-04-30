@@ -24,9 +24,7 @@ pub use cavy_inline::inline_cavy;
 macro_rules! cavy {
     ($($src:tt)*) => {
         {
-            let conf = $crate::session::Config::default();
-            let mut ctx = $crate::context::Context::new(&conf);
-
+            default_context!(ctx);
             let id = ctx.srcs.insert_input(&stringify!($($src)*));
             let circ = $crate::compile::compile_circuit(id, &mut ctx);
             // Can only get Ok(None) if compiler options ask to stop early

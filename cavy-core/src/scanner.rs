@@ -510,8 +510,7 @@ mod tests {
                 )*
             )?
 
-            let conf = crate::session::Config::default();
-            let mut ctx = crate::context::Context::new(&conf);
+            default_context!(ctx);
             let id = ctx.srcs.insert(SrcObject::from($code));
             let tokens = Scanner::new(id, &mut ctx).tokenize().unwrap();
 
@@ -635,8 +634,7 @@ mod tests {
 
     #[test]
     fn spans_correct() {
-        let conf = crate::session::Config::default();
-        let mut ctx = crate::context::Context::new(&conf);
+        default_context!(ctx);
         let id = ctx.srcs.insert(SrcObject::from("fn hello()"));
         let scanner = Scanner::new(id, &mut ctx);
         let tokens = scanner.tokenize().unwrap();

@@ -17,9 +17,10 @@ macro_rules! test_compiles {
                 // cavy/lib.rs. We can't necessarily use that macro, though,
                 // because I want access to the config. Maybe it should *return*
                 // the config? Not clear. Good enough for now.
+                let mut stats = session::Statistics::new();
                 let mut conf = session::Config::default();
                 $(conf.phase_config.last_phase = session::Phase::$phase;)?
-                let mut ctx = context::Context::new(&conf);
+                let mut ctx = context::Context::new(&conf, &mut stats);
                 let id = ctx.srcs.insert_input(&stringify!($($src)*));
                 let circ = compile::compile_circuit(id, &mut ctx);
                 if let Err(errs) = circ {

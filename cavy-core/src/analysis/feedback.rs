@@ -7,7 +7,7 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::common::{DataflowAnalysis, Forward, Lattice};
+use super::common::{Backward, DataflowAnalysis, Forward, Lattice};
 use crate::{
     ast::UnOpKind,
     mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},

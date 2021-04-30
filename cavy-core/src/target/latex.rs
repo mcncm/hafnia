@@ -744,7 +744,7 @@ impl FmtWith<LayoutArray<'_>> for LaTeX {
 
 impl Target for LaTeX {
     #[rustfmt::skip]
-    fn from(&self, circ: CircuitBuf) -> ObjectCode {
+    fn from(&self, circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
         let qbits = circ.qbit_size();
         let cbits = circ.cbit_size();
         let mut layout_array = LayoutArray::new(self, qbits, cbits);

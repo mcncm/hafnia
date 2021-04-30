@@ -6,7 +6,7 @@ use crate::{
     lowering, parser, scanner,
     session::Phase,
     source::{SrcId, SrcObject},
-    target::ObjectCode,
+    target::{ObjectCode, Target},
     util::{FmtWith, FmtWrapper},
 };
 use std::path::PathBuf;
@@ -16,9 +16,12 @@ pub fn compile_circuit(
     entry_point: SrcId,
     ctx: &mut Context,
 ) -> Result<Option<CircuitBuf>, ErrorBuf> {
+    ctx.stats.tick("compile_start");
     let tokens = scanner::tokenize(entry_point, ctx)?;
+    ctx.stats.tick("scanning");
 
     let ast = parser::parse(tokens, ctx)?;
+    ctx.stats.tick("parsing");
     if ctx.last_phase() == &Phase::Parse {
         if ctx.conf.debug {
             println!("{:#?}", ast);
@@ -27,6 +30,7 @@ pub fn compile_circuit(
     }
 
     let mut mir = lowering::lower(ast, ctx)?;
+    ctx.stats.tick("lowering");
     if ctx.last_phase() == &Phase::Typecheck {
         if ctx.conf.debug {
             println!("{}", mir.fmt_with(&ctx));
@@ -35,11 +39,13 @@ pub fn compile_circuit(
     }
 
     crate::analysis::check(&mir, ctx)?;
+    ctx.stats.tick("analysis");
     if ctx.last_phase() == &Phase::Analysis {
         return Ok(None);
     }
 
     crate::opt::optimize(&mut mir, ctx);
+    ctx.stats.tick("optimization");
     if ctx.last_phase() == &Phase::Optimization {
         if ctx.conf.debug {
             println!("{}", mir.fmt_with(&ctx));
@@ -48,6 +54,7 @@ pub fn compile_circuit(
     }
 
     let circ = crate::codegen::translate(&mir, ctx);
+    ctx.stats.tick("codegen");
     if ctx.last_phase() == &Phase::Translation {
         if ctx.conf.debug {
             println!("{:?}", circ);
@@ -65,6 +72,7 @@ pub fn compile_circuit(
 pub fn compile_target(
     entry_point: SrcId,
     ctx: &mut Context,
+    target: Box<dyn Target>,
 ) -> Result<Option<ObjectCode>, ErrorBuf> {
-    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| ctx.conf.target.from(circ)))
+    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| target.from(circ, &ctx)))
 }

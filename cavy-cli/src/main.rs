@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use cavy_core::{
     arch, compile,
     context::Context,
-    session::{Config, OptConfig, OptFlags, Phase, PhaseConfig},
+    session::{Config, OptConfig, OptFlags, Phase, PhaseConfig, Statistics},
     sys, target,
     util::FmtWith,
 };
@@ -98,9 +98,31 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
     })
 }
 
+fn get_config(argmatches: &ArgMatches) -> Config {
+    // Should we provide debug information?
+    let debug = argmatches.is_present("debug");
+    let opt = get_opt(argmatches);
+    let phase_config = get_phase(argmatches);
+    let arch = match get_arch(argmatches) {
+        Ok(arch) => arch,
+        Err(_) => {
+            eprintln!("Failed to identify target architecture.");
+            sys::exit(1);
+        }
+    };
+
+    Config {
+        debug,
+        arch,
+        opt,
+        phase_config,
+    }
+}
+
 fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
     use target::{latex, qasm, summary};
 
+    let perf = argmatches.is_present("perf");
     let standalone = argmatches.is_present("standalone");
     let initial_kets = argmatches.is_present("initial_kets");
     let package = match argmatches.value_of("package") {
@@ -118,31 +140,8 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
             initial_kets,
             package,
         }),
-        Some("summary") => Box::new(summary::Summary {}),
+        Some("summary") => Box::new(summary::Summary { perf }),
         _ => unreachable!(),
-    }
-}
-
-fn get_config(argmatches: &ArgMatches) -> Config {
-    // Should we provide debug information?
-    let debug = argmatches.is_present("debug");
-    let opt = get_opt(argmatches);
-    let phase_config = get_phase(argmatches);
-    let arch = match get_arch(argmatches) {
-        Ok(arch) => arch,
-        Err(_) => {
-            eprintln!("Failed to identify target architecture.");
-            sys::exit(1);
-        }
-    };
-    let target = get_target(argmatches);
-
-    Config {
-        debug,
-        arch,
-        target,
-        opt,
-        phase_config,
     }
 }
 
@@ -163,11 +162,14 @@ fn emit_object_code(object_code: target::ObjectCode, object_path: PathBuf) {
 }
 
 fn main() {
+    // Should be the very first thing that is called, in order to diagnose the
+    // performance of every part of the process.
+    let mut stats = Statistics::new();
     let yaml = load_yaml!("cli.yml");
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
     let conf = get_config(&argmatches);
-    let mut ctx = Context::new(&conf);
+    let mut ctx = Context::new(&conf, &mut stats);
 
     // Only emit debug messages if the program has *not* been built for the
     // `release` profile, *and* the --debug flag has been passed. The reason for
@@ -187,9 +189,10 @@ fn main() {
     }
 
     if let Some(path) = get_entry_point(&argmatches) {
-        let id = ctx.srcs.insert_path(path).unwrap();
+        let target = get_target(&argmatches);
         let object_path = get_object_path(&argmatches);
-        let object_code = compile::compile_target(id, &mut ctx).unwrap_or_else(|errs| {
+        let id = ctx.srcs.insert_path(path).unwrap();
+        let object_code = compile::compile_target(id, &mut ctx, target).unwrap_or_else(|errs| {
             eprintln!("{}", errs.fmt_with(&ctx));
             sys::exit(1);
         });

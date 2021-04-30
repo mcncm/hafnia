@@ -4,7 +4,10 @@
 //! it's used in this one place.
 
 use crate::circuit::{CGate, FreeState, Inst, QGate};
-use serde_json::json;
+use crate::session::Statistics;
+use serde_json::{json, Map};
+
+use std::time::Duration;
 
 use super::*;
 
@@ -13,9 +16,12 @@ macro_rules! zero {
 }
 
 #[derive(Debug)]
-pub struct Summary();
+pub struct Summary {
+    pub perf: bool,
+}
+
 impl Target for Summary {
-    fn from(&self, circ: CircuitBuf) -> ObjectCode {
+    fn from(&self, circ: CircuitBuf, ctx: &Context) -> ObjectCode {
         let qbits = circ.qbit_size();
         let cbits = circ.cbit_size();
 
@@ -51,7 +57,7 @@ impl Target for Summary {
         let two_qubit_gates = cxgates + swapgates;
         let total_gates = single_qubit_gates + two_qubit_gates;
 
-        let stats = json!({
+        let mut stats = json!({
             "bits": {
                 "qbits": qbits,
                 "cbits": cbits,
@@ -74,6 +80,28 @@ impl Target for Summary {
                 "total": clean_frees + dirty_frees,
             }
         });
+
+        if self.perf {
+            let events = &ctx.stats.events;
+            let mut times: Map<_, _> = events
+                .windows(2)
+                .map(|w| {
+                    let label = w[1].label.to_string();
+                    // `serde_json` doesn't support 128-bit numbers, so we have
+                    // to downcast it here.
+                    let delta = w[1].delta(&w[0]) as u64;
+                    (label, json!(delta))
+                })
+                .collect();
+            let total = events.last().unwrap().delta(&events[0]) as u64;
+            times.insert("total".to_string(), json!(total));
+
+            if let serde_json::Value::Object(ref mut map) = stats {
+                map.insert("perf".to_string(), json!(times));
+            } else {
+                unreachable!();
+            }
+        }
         format!("{}", serde_json::to_string_pretty(&stats).unwrap())
     }
 }

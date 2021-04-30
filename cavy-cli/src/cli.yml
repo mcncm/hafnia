@@ -31,6 +31,9 @@ args:
   - initial_kets:
       long: initial-kets
       about: Replace initial `X` gates with ket states.
+  - perf:
+      long: perf
+      about: Include profiling data in summary statistics.
   - package:
       long: package
       value_name: PACKAGE
