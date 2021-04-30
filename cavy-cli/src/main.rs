@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use cavy_core::{
     arch, compile,
     context::Context,
-    session::{Config, OptConfig, Phase, PhaseConfig},
+    session::{Config, OptConfig, OptFlags, Phase, PhaseConfig},
     sys, target,
     util::FmtWith,
 };
@@ -23,10 +23,18 @@ fn get_opt(argmatches: &ArgMatches) -> OptConfig {
         Some("3") => 3,
         _ => unreachable!(),
     };
-
-    let comptime = !argmatches.is_present("no_comptime");
-
-    OptConfig { level, comptime }
+    let mut flags = OptFlags::default();
+    if let Some(values) = argmatches.values_of("enable-opt") {
+        for flag in values {
+            flags.enable(flag);
+        }
+    }
+    if let Some(values) = argmatches.values_of("disable-opt") {
+        for flag in values {
+            flags.disable(flag);
+        }
+    }
+    OptConfig { level, flags }
 }
 
 /// Collect information about which compiler phases to execute

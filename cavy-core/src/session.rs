@@ -1,10 +1,15 @@
 //! Data maintained for a whole compilation session: compiler flags, error
 //! handlers, and so on.
 
-use crate::arch::Arch;
-use crate::cavy_errors::{Diagnostic, ErrorBuf};
-use crate::source::SrcStore;
-use crate::target::Target;
+use crate::{
+    arch::Arch,
+    cavy_errors::{Diagnostic, ErrorBuf},
+    source::SrcStore,
+    target::Target,
+};
+
+pub use crate::opt::OptFlags;
+
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -43,15 +48,14 @@ pub struct PhaseConfig {
 pub struct OptConfig {
     /// Integer optimization level.
     pub level: u8,
-    /// Perform const propagation, or compile-time evaluation of classical operations?
-    pub comptime: bool,
+    pub flags: OptFlags,
 }
 
 impl Default for OptConfig {
     fn default() -> Self {
         Self {
             level: 3,
-            comptime: true,
+            flags: OptFlags::default(),
         }
     }
 }

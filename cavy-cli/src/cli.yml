@@ -42,7 +42,6 @@ args:
       default_value: "qcircuit"
       about: <PACKAGE> is the LaTeX package used for circuit output.
       
-
   # Compile phase options
   - debug:
       short: d
@@ -69,9 +68,9 @@ args:
   # Optimization options
   - opt:
       short: O
-      long: opt
+      long: opt-level
       value_name: OPT
-      about: Sets an optimization level.
+      about: Sets the optimization level.
       possible_values:
         - "0"
         - "1"
@@ -79,9 +78,22 @@ args:
         - "3"
       default_value: "3"
       required: false
-  - no_comptime:
-      long: no-comptime
-      about: Compile without constant propagation.
+  - enable_opt:
+      about: Enable a specific optimization, regardless of optimization level.
+      short: E
+      long: enable-opt
+      multiple: true
+      possible_values:
+        - "constprop"
+        - "unipotence"
+  - disable_opt:
+      about: Disable a specific optimization, regardless of optimization level.
+      short: D
+      long: disable-opt
+      multiple: true
+      possible_values:
+        - "constprop"
+        - "unipotence"
 
   # Architectural options
   - qbcount:

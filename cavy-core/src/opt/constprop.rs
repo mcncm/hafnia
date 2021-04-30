@@ -34,7 +34,7 @@ use crate::{context::Context, mir::*, values::Value};
 /// framework, similar to the dataflow analyses.
 ///
 /// For now, even *this* optimization is intraprocedural. That *must* change.
-pub fn propagate_consts(mir: &mut Mir, _ctx: &Context) {
+pub fn optimize(mir: &mut Mir, _ctx: &Context) {
     for gr in mir.graphs.iter_mut() {
         simpl_graph(gr);
     }
