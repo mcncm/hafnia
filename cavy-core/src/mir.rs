@@ -474,6 +474,15 @@ pub enum Operand {
     Move(Place),
 }
 
+impl Operand {
+    fn unwrap_place(self) -> Place {
+        match self {
+            Self::Const(_) => panic!("expected a `Place`"),
+            Self::Copy(place) | Self::Move(place) => place,
+        }
+    }
+}
+
 /// Find this in rustc mir.rs; see 'The MIR' in the rustc Dev Guide.
 #[derive(Debug)]
 pub enum RvalueKind {

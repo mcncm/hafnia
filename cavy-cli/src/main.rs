@@ -165,9 +165,11 @@ fn main() {
     // Should be the very first thing that is called, in order to diagnose the
     // performance of every part of the process.
     let mut stats = Statistics::new();
+    // FIXME: This line is literally the slowest thing in the program
     let yaml = load_yaml!("cli.yml");
     let app = App::from(yaml).version(sys::VERSION_STRING);
     let argmatches = app.get_matches();
+    stats.tick("argparsing");
     let conf = get_config(&argmatches);
     let mut ctx = Context::new(&conf, &mut stats);
 
