@@ -158,7 +158,7 @@ enum Elem {
     CTarg(Option<isize>),
     // A swap target
     TargX,
-    // An arrow indicating trashing a qubit
+    // Trash a qubit
     Trash,
     // A meter with an optional control line
     Meter(Option<isize>),
@@ -475,7 +475,7 @@ impl<'l> LayoutArray<'l> {
                 // with my installation or the package, but even the
                 // examples don't work.
 
-                // self.insert_single(wire, Elem::Trash),
+                self.insert_single(wire, Elem::Trash);
             }
         }
         self.wires[wire].liveness = Dead;
@@ -559,6 +559,11 @@ impl<'l> LayoutArray<'l> {
     fn insert_single(&mut self, wire: usize, elem: Elem) {
         let blocked = &self.blocked;
         self.wires[wire].push(elem, || blocked.get_contained(&wire));
+        // We also have to add this gate to the blocking list. Note that this
+        // will add a *lot* of blocked intervals to that data structure, which
+        // is using the most naive algorithm. Runtime will be something like
+        // O(A^2) in the circuit area.
+        self.blocked.insert(wire..=wire, self.wires[wire].len() - 1);
     }
 
     /// Note that, unlike `insert_single`, the "free slots" aren't
@@ -703,13 +708,13 @@ impl LaTeX {
         match self.package {
             Package::Qcircuit => {
                 let options = if self.initial_kets { "[braket,qm]" } else { "" };
-                let nwtarg = include_str!("nwtarg_qcircuit.tex");
-                writeln!(f, "\\usepackage{}{{qcircuit}}\n{}", options, nwtarg)?
+                writeln!(f, "\\usepackage{}{{qcircuit}}", options)?
             }
             Package::Quantikz => f.write_str(concat!(
                 r"\usepackage{tikz}
 \usetikzlibrary{quantikz}
 ",
+                include_str!("trash_quantikz.tex"),
                 include_str!("nwtarg_quantikz.tex")
             ))?,
             Package::Yquant => f.write_str(

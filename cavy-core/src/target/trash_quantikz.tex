@@ -1,0 +1,15 @@
+% My version of quantikz did not have the `trash` command, and others' might not, too. So I'm including this excerpt from a newer version of the quantikz source, with attribution.
+
+\makeatletter
+\@ifundefined{trash}{
+\tikzset{
+%This is the quantikz library for typesetting quantum circuits using LaTeX/Tikz. version 0.9.6
+% Written by Alastair Kay, 2018. Published under a CC-BY-4.0 licence
+% Please email me (alastair.kay@rhul.ac.uk) with any bug reports or feature requests.
+% If you find this library useful, please cite its usage in your work, using arXiv:1809.03842, and possibly the DOI: 10.17637/rh.7000520.
+% Usage is at your own risk.
+	trash/.style={path picture={\draw[internal,inner sep=0pt,-stealth] (path picture bounding box.west) -- (path picture bounding box.center) -- (path picture bounding box.south);},minimum height=2.5em,minimum width=2em},
+}
+\DeclareExpandableDocumentCommand{\trash}{O{}{m}}{|[trash,label={below:#2},#1]| {} \qw}
+}{}
+\makeatother

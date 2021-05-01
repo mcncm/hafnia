@@ -593,7 +593,7 @@ impl fmt::Display for Stmt {
         match &self.kind {
             StmtKind::Assn(place, rhs) => write!(f, "{} = {};", place, rhs),
             StmtKind::Assert(place) => write!(f, "assert {};", place),
-            StmtKind::Drop(place) => write!(f, "assert {};", place),
+            StmtKind::Drop(place) => write!(f, "drop {};", place),
             StmtKind::Io(io) => {
                 match io {
                     IoStmtKind::In => unimplemented!(),

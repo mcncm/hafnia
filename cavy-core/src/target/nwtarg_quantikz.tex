@@ -1,5 +1,12 @@
 % A custom command for a target symbol *without* a left-facing \qw. This will
 % only be available in the standalone class, because it has to be included in
 % the header. It might also be *fragile*, and stop working when quantikz
-% eventually updates.
+% eventually updates. For the sake of attribution, here is the preamble of the
+% quantikz source file I modified this from.
+
+%This is the quantikz library for typesetting quantum circuits using LaTeX/Tikz. version 0.9.6
+% Written by Alastair Kay, 2018. Published under a CC-BY-4.0 licence
+% Please email me (alastair.kay@rhul.ac.uk) with any bug reports or feature requests.
+% If you find this library useful, please cite its usage in your work, using arXiv:1809.03842, and possibly the DOI: 10.17637/rh.7000520.
+% Usage is at your own risk.
 \DeclareExpandableDocumentCommand{\nwtarg}{O{}m}{|[circlewc,#1]| {}}
