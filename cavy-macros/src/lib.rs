@@ -240,15 +240,3 @@ impl<'ast> DiagnosticData<'ast> {
             .collect()
     }
 }
-
-// #[proc_macro]
-// pub fn cavy_comptime(src: TokenStream) -> TokenStream {
-//     let src = src.to_string();
-//
-//     let conf = $crate::session::Config::default();
-//     let mut ctx = $crate::context::Context::new(&conf);
-//
-//     let id = ctx.srcs.insert_input(&stringify!($($src)*));
-//     let circ = $crate::compile::compile_circuit(id, &mut ctx);
-//     (quote! { 3 }).into()
-// }

@@ -29,7 +29,7 @@ macro_rules! decl_opts {
         /// yes", -1 if "override no."
         #[derive(Default, Debug, PartialEq, Eq)]
         pub struct OptFlags {
-            $($name: i8,)*
+            pub $($name: i8,)*
         }
 
         impl OptFlags {

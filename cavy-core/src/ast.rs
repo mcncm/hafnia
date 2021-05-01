@@ -398,11 +398,11 @@ pub type UnOp = Spanned<UnOpKind>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOpKind {
-    Minus,
-    Not,
-    Split, // #
-    Linear,
-    Delin,
+    Minus,  // -
+    Not,    // ~
+    Split,  // #
+    Linear, // ?
+    Delin,  // !
 }
 
 impl FromToken for UnOp {
@@ -558,6 +558,7 @@ pub enum ExprKind {
         annot: RefAnnot,
         expr: Box<Expr>,
     },
+    Deref(Box<Expr>),
 }
 
 impl ExprKind {
@@ -568,6 +569,7 @@ impl ExprKind {
             BinOp { .. } => true,
             UnOp { .. } => true,
             Ref { .. } => true,
+            Deref(_) => true,
             Assn { .. } => true,
             Literal(_) => true,
             Ident(_) => true,

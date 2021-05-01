@@ -10,9 +10,11 @@
 use cavy_core::{circuit::CircuitBuf, compile, default_context};
 use proc_macro::TokenStream;
 use quote::quote;
+use syn;
 
 #[cfg(feature = "nightly-features")]
 mod nightly;
+mod types;
 
 /// Compile Cavy code at Rust-compile-time. This is the best and easiest way to
 /// use Cavy as an embedded domain-specific language for quantum coprocessors
@@ -83,4 +85,11 @@ fn quote_circuit(_circ: CircuitBuf) -> TokenStream {
     };
 
     code.into()
+}
+
+/// Builds a Cavy type from a Rust type
+#[proc_macro_derive(Cavy, attributes(msg, span, ctx))]
+pub fn cavy_type(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    types::impl_cavy_error_macro(input)
 }
