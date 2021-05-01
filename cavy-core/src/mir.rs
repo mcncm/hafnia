@@ -27,11 +27,8 @@ store_type! { LocalStore : LocalId -> Local }
 
 impl LocalStore {
     pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
-        let mut ty = self[place.root].ty;
-        for elem in place.path.iter() {
-            ty = ty.slot(*elem, ctx);
-        }
-        ty
+        let ty = self[place.root].ty;
+        ty.project(&place.path, ctx)
     }
 }
 
@@ -396,13 +393,20 @@ pub enum LocalKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Place {
     pub root: LocalId,
-    pub path: Vec<usize>,
+    pub path: Vec<Proj>,
 }
 
 impl Place {
     /// Check if this `Place` has a nonempty path, or the root of a local.
     pub fn is_root(&self) -> bool {
         self.path.is_empty()
+    }
+
+    /// Unlike in Rust, `Deref` projections don't actually refer to *different*
+    /// memory locations, so it will often be useful to iterate over *just* the
+    /// field projections, which represent actual memory offsets.
+    pub fn iter_fields(&self) -> impl Iterator<Item = &usize> {
+        self.path.iter().filter_map(|elem| elem.field_of())
     }
 }
 
@@ -411,6 +415,24 @@ impl From<LocalId> for Place {
         Self {
             root,
             path: Vec::new(),
+        }
+    }
+}
+
+/// A path element of a `Place`. Following `rustc`'s example, this can be either
+/// a field access or a dereference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Proj {
+    Field(usize),
+    Deref,
+}
+
+impl Proj {
+    /// If this projection is a field, return it.
+    fn field_of(&self) -> Option<&usize> {
+        match self {
+            Proj::Field(field) => Some(field),
+            Proj::Deref => None,
         }
     }
 }
@@ -612,7 +634,10 @@ impl fmt::Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.root)?;
         for elem in self.path.iter() {
-            write!(f, ".{}", elem)?;
+            match elem {
+                Proj::Field(field) => write!(f, ".{}", field)?,
+                Proj::Deref => f.write_str(".*")?,
+            };
         }
         Ok(())
     }

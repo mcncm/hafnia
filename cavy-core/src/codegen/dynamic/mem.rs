@@ -3,7 +3,7 @@ use std::ops;
 use crate::{
     circuit::{Cbit, FreeState, Inst, Qbit},
     store::Counter,
-    types::{TyId, TypeSize},
+    types::{Offset, TyId, TypeSize},
 };
 
 use super::*;
@@ -130,31 +130,19 @@ impl<'a> MemFree<Cbit> for CircAssembler<'a> {
 impl<'a> Environment<'a> {
     pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<usize>, ops::Range<usize>) {
         // start with the root type
-        let mut ty = self.locals[place.root].ty;
+        let ty = self.locals[place.root].ty;
+        use crate::util::FmtWith;
         // traverse the allocation
-        let (mut qi, mut ci) = (0, 0);
-        for elem in &place.path {
-            // TODO: [PERF] `ty.slot` should really return a `Slot` that also
-            // contains an offset (and size?). These could be computed *once* when
-            // the type is interned. This sort of "data about types" shouldn't
-            // be computed *here*, of all place, and certainly not on every
-            // call. In practice, it probably won't matter much, but it's really
-            // bad in principle.
-            for i in 0..*elem {
-                // Actually, there's even more work being done here, because
-                // `ty` is looked up repeatedly on *each* call to `slot`. There
-                // are a *ton* of hashes going on here.
-                let ty = ty.slot(i, self.ctx);
-                let sz = ty.size(self.ctx);
-                qi += sz.qsize;
-                ci += sz.csize;
-            }
-            ty = ty.slot(*elem, self.ctx);
-        }
-        let sz = ty.size(self.ctx);
-        let (qf, cf) = (qi + sz.qsize, ci + sz.csize);
-
-        (qi..qf, ci..cf)
+        let (ty, start) = place
+            .path
+            .iter()
+            .fold((ty, Offset::zero()), |(ty, offset), proj| {
+                let (newty, delta) = ty.slot(proj, self.ctx);
+                (newty, offset + delta)
+            });
+        let sz = *ty.size(self.ctx);
+        let end = start + sz;
+        (start.quant..end.quant, start.class..end.class)
     }
 
     pub fn mem_copy(&mut self, lplace: &Place, rplace: &Place) {

@@ -1,6 +1,7 @@
 use crate::{
     context::{Context, SymbolId},
     interner_type,
+    mir::Proj,
     num::Uint,
     util::{FmtWith, FmtWrapper},
 };
@@ -25,6 +26,8 @@ pub struct TypeProperties {
     ord: bool,
     /// If a reference, the kind of reference that it is
     ref_kind: Option<RefKind>,
+    /// Precomputed memory offsets for the type slots
+    offsets: Vec<Offset>,
 }
 
 /// A type interner that also carries some satellite data caches
@@ -54,6 +57,7 @@ impl CachedTypeInterner {
             linear: ty.is_linear(self),
             ord: ty.is_ord(self),
             ref_kind: ty.ref_kind(self),
+            offsets: ty.offsets(self),
         };
         let ty = self.interner.intern(ty);
         self.cache.insert(ty, props);
@@ -142,9 +146,28 @@ impl TyId {
         &interner.cache[self].size
     }
 
-    /// Get the stype in the `n`th slot of a type, if it has one.
-    pub fn slot(&self, n: usize, ctx: &Context) -> TyId {
-        ctx.types[*self].slot(n)
+    // I'm not sure about this interface. I don't realy want to store the slot
+    // types *twice*, but it also seems a little weird to take the offset from a
+    // different place than the inner type, and it's also a little weird for
+    // this to have a different "signature" than `Type::slot`.
+    /// Get the type in a projection, if this type has one.
+    pub fn slot(&self, proj: &Proj, ctx: &Context) -> (TyId, Offset) {
+        let ty = &ctx.types[*self];
+        let inner = ty.slot(proj);
+        let offsets = &ctx.types.cache[self].offsets;
+        let offset = match proj {
+            Proj::Field(n) => offsets[*n],
+            Proj::Deref => offsets[0],
+        };
+        (inner, offset)
+    }
+
+    /// Resolve a path of projections
+    pub fn project(&self, projections: &[Proj], ctx: &Context) -> TyId {
+        projections.iter().fold(*self, |ty, proj| {
+            let ty = &ctx.types[ty];
+            ty.slot(proj)
+        })
     }
 }
 
@@ -230,6 +253,13 @@ impl TypeSize {
     }
 }
 
+/// A memory location offset for a type slot
+#[derive(Debug, Clone, Copy)]
+pub struct Offset {
+    pub quant: usize,
+    pub class: usize,
+}
+
 impl std::ops::Add for TypeSize {
     type Output = TypeSize;
 
@@ -238,6 +268,43 @@ impl std::ops::Add for TypeSize {
             qsize: self.qsize + rhs.qsize,
             csize: self.csize + rhs.csize,
         }
+    }
+}
+
+impl std::ops::Add<TypeSize> for Offset {
+    type Output = Offset;
+
+    fn add(self, rhs: TypeSize) -> Self::Output {
+        Self {
+            quant: self.quant + rhs.qsize,
+            class: self.class + rhs.csize,
+        }
+    }
+}
+
+impl std::ops::Add<Offset> for Offset {
+    type Output = Offset;
+
+    fn add(self, rhs: Offset) -> Self::Output {
+        Self {
+            quant: self.quant + rhs.quant,
+            class: self.class + rhs.class,
+        }
+    }
+}
+
+impl From<TypeSize> for Offset {
+    fn from(sz: TypeSize) -> Self {
+        Self {
+            quant: sz.qsize,
+            class: sz.csize,
+        }
+    }
+}
+
+impl Offset {
+    pub fn zero() -> Self {
+        Self { quant: 0, class: 0 }
     }
 }
 
@@ -303,15 +370,65 @@ impl Type {
     }
 
     /// Get the path positions held by this type
-    pub fn slot(&self, elem: usize) -> TyId {
-        match self {
-            Type::Tuple(tys) => tys[elem],
-            Type::UserType(udt) => udt.fields[elem].1,
+    pub fn slot(&self, proj: &Proj) -> TyId {
+        match (self, proj) {
+            (Type::Tuple(tys), Proj::Field(elem)) => tys[*elem],
+            (Type::UserType(udt), Proj::Field(elem)) => udt.fields[*elem].1,
+            (Type::Ref(RefKind::Uniq, ty), Proj::Deref) => *ty,
             _ => unreachable!(),
         }
     }
 
-    /// Number of bits owned by a type
+    // TODO: this method can/should probably be unified with `Type::slot` and/or
+    // `Type::size`; it's really *doubling* the work of interning.
+    //
+    // On second thought, maybe don't. They're deceptively combinable-looking,
+    // but each one has enough special cases that it comes out a little ugly.
+    /// Compute the memory offsets of the type's slots
+    fn offsets(&self, interner: &CachedTypeInterner) -> Vec<Offset> {
+        match self {
+            Type::Bool => vec![],
+            Type::Uint(_) => vec![],
+            Type::Q_Bool => vec![],
+            Type::Q_Uint(_) => vec![],
+            Type::Tuple(elems) => {
+                let mut offsets: Vec<Offset> = elems
+                    .iter()
+                    .map(|ty| ty.size_inner(interner))
+                    .scan(Offset::zero(), |offset, sz| {
+                        let prev_offset = offset.clone();
+                        *offset = *offset + *sz;
+                        Some(prev_offset)
+                    })
+                    .collect();
+                // The last offset is the size of the tuple, which is what makes
+                // it so appealing to try combining this wtih `Type::size`.
+                offsets.pop();
+                offsets
+            }
+            Type::Array(_) => todo!(),
+            Type::Func(_, _) => vec![],
+            Type::UserType(udt) => {
+                if let Some(tag) = &udt.tag {
+                    let tag_size = match tag {
+                        Discriminant::C(n) => TypeSize::classical(*n),
+                        Discriminant::Q(n) => TypeSize::coherent(*n),
+                    };
+                    return vec![Offset::from(tag_size)];
+                } else {
+                    let tuple = udt.as_tuple();
+                    return tuple.offsets(interner);
+                }
+            }
+            // There should be one offset *to the owned data*, which is just
+            // contained in the ref. This is in contrast with Rust, where a
+            // reference is of constant size.
+            Type::Ref(_, _) => vec![Offset::zero()],
+            Type::Ord => vec![],
+        }
+    }
+
+    /// Compute the number of bits owned by a type.
     fn size(&self, interner: &CachedTypeInterner) -> TypeSize {
         match self {
             Type::Bool => TypeSize { qsize: 0, csize: 1 },
@@ -332,6 +449,7 @@ impl Type {
             Type::Array(_) => todo!(),
             Type::Func(_, _) => todo!(),
             Type::UserType(udt) => match &udt.tag {
+                // The enum case is special, and we'll treat it separately with an early return
                 Some(tag) => {
                     let tag_size = match tag {
                         Discriminant::C(n) => TypeSize::classical(*n),
@@ -340,13 +458,16 @@ impl Type {
                     udt.fields
                         .iter()
                         .map(|(_, ty)| ty.size_inner(interner))
-                        .fold(tag_size, |acc, sz| acc + *sz)
+                        .fold(tag_size, |acc, sz| acc.join_max(sz))
                 }
                 None => {
                     let tup = udt.as_tuple();
                     tup.size(interner)
                 }
             },
+            // Note that this is different from Rust: a 'reference' isn't a
+            // fixed-size reference at all; it's actually the original data in
+            // memory. It's just the usage contract that differs.
             Type::Ref(_, ty) => *ty.size_inner(interner),
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
         }

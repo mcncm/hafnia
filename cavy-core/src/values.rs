@@ -1,4 +1,4 @@
-use crate::{ast::Expr, token::Token};
+use crate::{ast::Expr, mir::Proj, token::Token};
 use std::fmt;
 
 /// The enum of all the classical Cavy values, comprising the unit type
@@ -105,12 +105,15 @@ impl Value {
     }
 
     /// Follow a path to its end from this value
-    pub fn follow(&self, path: &[usize]) -> Option<&Value> {
+    pub fn follow(&self, path: &[Proj]) -> Option<&Value> {
         let mut node = Some(self);
         for elem in path {
-            node = match node {
-                Some(node) => node.slot(*elem),
-                None => return None,
+            // Derefs don't affect anything!
+            if let Proj::Field(field) = elem {
+                node = match node {
+                    Some(node) => node.slot(*field),
+                    None => return None,
+                }
             }
         }
         node
@@ -119,10 +122,12 @@ impl Value {
     // NOTE Is it a "problem" that the `follow` and `follow_mut` APIs aren't
     // symmetric?
     /// Follow a path to its end from this value, mutably:
-    pub fn follow_mut(&mut self, path: &[usize]) -> &mut Value {
+    pub fn follow_mut(&mut self, path: &[Proj]) -> &mut Value {
         let mut node = self;
         for elem in path {
-            node = node.slot_mut(*elem);
+            if let Proj::Field(field) = elem {
+                node = node.slot_mut(*field);
+            }
         }
         node
     }

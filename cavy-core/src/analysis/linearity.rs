@@ -1,5 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
+use mir::Proj;
+
 use super::common::{DataflowAnalysis, Forward, Lattice};
 use crate::{
     mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
@@ -123,8 +125,10 @@ pub struct MoveState {
 impl MoveState {
     fn get_mut(&mut self, place: &Place) -> Option<&mut MoveTree> {
         self.moves.get_mut(&place.root).map(|mut node| {
-            for elem in place.path.iter().copied() {
-                node = &mut node.fields[elem];
+            // Because only `Field` elements of a `Place` denote actual memory
+            // offsets, we can just walk over those.
+            for field in place.iter_fields().copied() {
+                node = &mut node.fields[field];
             }
             node
         })
@@ -139,14 +143,14 @@ impl MoveState {
 
         let mut node = moves.entry(place.root).or_insert(MoveTree::default());
 
-        for elem in place.path.iter() {
+        for field in place.iter_fields() {
             // Then this with an intermediate ('partial move')
             if let Some(moves) = node.update(Move::partial(site)) {
                 double_moves.insert(place.clone(), moves);
             }
             // Make sure there are enough fields in the tree to take the next step
-            node.ensure_fields(*elem + 1);
-            node = &mut node.fields[*elem];
+            node.ensure_fields(*field + 1);
+            node = &mut node.fields[*field];
         }
         // Update the final path element ('full move')
         if let Some(moves) = node.update(Move::full(site)) {

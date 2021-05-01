@@ -753,14 +753,14 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             }
         };
         let (field, _) = self.field_of(head_ty, field).unwrap();
-        place.path.push(field);
+        place.path.push(Proj::Field(field));
         Ok(place)
     }
 
     fn lower_into_tuple(&mut self, place: Place, elems: &[Expr]) -> Maybe<()> {
         for (field, elem) in elems.iter().enumerate() {
             let mut place = place.clone();
-            place.path.push(field);
+            place.path.push(Proj::Field(field));
             self.lower_into(&place, elem)?;
         }
         Ok(())
@@ -805,7 +805,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 }
             };
             let mut place = place.clone();
-            place.path.push(n);
+            place.path.push(Proj::Field(n));
             self.lower_into(&place, expr)?;
         }
         Ok(())
