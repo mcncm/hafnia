@@ -2,7 +2,7 @@ mod compute;
 mod gates;
 mod mem;
 
-use mem::{BitAllocator, BitSet};
+use mem::BitSet;
 
 use std::{
     cell::Ref,
@@ -18,6 +18,8 @@ use crate::{
     session::Config,
     store::Store,
 };
+
+use self::mem::BitAllocators;
 
 pub struct Environment<'a> {
     /// The graph locals. We must hold onto these here in order to have access
@@ -79,9 +81,9 @@ impl<'a> InterpreterState<'a> {
 }
 
 struct CircAssembler<'a> {
-    /// This needs to own the allocater because we might use temporaries while
+    /// This needs to own the allocators because we might use temporaries while
     /// inserting gates.
-    alloc: BitAllocator<'a>,
+    allocators: BitAllocators,
     /// ...And, like almost everything else, a copy of the Context.
     ctx: &'a Context<'a>,
     gate_buf: CircuitBuf,
@@ -90,8 +92,8 @@ struct CircAssembler<'a> {
 impl<'a> CircAssembler<'a> {
     fn new(ctx: &'a Context<'a>) -> Self {
         Self {
-            alloc: BitAllocator::new(ctx),
             ctx,
+            allocators: BitAllocators::new(),
             gate_buf: CircuitBuf::new(),
         }
     }

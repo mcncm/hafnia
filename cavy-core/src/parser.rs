@@ -18,7 +18,6 @@ use crate::{
     context::{Context, SymbolId},
     num::Uint,
     source::Span,
-    store::Counter,
     token::{
         Delim::{self, *},
         Lexeme::{self, *},
@@ -161,7 +160,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         Expr {
             data: kind,
             span,
-            node: self.ast.counter.new_index(),
+            node: self.ast.counter.next().unwrap(),
         }
     }
 

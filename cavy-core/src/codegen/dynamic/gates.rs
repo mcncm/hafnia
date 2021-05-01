@@ -1,7 +1,4 @@
-use crate::{
-    arch::MeasurementMode,
-    circuit::{BaseGateC, BaseGateQ, FreeState, GateC, GateQ, Inst},
-};
+use crate::{arch::MeasurementMode, circuit::*};
 
 use super::{mem::*, *};
 
@@ -49,7 +46,7 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Measure some qubits and store them in classical bits
-    pub fn meas(&mut self, srcs: &[Addr], tgts: &[Addr], _st: &InterpreterState) {
+    pub fn meas(&mut self, srcs: &[Qbit], tgts: &[Cbit], _st: &InterpreterState) {
         debug_assert!(srcs.len() == tgts.len());
         for (&src, &tgt) in srcs.iter().zip(tgts) {
             self.gate_buf.push(Inst::Meas(src, tgt));
@@ -58,7 +55,7 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Free a set of qubits after measurement
-    pub fn free_meas(&mut self, addrs: &[Addr]) {
+    pub fn free_meas(&mut self, addrs: &[Qbit]) {
         use MeasurementMode::*;
         let mode = self.ctx.conf.arch.meas_mode;
         // Hm, will the branch predictor take care of this for us?
@@ -68,7 +65,7 @@ impl<'m> CircAssembler<'m> {
             Dirty => FreeState::Dirty,
         };
 
-        self.alloc.free_quant(addrs.iter().copied(), free_state);
+        self.free(addrs.iter().copied(), free_state);
         for &addr in addrs {
             self.gate_buf.push(Inst::QFree(addr, free_state));
         }

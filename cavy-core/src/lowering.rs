@@ -1124,7 +1124,7 @@ mod typing {
     //! Hindley-Milner type inference, it will be broken out into another file
     //! or even a separate crate.
     use super::*;
-    use crate::{index_type, store::Counter};
+    use crate::index_type;
 
     pub fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
         match annot.kind {

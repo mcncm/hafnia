@@ -17,12 +17,6 @@ use std::{
     iter::FromIterator,
 };
 
-/// A trait automatically implemented by index types
-pub trait Index: Default + Clone + Copy + Eq {
-    fn new(u: u32) -> Self;
-    fn into_usize(self) -> usize;
-}
-
 /// An index counter, which you might want to make independently of a store or
 /// interner.
 #[derive(Default, Debug)]
@@ -38,18 +32,22 @@ impl<I: Index> Counter<I> {
             phantom: PhantomData,
         }
     }
+}
 
-    pub fn new_index(&mut self) -> I {
-        let idx = I::new(self.inner);
+impl<I: Index> Iterator for Counter<I> {
+    type Item = I;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = From::<u32>::from(self.inner);
         self.inner += 1;
-        idx
-    }
-
-    /// The number of indices emitted so far
-    pub fn count(&self) -> usize {
-        self.inner as usize
+        Some(next)
     }
 }
+
+/// A trait automatically implemented by index types
+///
+/// TODO I have to rename this; it conflicts with `std::ops::Index`
+pub trait Index: Default + Clone + Copy + Eq + From<u32> + Into<u32> {}
 
 /// A macro for building implementers of Index. This is exactly analogous to
 /// rustc's `rustc_index::newtype_index`.
@@ -62,6 +60,8 @@ macro_rules! index_type {
     ($index:ident) => {
         #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
         pub struct $index(u32);
+
+        impl $crate::store::Index for $index {}
 
         impl ::std::fmt::Debug for $index {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,13 +76,15 @@ macro_rules! index_type {
             }
         }
 
-        impl crate::store::Index for $index {
-            fn new(u: u32) -> Self {
-                Self(u)
+        impl From<u32> for $index {
+            fn from(n: u32) -> Self {
+                Self(n)
             }
+        }
 
-            fn into_usize(self) -> usize {
-                self.0 as usize
+        impl Into<u32> for $index {
+            fn into(self) -> u32 {
+                self.0
             }
         }
     };
@@ -136,7 +138,7 @@ impl<Idx: Index, V> Store<Idx, V> {
     }
 
     pub fn insert(&mut self, item: V) -> Idx {
-        let idx = Idx::new(self.len() as u32);
+        let idx = Idx::from(self.len() as u32);
         self.backing_store.push(item);
         idx
     }
@@ -177,7 +179,7 @@ impl<'i, Idx: Index, V> Iterator for StoreEnumerate<'i, Idx, V> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(idx, v)| {
             // NOTE is this always safe?
-            let idx = Idx::new(idx as u32);
+            let idx = Idx::from(idx as u32);
             (idx, v)
         })
     }
@@ -206,13 +208,13 @@ impl<Idx: Index, V> std::ops::Index<Idx> for Store<Idx, V> {
     type Output = V;
 
     fn index(&self, index: Idx) -> &Self::Output {
-        &self.backing_store[index.into_usize()]
+        &self.backing_store[index.into() as usize]
     }
 }
 
 impl<Idx: Index, V> std::ops::IndexMut<Idx> for Store<Idx, V> {
     fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
-        &mut self.backing_store[index.into_usize()]
+        &mut self.backing_store[index.into() as usize]
     }
 }
 

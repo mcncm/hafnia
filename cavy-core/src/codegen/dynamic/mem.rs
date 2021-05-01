@@ -1,28 +1,32 @@
 use std::ops;
 
 use crate::{
-    circuit::FreeState,
+    circuit::{Cbit, FreeState, Inst, Qbit},
+    store::Counter,
     types::{TyId, TypeSize},
 };
 
 use super::*;
 
-struct Allocator<T, I>
-where
-    I: Iterator<Item = T>,
-{
+pub trait MemFree<T> {
+    fn free<S>(&mut self, items: S, state: FreeState)
+    where
+        S: Iterator<Item = T>;
+}
+
+trait Allocator<T>: Iterator<Item = T> + MemFree<T> {}
+
+struct ThreeWayAllocator<T, I: Iterator<Item = T>> {
     /// Unused items
     fresh: I,
+    // `Vec` probably better for locality?
     /// A clean free set that can be reallocated immediately
     clean: Vec<T>,
-    /// A dirty free set that should be scheduled for reset
+    /// A dirty free set that can be scheduled for reset
     dirty: VecDeque<T>,
 }
 
-impl<T, I> Allocator<T, I>
-where
-    I: Iterator<Item = T>,
-{
+impl<T, I: Iterator<Item = T>> ThreeWayAllocator<T, I> {
     fn new(items: I) -> Self {
         Self {
             fresh: items,
@@ -30,16 +34,18 @@ where
             dirty: VecDeque::new(),
         }
     }
+}
 
-    fn alloc_one(&mut self) -> Option<T> {
+impl<T, I: Iterator<Item = T>> Iterator for ThreeWayAllocator<T, I> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let bit = self.clean.pop().or_else(|| self.fresh.next());
         bit
     }
+}
 
-    fn alloc(&mut self, n: usize) -> Vec<T> {
-        std::iter::from_fn(|| self.alloc_one()).take(n).collect()
-    }
-
+impl<T, I: Iterator<Item = T>> MemFree<T> for ThreeWayAllocator<T, I> {
     fn free<S>(&mut self, items: S, state: FreeState)
     where
         S: Iterator<Item = T>,
@@ -51,56 +57,78 @@ where
     }
 }
 
-/// Specifier for a qubit set
-pub enum BitKind {}
+impl<T, I: Iterator<Item = T>> Allocator<T> for ThreeWayAllocator<T, I> {}
 
-pub struct BitAllocator<'c> {
-    class: Allocator<usize, RangeFrom<usize>>,
-    quant: Allocator<usize, RangeFrom<usize>>,
-    // NOTE: This struct *could* just hold onto the type interner. But
-    // `Ty::size_inner` isn't `pub`, so I'll give it access to the whole
-    // `Context` for now.
-    ctx: &'c Context<'c>,
+type QbAlloc = ThreeWayAllocator<Qbit, Counter<Qbit>>;
+type CbAlloc = ThreeWayAllocator<Cbit, Counter<Cbit>>;
+
+pub struct BitAllocators {
+    class: CbAlloc,
+    quant: QbAlloc,
 }
 
-///
-
-impl<'c> BitAllocator<'c> {
-    pub fn new(ctx: &'c Context) -> Self {
+impl BitAllocators {
+    pub fn new() -> Self {
         Self {
-            class: Allocator::new(0..),
-            quant: Allocator::new(0..),
-            ctx,
+            quant: QbAlloc::new(Counter::new()),
+            class: CbAlloc::new(Counter::new()),
         }
+    }
+}
+
+impl<'c> CircAssembler<'c> {
+    fn alloc_class(&mut self, n: usize) -> Vec<Cbit> {
+        let gates = &mut self.gate_buf;
+        (&mut self.allocators.class)
+            .take(n)
+            .map(|bit| {
+                gates.push(Inst::CInit(bit));
+                bit
+            })
+            .collect()
+    }
+
+    fn alloc_quant(&mut self, n: usize) -> Vec<Qbit> {
+        let gates = &mut self.gate_buf;
+        (&mut self.allocators.quant)
+            .take(n)
+            .map(|bit| {
+                gates.push(Inst::QInit(bit));
+                bit
+            })
+            .collect()
     }
 
     /// Allocate space for a given type
     pub fn alloc_for_ty(&mut self, ty: TyId) -> BitSet {
         let sz = ty.size(self.ctx);
         BitSet {
-            cbits: self.class.alloc(sz.csize),
-            qbits: self.quant.alloc(sz.qsize),
+            cbits: self.alloc_class(sz.csize),
+            qbits: self.alloc_quant(sz.qsize),
         }
-    }
-
-    pub fn free_class<S: Iterator<Item = Addr>>(&mut self, items: S, state: FreeState) {
-        self.class.free(items, state);
-    }
-
-    pub fn free_quant<S: Iterator<Item = Addr>>(&mut self, items: S, state: FreeState) {
-        self.quant.free(items, state);
-    }
-
-    pub fn free(&mut self, bits: BitSetSlice, state: FreeState) {
-        self.free_class(bits.cbits.iter().copied(), state);
-        self.free_quant(bits.qbits.iter().copied(), state);
     }
 }
 
-impl<'a> CircAssembler<'a> {}
+impl<'a> MemFree<Qbit> for CircAssembler<'a> {
+    fn free<S>(&mut self, items: S, state: FreeState)
+    where
+        S: Iterator<Item = Qbit>,
+    {
+        self.allocators.quant.free(items, state);
+    }
+}
+
+impl<'a> MemFree<Cbit> for CircAssembler<'a> {
+    fn free<S>(&mut self, items: S, state: FreeState)
+    where
+        S: Iterator<Item = Cbit>,
+    {
+        self.allocators.class.free(items, state);
+    }
+}
 
 impl<'a> Environment<'a> {
-    pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<Addr>, ops::Range<Addr>) {
+    pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<usize>, ops::Range<usize>) {
         // start with the root type
         let mut ty = self.locals[place.root].ty;
         // traverse the allocation
@@ -181,21 +209,16 @@ impl<'m> Interpreter<'m> {
     // take `&mut self`?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitSet {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
-        let bitset = self.circ.alloc.alloc_for_ty(ty);
+        let bitset = self.circ.alloc_for_ty(ty);
         bitset
     }
 }
 
-// NOTE: it has already caused some slight problems that these are untyped. It
-// might really make sense to wrap them.
-/// A quantum or classical bit address
-pub type Addr = usize;
-
 /// An allocation of locally indexed virtual addresses
 #[derive(Debug, Clone, Default)]
 pub struct BitSet {
-    pub qbits: Vec<Addr>,
-    pub cbits: Vec<Addr>,
+    pub qbits: Vec<Qbit>,
+    pub cbits: Vec<Cbit>,
 }
 
 impl BitSet {
@@ -216,8 +239,8 @@ impl BitSet {
     /// Create an uninitialized set of address bindings
     pub fn uninit(sz: &TypeSize) -> Self {
         Self {
-            qbits: vec![0; sz.qsize],
-            cbits: vec![0; sz.csize],
+            qbits: vec![Qbit::from(0); sz.qsize],
+            cbits: vec![Cbit::from(0); sz.csize],
         }
     }
 
@@ -248,7 +271,7 @@ impl BitSet {
     // GATs.
     pub fn index<'b: 'a, 'a>(
         &'b self,
-        idx: (std::ops::Range<Addr>, std::ops::Range<Addr>),
+        idx: (std::ops::Range<usize>, std::ops::Range<usize>),
     ) -> BitSetSlice<'a> {
         BitSetSlice {
             qbits: &self.qbits[idx.0],
@@ -258,7 +281,7 @@ impl BitSet {
 
     pub fn index_mut<'b: 'a, 'a>(
         &'b mut self,
-        idx: (std::ops::Range<Addr>, std::ops::Range<Addr>),
+        idx: (std::ops::Range<usize>, std::ops::Range<usize>),
     ) -> BitSetSliceMut<'a> {
         BitSetSliceMut {
             qbits: &mut self.qbits[idx.0],
@@ -269,8 +292,8 @@ impl BitSet {
 
 #[derive(Debug)]
 pub struct BitSetSlice<'a> {
-    pub qbits: &'a [Addr],
-    pub cbits: &'a [Addr],
+    pub qbits: &'a [Qbit],
+    pub cbits: &'a [Cbit],
 }
 
 impl BitSetSlice<'_> {
@@ -284,8 +307,8 @@ impl BitSetSlice<'_> {
 }
 
 pub struct BitSetSliceMut<'a> {
-    pub qbits: &'a mut [Addr],
-    pub cbits: &'a mut [Addr],
+    pub qbits: &'a mut [Qbit],
+    pub cbits: &'a mut [Cbit],
 }
 
 impl<'a> BitSetSliceMut<'a> {

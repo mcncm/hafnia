@@ -16,9 +16,9 @@ use crate::{
     store::Counter,
 };
 use crate::{index_type, interner_type, store_type};
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::{collections::HashMap, ops::RangeFrom};
 
 // Each of the AST items in this module is given as a wrapper struct (possibly
 // with a single field) enclosing an internal enum listing the variants for

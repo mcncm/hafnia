@@ -1,4 +1,4 @@
-use crate::{ast::FnId, store::Index, util::FmtWith};
+use crate::{ast::FnId, index_type, store::Index, util::FmtWith};
 use crate::{
     context::SymbolId,
     target::{qasm::Qasm, Target},
@@ -10,13 +10,13 @@ use std::{
     vec::IntoIter,
 };
 
-/// This type alias identifies qubits with their numerical indices
-pub type Addr = usize;
+index_type! { Qbit }
+index_type! { Cbit }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoOutGate {
     /// Classical address to read from
-    pub addr: Addr,
+    pub addr: Cbit,
     /// Name of the ext location. Maybe this could be a `SymbolId`--but that
     /// would necessitate refactoring the `target` api, and I really don't want
     /// to go there.
@@ -28,28 +28,28 @@ pub struct IoOutGate {
 /// The base gates from which we will build circuits
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseGateQ {
-    X(Addr),
-    H(Addr),
-    Z(Addr),
-    T(Addr),
-    TDag(Addr),
+    X(Qbit),
+    H(Qbit),
+    Z(Qbit),
+    T(Qbit),
+    TDag(Qbit),
     // This might "really" belong in `GateQ`, but it makes control unrolling a
     // bit challenging.
-    Swap(Addr, Addr),
+    Swap(Qbit, Qbit),
 }
 
 /// These are gates that might decompose into more primitive base gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateQ {
-    pub ctrls: Vec<Addr>,
+    pub ctrls: Vec<Qbit>,
     pub base: BaseGateQ,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseGateC {
-    Not(Addr),
+    Not(Cbit),
     /// The first address is the source bit; the second is the target bit
-    Copy(Addr, Addr),
+    Copy(Cbit, Cbit),
 }
 
 /// For classical-controlled gates, the target can be either a classical or
@@ -62,7 +62,7 @@ pub enum BaseGate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateC {
-    pub ctrls: Vec<Addr>,
+    pub ctrls: Vec<Cbit>,
     pub base: BaseGate,
 }
 
@@ -108,20 +108,20 @@ pub enum FreeState {
 #[derive(Debug)]
 pub enum Inst {
     /// Bring up a bit rail
-    CInit(Addr),
+    CInit(Cbit),
     /// Set down a bit rail
-    CFree(Addr, FreeState),
+    CFree(Cbit, FreeState),
     /// Bring up a qubit rail
-    QInit(Addr),
+    QInit(Qbit),
     /// Set down a qubit rail
-    QFree(Addr, FreeState),
+    QFree(Qbit, FreeState),
     /// A quantum gate
     QGate(GateQ),
     /// A classical gate
     CGate(GateC),
     /// Measurement: the first address is the qubit measured; the second is the
     /// target classical bit
-    Meas(Addr, Addr),
+    Meas(Qbit, Cbit),
     /// IO out
     Out(Box<IoOutGate>),
 }
@@ -206,12 +206,12 @@ impl GateQ {
 }
 
 pub trait MaxBits {
-    fn max_qbit(&self) -> Option<usize>;
-    fn max_cbit(&self) -> Option<usize>;
+    fn max_qbit(&self) -> Option<Qbit>;
+    fn max_cbit(&self) -> Option<Cbit>;
 }
 
 impl MaxBits for BaseGateQ {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         let max = *match self {
             BaseGateQ::X(u) => u,
             BaseGateQ::H(u) => u,
@@ -223,27 +223,27 @@ impl MaxBits for BaseGateQ {
         Some(max)
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         None
     }
 }
 
 impl MaxBits for GateQ {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_qbit())
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         None
     }
 }
 
 impl MaxBits for BaseGateC {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         None
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         let max = *match self {
             BaseGateC::Not(u) => u,
             BaseGateC::Copy(u, v) => std::cmp::max(u, v),
@@ -253,33 +253,33 @@ impl MaxBits for BaseGateC {
 }
 
 impl MaxBits for BaseGate {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         match self {
             BaseGate::C(x) => x.max_qbit(),
             BaseGate::Q(x) => x.max_qbit(),
         }
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         match self {
-            BaseGate::C(x) => x.max_qbit(),
-            BaseGate::Q(x) => x.max_qbit(),
+            BaseGate::C(x) => x.max_cbit(),
+            BaseGate::Q(x) => x.max_cbit(),
         }
     }
 }
 
 impl MaxBits for GateC {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         self.base.max_qbit()
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_cbit())
     }
 }
 
 impl MaxBits for Inst {
-    fn max_qbit(&self) -> Option<usize> {
+    fn max_qbit(&self) -> Option<Qbit> {
         match self {
             Inst::CInit(_) => None,
             Inst::CFree(_, _) => None,
@@ -292,7 +292,7 @@ impl MaxBits for Inst {
         }
     }
 
-    fn max_cbit(&self) -> Option<usize> {
+    fn max_cbit(&self) -> Option<Cbit> {
         match self {
             Inst::CInit(u) => Some(*u),
             Inst::CFree(u, _) => Some(*u),
@@ -322,8 +322,8 @@ impl From<GateC> for Inst {
 #[derive(Debug)]
 pub struct CircuitBuf {
     insts: Vec<Inst>,
-    max_qbit: Option<usize>,
-    max_cbit: Option<usize>,
+    max_qbit: Option<Qbit>,
+    max_cbit: Option<Cbit>,
 }
 
 impl CircuitBuf {
@@ -337,14 +337,14 @@ impl CircuitBuf {
 
     pub fn qbit_size(&self) -> usize {
         match self.max_qbit {
-            Some(n) => n + 1,
+            Some(n) => Into::<u32>::into(n) as usize + 1,
             None => 0,
         }
     }
 
     pub fn cbit_size(&self) -> usize {
         match self.max_cbit {
-            Some(n) => n + 1,
+            Some(n) => Into::<u32>::into(n) as usize + 1,
             None => 0,
         }
     }
@@ -367,7 +367,7 @@ impl CircuitBuf {
     }
 }
 
-// === Formatting implementations
+// === Implementations
 
 impl std::fmt::Display for BaseGateQ {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -380,5 +380,17 @@ impl std::fmt::Display for BaseGateQ {
             TDag(q) => write!(f, "T* {}", q),
             Swap(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
         }
+    }
+}
+
+impl std::fmt::Display for Qbit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Display for Cbit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

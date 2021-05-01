@@ -58,7 +58,7 @@ macro_rules! decl_opts {
 // together with the optimization level at which they turn on.
 decl_opts![
     constprop:  1,
-    unipotence: 1,
+    unipotence: 2,
 ];
 
 /// Main entry point for the `opt` module

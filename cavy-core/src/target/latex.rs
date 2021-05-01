@@ -13,12 +13,15 @@ use crate::circuit::*;
 use super::*;
 
 /// LaTeX quantum circuit packages
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Package {
     Qcircuit,
     Quantikz,
     Yquant,
 }
+
+// There should be no harm in bringing all of these into module scope.
+use Package::*;
 
 impl Default for Package {
     fn default() -> Self {
@@ -176,7 +179,7 @@ impl FmtWith<LaTeX> for Elem {
         use Elem::*;
         match self {
             Ket(s) => {
-                if let Package::Qcircuit = latex.package {
+                if let Qcircuit = latex.package {
                     write!(f, r"\lstick{{\ket{{{}}}}}", s)
                 } else {
                     // Package is Quantikz
@@ -198,6 +201,7 @@ impl FmtWith<LaTeX> for Elem {
                 }
 
                 if let Some(dist) = dist {
+                    debug_assert!(latex.package == Qcircuit);
                     write!(f, r"\cwx[{}]", dist)?;
                 }
                 Ok(())
@@ -205,14 +209,19 @@ impl FmtWith<LaTeX> for Elem {
             Swap(dist) => write!(f, r"\swap{{{}}}", dist),
             TargX => f.write_str(r"\targX{}"),
             Trash => f.write_str(r"\trash{}"),
-            Meter(targ) => {
-                f.write_str(r"\meter{}")?;
-                if let (Package::Quantikz, Some(dist)) = (&latex.package, targ) {
-                    write!(f, r"\meter \vcw{{{}}}", dist)?;
-                }
-                Ok(())
-            }
-            IoLabel(io) => write!(f, r"\push{{\tt \enspace {} [{}] }} \cw", io.name, io.elem),
+            Meter(targ) => match (latex.package, targ) {
+                (Quantikz, Some(dist)) => write!(f, r"\meter{{}} \vcw{{{}}}", dist),
+                (Qcircuit, Some(dist)) => write!(f, r"\meter{{}} \cwx[{}]", dist),
+                (_, None) => f.write_str(r"\meter{}"),
+                _ => unreachable!(),
+            },
+            // Maybe "ought" to use `\rstick` here, but then we'd need to figure
+            // out the bounding box for Qcircuit.
+            IoLabel(io) => match latex.package {
+                Qcircuit => write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", io.name, io.elem),
+                Quantikz => write!(f, r"\rstick{{\tt {}[{}] }} \cw", io.name, io.elem),
+                _ => unreachable!(),
+            },
         }
     }
 }
@@ -247,6 +256,16 @@ impl Wire {
 
     pub fn len(&self) -> usize {
         self.cells.len()
+    }
+
+    // NOTE: a key invariant is that no wire is ever empty. So, we can
+    // get the last cell unconditionally.
+    pub fn last(&self) -> &LayoutState<Elem> {
+        self.cells.last().unwrap()
+    }
+
+    pub fn last_mut(&mut self) -> &mut LayoutState<Elem> {
+        self.cells.last_mut().unwrap()
     }
 
     fn set_blocked(&mut self, blocked: Vec<usize>) {
@@ -393,20 +412,21 @@ impl<'l> LayoutArray<'l> {
 
     /// Translate from qwire address to absolute address
     #[inline(always)]
-    fn qwire(&self, wire: usize) -> usize {
-        wire
+    fn qwire(&self, qbit: Qbit) -> usize {
+        Into::<u32>::into(qbit) as usize
     }
 
     /// Translate from cwire address to absolute address
     #[inline(always)]
-    fn cwire(&self, wire: usize) -> usize {
-        wire + self.fst_cwire
+    fn cwire(&self, cbit: Cbit) -> usize {
+        use crate::store::Index;
+        Into::<u32>::into(cbit) as usize + self.fst_cwire
     }
 
     /// How quantikz expects distances to be calculated. Here, `src` denotes
     /// e.g. the source of a control operation; `tgt` denotes its target.
     #[inline(always)]
-    fn dist(src: usize, tgt: usize) -> isize {
+    fn dist(&self, src: usize, tgt: usize) -> isize {
         (tgt as isize) - (src as isize)
     }
 
@@ -421,8 +441,8 @@ impl<'l> LayoutArray<'l> {
         match inst {
             Inst::CInit(_) => {}
             Inst::CFree(_, _) => {}
-            Inst::QInit(_) => {}
-            Inst::QFree(s, wire) => self.push_free(wire, s),
+            Inst::QInit(q) => self.qinit(q),
+            Inst::QFree(q, s) => self.push_qfree(q, s),
             Inst::QGate(g) => self.push_qgate(g),
             Inst::CGate(g) => self.push_cgate(g),
             Inst::Meas(s, t) => self.push_meas(self.qwire(s), self.cwire(t)),
@@ -430,8 +450,20 @@ impl<'l> LayoutArray<'l> {
         }
     }
 
-    fn push_free(&mut self, s: FreeState, wire: usize) {
-        let wire = self.qwire(wire);
+    fn qinit(&mut self, qbit: Qbit) {
+        let wire = self.qwire(qbit);
+        let wire = &mut self.wires[wire];
+        wire.liveness = LiveQ;
+        if self.latex.initial_kets {
+            let prev = wire.last_mut();
+            if let Free(Dead) = prev {
+                *prev = Occupied(Elem::Ket("0"));
+            }
+        }
+    }
+
+    fn push_qfree(&mut self, qbit: Qbit, s: FreeState) {
+        let wire = self.qwire(qbit);
         match s {
             FreeState::Clean => {}
             FreeState::Dirty => {
@@ -452,14 +484,15 @@ impl<'l> LayoutArray<'l> {
         }
 
         use BaseGateQ::*;
-        let (wire, elem) = match gate.base {
-            X(u) => (u, Elem::X),
-            H(u) => (u, Elem::H),
-            Z(u) => (u, Elem::Z),
-            T(u) => (u, Elem::T),
-            TDag(u) => (u, Elem::TDag),
+        let (wire_idx, elem) = match gate.base {
+            X(u) => (self.qwire(u), Elem::X),
+            H(u) => (self.qwire(u), Elem::H),
+            Z(u) => (self.qwire(u), Elem::Z),
+            T(u) => (self.qwire(u), Elem::T),
+            TDag(u) => (self.qwire(u), Elem::TDag),
             Swap(u, v) => {
-                let dist = Self::dist(u, v);
+                let (u, v) = (self.qwire(u), self.qwire(v));
+                let dist = self.dist(u, v);
                 let fst = (u, Elem::Swap(dist));
                 let snd = (v, Elem::TargX);
                 self.insert_multiple(vec![fst, snd]);
@@ -467,22 +500,17 @@ impl<'l> LayoutArray<'l> {
             }
         };
 
-        let wire_idx = self.qwire(wire);
-        let wire = &mut self.wires[wire];
-
-        let prev = wire.next_free - 1;
-        if self.latex.initial_kets && wire.liveness == Dead {
-            if let Elem::X = elem {
-                // NOTE: Does this violate any important invariants? Could
-                // the previous wire be blocked?
-                wire[prev] = Occupied(Elem::Ket("1"));
-                wire.liveness = LiveQ;
-                return;
-            } else {
-                wire[prev] = Occupied(Elem::Ket("0"));
-            }
-        }
+        let wire = &mut self.wires[wire_idx];
         wire.liveness = LiveQ;
+
+        // We can do this unconditionally instead of inserting: if there’s
+        // already a ket, it’s safe to update it, and this doesn’t change the
+        // actual gates of the circuit.
+        if let (Elem::X, Occupied(ref mut k @ Elem::Ket("0"))) = (&elem, wire.last_mut()) {
+            *k = Elem::Ket("1");
+            return;
+        }
+
         self.insert_single(wire_idx, elem);
     }
 
@@ -504,14 +532,11 @@ impl<'l> LayoutArray<'l> {
     }
 
     fn push_meas(&mut self, src_wire: usize, tgt_wire: usize) {
-        let mut dist = Self::dist(src_wire, tgt_wire);
-        if let Package::Qcircuit = self.latex.package {
-            dist *= -1;
-        }
+        let dist = self.dist(src_wire, tgt_wire);
         let src = (src_wire, Elem::Meter(Some(dist)));
         // The distance is only used if needed--no harm to include it
         // unconditionally. Note the *opposite* sign convention.
-        let tgt = (tgt_wire, Elem::CTarg(Some(dist)));
+        let tgt = (tgt_wire, Elem::CTarg(None));
         self.insert_multiple(vec![src, tgt]);
         self.wires[tgt_wire].liveness = LiveC;
         self.wires[src_wire].liveness = Dead;
@@ -614,7 +639,7 @@ impl FmtWith<LaTeX> for LayoutArray<'_> {
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((last, head)) = &self.wires.split_last() {
             for wire in head.iter() {
-                writeln!(f, "{}\\\\", wire.fmt_with(latex))?;
+                writeln!(f, r"{}\\", wire.fmt_with(latex))?;
             }
             writeln!(f, "{}", last.fmt_with(latex))?;
         }
@@ -638,6 +663,7 @@ impl LaTeX {
         }
     }
 
+    /// LaTeX header for standalone mode
     fn fmt_header(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.standalone {
             return Ok(());
@@ -664,19 +690,25 @@ impl LaTeX {
         )
     }
 
-    // #[rustfmt::skip]
+    // NOTE: I could get rid of this entire mess by just putting the whole
+    // preambles in separate `.tex` files and `include_str!`in them. But then
+    // I'd have to use `bracket,qm` unconditionally, which might slow down
+    // Qcircuit slightly. And there is *definitely* no hope of using LaTeX
+    // source as a Rust format string.
+    /// Package and macro declarations for standalone mode
     fn fmt_tex_packages(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.package {
             Package::Qcircuit => {
                 let options = if self.initial_kets { "[braket,qm]" } else { "" };
-                let nwtarg_cmd = include_str!("nwtarg.tex");
-                writeln!(f, "\\usepackage{}{{qcircuit}}\n{}", options, nwtarg_cmd)?;
+                let nwtarg = include_str!("nwtarg_qcircuit.tex");
+                writeln!(f, "\\usepackage{}{{qcircuit}}\n{}", options, nwtarg)?
             }
-            Package::Quantikz => f.write_str(
+            Package::Quantikz => f.write_str(concat!(
                 r"\usepackage{tikz}
 \usetikzlibrary{quantikz}
 ",
-            )?,
+                include_str!("nwtarg_quantikz.tex")
+            ))?,
             Package::Yquant => f.write_str(
                 r"\usepackage{tikz}
 \usepackage{yquant}
