@@ -15,8 +15,9 @@ pub fn optimize(mir: &mut Mir, _ctx: &Context) {
 }
 
 fn simpl_graph(gr: &mut Graph) {
+    let mut checker = StrandChecker::new();
     for block in gr.iter_mut() {
-        StrandChecker::new().simplify(block);
+        &mut checker.simplify(block);
     }
 }
 
@@ -115,13 +116,17 @@ impl Strand {
     }
 
     /// Merge the edit intervals
-    fn merge(&mut self) {
+    fn merge(mut self) -> MergedStrand {
+        if self.edits.len() == 0 {
+            return MergedStrand(self);
+        }
+
         self.edits.sort_by_key(|edit| edit.fst);
         let mut edits = self.edits.drain(0..);
         let mut stack = Vec::new();
         match edits.next() {
             Some(fst) => stack.push(fst),
-            None => return,
+            None => unreachable!(),
         };
         for edit in edits {
             let prev = stack.last_mut().unwrap();
@@ -134,6 +139,28 @@ impl Strand {
             }
         }
         std::mem::swap(&mut self.edits, &mut stack);
+        MergedStrand(self)
+    }
+}
+
+struct MergedStrand(Strand);
+
+impl MergedStrand {
+    // Must have merged before applying edits
+    fn apply(self, block: &mut BasicBlock) {
+        let strand = self.0;
+        for edit in strand.edits {
+            // The beginning of the edit, which is to be excised.
+            for loc in strand.locs[edit.fst..edit.snd].iter() {
+                block.stmts[*loc].kind = StmtKind::Nop;
+            }
+            let end = &mut block.stmts[strand.locs[edit.snd]];
+            let rvalue = Rvalue {
+                data: RvalueKind::Use(Operand::Move(edit.rhs)),
+                span: Span::default(), // technically wrong
+            };
+            end.kind = StmtKind::Assn(edit.lhs, rvalue);
+        }
     }
 }
 
@@ -145,20 +172,22 @@ struct StrandChecker {
     ///
     /// we will take the strand out of the slot `_i`, and place it into the slot
     /// `_j`.
-    strands: HashMap<Place, Strand>,
-    /// The edits collected so far
-    edits: Vec<Edit>,
+    live_strands: HashMap<Place, Strand>,
+    /// Strands that have been terminated by encountering a BinOp, reaching the
+    /// end of a block, etc.
+    dead_strands: Vec<MergedStrand>,
 }
 
 impl StrandChecker {
     fn new() -> Self {
         Self {
-            strands: HashMap::new(),
-            edits: Vec::new(),
+            live_strands: HashMap::new(),
+            dead_strands: Vec::new(),
         }
     }
 
-    fn simplify(mut self, block: &mut BasicBlock) {
+    // Invariant: after simplifying a block, this data structure is empty.
+    fn simplify(&mut self, block: &mut BasicBlock) {
         for (loc, stmt) in block.stmts.iter().enumerate() {
             match &stmt.kind {
                 StmtKind::Assn(place, rvalue) => {
@@ -174,7 +203,15 @@ impl StrandChecker {
                 StmtKind::Nop => {}
             }
         }
-        self.apply_edits(block);
+
+        // Dump the remaining live strands at the end of the block
+        self.dead_strands
+            .extend(self.live_strands.drain().map(|(_, strand)| strand.merge()));
+
+        // Apply the merged strands
+        for strand in self.dead_strands.drain(0..) {
+            strand.apply(block);
+        }
     }
 
     fn ingest_stmt(&mut self, loc: Loc, place: &Place, rvalue: &Rvalue) {
@@ -189,34 +226,34 @@ impl StrandChecker {
             UnOp(_, _) | Use(_) => return,
 
             // Must end a strand if one of its places appears in a binop or ref.
-            BinOp(_, _, _) => return,
-            Ref(_, _) => return,
+            BinOp(_, lhs, rhs) => {
+                self.kill_at_place(lhs.place());
+                self.kill_at_place(rhs.place());
+                return;
+            }
+            Ref(_, rhs) => {
+                self.kill_at_place(Some(rhs));
+                return;
+            }
         };
 
-        let mut strand = match self.strands.entry(rhs.clone()) {
+        // Take the strand out of its old place
+        let mut strand = match self.live_strands.entry(rhs.clone()) {
             Entry::Occupied(e) => e.remove(),
             Entry::Vacant(_) => Strand::new(),
         };
 
+        // Put it in its new place
         strand.insert(op, loc, (place.clone(), rhs.clone()));
-        self.strands.insert(place.clone(), strand);
+        self.live_strands.insert(place.clone(), strand);
     }
 
-    fn apply_edits(self, block: &mut BasicBlock) {
-        for (_, mut strand) in self.strands {
-            strand.merge();
-            for edit in strand.edits {
-                // The beginning of the edit, which is to be excised.
-                for loc in strand.locs[edit.fst..edit.snd].iter() {
-                    block.stmts[*loc].kind = StmtKind::Nop;
-                }
-                let end = &mut block.stmts[strand.locs[edit.snd]];
-                let rvalue = Rvalue {
-                    data: RvalueKind::Use(Operand::Move(edit.rhs)),
-                    span: Span::default(), // technically wrong
-                };
-                end.kind = StmtKind::Assn(edit.lhs, rvalue);
-            }
+    fn kill_at_place(&mut self, place: Option<&Place>) {
+        if let Some(place) = place {
+            let dead_strands = &mut self.dead_strands;
+            self.live_strands
+                .remove(place)
+                .map(|strand| dead_strands.push(strand.merge()));
         }
     }
 }

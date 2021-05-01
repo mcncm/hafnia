@@ -55,7 +55,7 @@ impl<K: Ord, V> Interval<K, V> {
     }
 
     fn overlaps(&self, other: &RangeInclusive<K>) -> bool {
-        self.contains(other.start()) || self.contains(other.end())
+        !(&self.high < other.start() || other.end() < &self.low)
     }
 }
 
@@ -217,11 +217,14 @@ impl FmtWith<LaTeX> for Elem {
             },
             // Maybe "ought" to use `\rstick` here, but then we'd need to figure
             // out the bounding box for Qcircuit.
-            IoLabel(io) => match latex.package {
-                Qcircuit => write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", io.name, io.elem),
-                Quantikz => write!(f, r"\rstick{{\tt {}[{}] }} \cw", io.name, io.elem),
-                _ => unreachable!(),
-            },
+            IoLabel(io) => {
+                let name = LaTeX::escape(&io.name);
+                match latex.package {
+                    Qcircuit => write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", name, io.elem),
+                    Quantikz => write!(f, r"\rstick{{\tt {}[{}] }} \cw", name, io.elem),
+                    _ => unreachable!(),
+                }
+            }
         }
     }
 }

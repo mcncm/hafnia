@@ -475,7 +475,14 @@ pub enum Operand {
 }
 
 impl Operand {
-    fn unwrap_place(self) -> Place {
+    pub fn place(&self) -> Option<&Place> {
+        match self {
+            Self::Const(_) => None,
+            Self::Copy(place) | Self::Move(place) => Some(place),
+        }
+    }
+
+    pub fn unwrap_place(self) -> Place {
         match self {
             Self::Const(_) => panic!("expected a `Place`"),
             Self::Copy(place) | Self::Move(place) => place,
