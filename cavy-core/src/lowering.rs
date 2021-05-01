@@ -535,7 +535,15 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Ref { annot, expr: inner } => {
                 self.lower_into_ref(place, annot, inner, expr.span)
             }
-            ExprKind::Deref(expr) => todo!(),
+            ExprKind::Deref(inner) => {
+                let rplace = self.resolve_deref(inner)?;
+                let rvalue = Rvalue {
+                    data: RvalueKind::Use(Operand::Move(rplace)),
+                    span: expr.span,
+                };
+                self.assn_stmt(place, rvalue);
+                Ok(())
+            }
         }
     }
 
@@ -631,6 +639,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             // typechecking
             ExprKind::Ident(name) => (*self.st.get(&name.data).unwrap()).into(),
             ExprKind::Field(root, field) => self.resolve_fields(root, field)?,
+            ExprKind::Deref(inner) => self.resolve_deref(inner)?,
             _ => return Err(self.errors.push(errors::InvalidLhsKind { span: lhs.span })),
         };
 
@@ -755,6 +764,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let (field, _) = self.field_of(head_ty, field).unwrap();
         place.path.push(Proj::Field(field));
         Ok(place)
+    }
+
+    /// Ok, now a third of these odd methods
+    fn resolve_deref(&mut self, inner: &Expr) -> Maybe<Place> {
+        let mut rplace = self.lower_expr(inner)?;
+        rplace.path.push(Proj::Deref);
+        Ok(rplace)
     }
 
     fn lower_into_tuple(&mut self, place: Place, elems: &[Expr]) -> Maybe<()> {
@@ -1211,7 +1227,18 @@ mod typing {
                     let ty = self.type_expr(expr)?;
                     self.ctx.intern_ty(Type::Ref(kind, ty))
                 }
-                ExprKind::Deref(_) => todo!(),
+                ExprKind::Deref(expr) => {
+                    let ty = self.type_expr(expr)?;
+                    match self.ctx.types[ty] {
+                        Type::Ref(RefKind::Uniq, ty) => ty,
+                        _ => {
+                            return self.error(errors::NonDereferenceableType {
+                                span: expr.span,
+                                ty,
+                            })
+                        }
+                    }
+                }
             };
             self.gamma.insert(expr.node, ty);
             Ok(ty)
@@ -1880,6 +1907,15 @@ mod errors {
         pub span: Span,
         #[ctx]
         pub name: SymbolId,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "cannot dereference values of type `{ty}`"]
+    pub struct NonDereferenceableType {
+        #[span]
+        pub span: Span,
+        #[ctx]
+        pub ty: TyId,
     }
 
     #[derive(Diagnostic)]

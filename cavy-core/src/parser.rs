@@ -844,18 +844,25 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                     op,
                     right: Box::new(right),
                 };
-                return Ok(self.node(kind, span));
+                Ok(self.node(kind, span))
+            }
+            Some(Star) => {
+                let mut span = self.token().unwrap().span;
+                let right = self.unary()?;
+                span = span.join(&right.span).unwrap();
+                let kind = ExprKind::Deref(Box::new(right));
+                Ok(self.node(kind, span))
             }
             Some(Ampersand) => {
-                let span = self.token().unwrap().span;
+                let mut span = self.token().unwrap().span;
                 let annot = self.finish_ref_annot(span)?;
                 let right = self.unary()?;
-                let span = annot.span.join(&right.span).unwrap();
+                span = annot.span.join(&right.span).unwrap();
                 let kind = ExprKind::Ref {
                     annot,
                     expr: Box::new(right),
                 };
-                return Ok(self.node(kind, span));
+                Ok(self.node(kind, span))
             }
             Some(LDelim(Bracket)) => {
                 let opening = self.token()?.span;
