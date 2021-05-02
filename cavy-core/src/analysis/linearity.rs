@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use mir::Proj;
 
-use super::common::{DataflowAnalysis, Forward, Lattice};
+use super::common::{DataflowAnalysis, Forward, Lattice, Statementwise};
 use crate::{
     mir::{self, BlockKind, LocalId, Operand, Place, RvalueKind},
     source::Span,
@@ -227,7 +227,7 @@ pub struct LinearityAnalysis {}
 
 impl LinearityAnalysis {}
 
-impl DataflowAnalysis<Forward> for LinearityAnalysis {
+impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
     type Domain = MoveState;
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt) {

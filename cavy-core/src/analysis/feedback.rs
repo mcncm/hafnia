@@ -7,7 +7,7 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::common::{DataflowAnalysis, Forward, Lattice};
+use super::common::{DataflowAnalysis, Forward, Lattice, Statementwise};
 use crate::{
     ast::UnOpKind,
     mir::{self, BlockKind, LocalId, Operand, Place, RvalueKind},
@@ -66,7 +66,7 @@ impl MeasState {
 /// gen-kill thing is all about.)
 pub struct FeedbackAnalysis {}
 
-impl DataflowAnalysis<Forward> for FeedbackAnalysis {
+impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     type Domain = MeasState;
 
     fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt) {

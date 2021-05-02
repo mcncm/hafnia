@@ -65,14 +65,15 @@ where
 }
 
 /// Trait for a general dataflow analysis
-pub trait DataflowAnalysis<D>
+pub trait DataflowAnalysis<D, G>
 where
     D: Direction,
+    G: Granularity,
 {
     type Domain: Lattice;
 
-    /// Apply the transfer function for a single statement
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &Stmt);
+    /// Apply the transfer function for a single statement. Empty default implementation
+    fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt) {}
 
     /// Apply the transfer function for the end of a basic block
     fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind);
@@ -92,64 +93,66 @@ pub struct AnalysisStates<L: Lattice> {
     pub entry_states: Store<mir::BlockId, L>,
 }
 
+/// Dataflow states for a block-granularity analysis
+type BlockStates<L> = Store<mir::BlockId, L>;
+
+/// Dataflow states for a statement-granularity analysis
+type StmtStates<L> = Store<mir::BlockId, Vec<L>>;
+
 /// An execution environment for a dataflow analysis, using the Killdall method.
 ///
 /// NOTE Can we do this with a *single* pass per direction? Can we do it without
 /// generics? Probably only if we store the results in the analysis types
 /// themselves.
-pub struct DataflowRunner<'a, A, D>
+pub struct DataflowRunner<'a, A, D, G>
 where
-    A: DataflowAnalysis<D>,
+    A: DataflowAnalysis<D, G>,
     D: Direction,
+    G: Granularity,
 {
     analysis: A,
-    states: AnalysisStates<A::Domain>,
+    ctx: &'a Context<'a>,
     gr: &'a mir::Graph,
     preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
-    ctx: &'a Context<'a>,
+    /// Per-block analysis states, used for granularity `Blockwise`
+    block_states: BlockStates<A::Domain>,
+    /// Per-statement analysis states, used for granularity `Statementwise`
+    stmt_states: StmtStates<A::Domain>,
     /// The next set of blocks to be analyzed, together with their new starting
     /// states
-    working_set: HashMap<BlockId, A::Domain>,
+    working_set: Vec<BlockId>,
 }
 
-impl<'a, A, D> DataflowRunner<'a, A, D>
+impl<'a, A, D, G> DataflowRunner<'a, A, D, G>
 where
-    A: DataflowAnalysis<D>,
+    A: DataflowAnalysis<D, G>,
     D: Direction,
-    Self: Propagate<'a, A, D>,
+    G: Granularity,
+    Self: Propagate<'a, A, D, G>,
 {
     pub fn new(analysis: A, gr: &'a Graph, ctx: &'a Context<'a>) -> Self {
         let preds = gr.get_preds();
-        let bot = A::Domain::bottom(gr, ctx);
-        // FIXME this is doing a lot of extra work to fill in these "default"
-        // values. Maybe we should use either a `Store<BlockId,
-        // Option<A::Domain>>` or a `HashMap<BlockId, A::Domain>`, or somehow
-        // guarantee that we walk the blocks in index-order.
-        let entry_states = std::iter::repeat(bot.clone()).take(gr.len()).collect();
-        let states = AnalysisStates { entry_states };
-        let mut working_set = HashMap::new();
-        working_set.insert(gr.entry_block, bot);
         Self {
             analysis,
-            states,
+            block_states: BlockStates::new(),
+            stmt_states: StmtStates::new(),
             gr,
             ctx,
             preds,
-            working_set,
+            working_set: vec![gr.entry_block],
         }
     }
 
-    pub fn run(mut self) -> AnalysisStates<A::Domain> {
+    pub fn run(mut self) -> BlockStates<A::Domain> {
         while !self.working_set.is_empty() {
             // Probably do need to reallocate, because the working set will be
             // filled up inside this loop
-            let mut working_set: Vec<_> = self.working_set.drain().collect();
-            for (blk, state) in working_set.drain(0..) {
-                self.states.entry_states[blk] = state;
+            let working_set: Vec<_> = self.working_set.drain(0..).collect();
+            for blk in working_set {
                 self.run_inner(blk);
             }
         }
-        self.states
+        self.block_states
     }
 
     /// Update the state associated with a single block. We'll take the previous
@@ -158,7 +161,7 @@ where
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
     fn run_inner(&mut self, blk_id: BlockId) {
-        let mut state = self.states.entry_states[blk_id].clone();
+        let mut state = self.block_states[blk_id].clone();
         let block = &self.gr[blk_id];
         self.propagate(&mut state, &block);
 
@@ -170,28 +173,30 @@ where
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
         for succ in succs {
-            let prev_succ_state = &self.states.entry_states[succ];
+            let prev_succ_state = &self.block_states[succ];
             let succ_state = prev_succ_state.join(&state);
             if &succ_state != prev_succ_state {
-                self.working_set.insert(succ, succ_state);
+                self.working_set.push(succ);
             }
         }
     }
 }
 
-pub trait Propagate<'a, A, D>
+pub trait Propagate<'a, A, D, G>
 where
-    A: DataflowAnalysis<D>,
+    A: DataflowAnalysis<D, G>,
     D: Direction,
+    G: Granularity,
 {
     fn successors<'b>(&'b self, blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId];
 
     fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock);
 }
 
-impl<'a, A> Propagate<'a, A, Forward> for DataflowRunner<'a, A, Forward>
+impl<'a, A, G> Propagate<'a, A, Forward, G> for DataflowRunner<'a, A, Forward, G>
 where
-    A: DataflowAnalysis<Forward>,
+    A: DataflowAnalysis<Forward, G>,
+    G: Granularity,
 {
     fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
         block.successors()
@@ -208,9 +213,10 @@ where
     }
 }
 
-impl<'a, A> Propagate<'a, A, Backward> for DataflowRunner<'a, A, Backward>
+impl<'a, A, G> Propagate<'a, A, Backward, G> for DataflowRunner<'a, A, Backward, G>
 where
-    A: DataflowAnalysis<Backward>,
+    A: DataflowAnalysis<Backward, G>,
+    G: Granularity,
 {
     fn successors<'b>(&'b self, blk_id: BlockId, _block: &BasicBlock) -> &[BlockId] {
         &self.preds[blk_id]
@@ -224,6 +230,41 @@ where
         for stmt in block.stmts.iter().rev() {
             self.analysis.trans_stmt(state, stmt);
         }
+    }
+}
+
+trait Update<A, D, G>
+where
+    A: DataflowAnalysis<D, G>,
+    D: Direction,
+    G: Granularity,
+{
+    /// Default implementation for both
+    fn init_block_states(gr: &Graph, ctx: &Context) -> BlockStates<A::Domain> {
+        let bot = A::Domain::bottom(gr, ctx);
+        std::iter::repeat(bot.clone()).take(gr.len()).collect()
+    }
+
+    /// Default implementation for `Blockwise` case
+    fn init_stmt_states(_gr: &Graph, _ctx: &Context) -> StmtStates<A::Domain> {
+        Store::new()
+    }
+}
+
+/// For the statementwise case, we must override the default implementations for the statement methods
+impl<'a, A, D> Update<A, D, Statementwise> for DataflowRunner<'a, A, D, Statementwise>
+where
+    A: DataflowAnalysis<D, Statementwise>,
+    D: Direction,
+{
+    fn init_stmt_states(gr: &Graph, ctx: &Context) -> StmtStates<A::Domain> {
+        let bot = A::Domain::bottom(gr, ctx);
+        gr.iter()
+            .map(|block| {
+                let len = block.stmts.len();
+                std::iter::repeat(bot.clone()).take(len).collect()
+            })
+            .collect()
     }
 }
 
