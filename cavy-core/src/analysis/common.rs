@@ -162,13 +162,12 @@ where
     /// action associated with the block kind.
     fn run_inner(&mut self, blk_id: BlockId) {
         let mut state = self.block_states[blk_id].clone();
-        let block = &self.gr[blk_id];
-        self.propagate(&mut state, &block);
+        self.propagate(&mut state, blk_id);
 
         // NOTE: yes, this allocation is unnecessary. No, don't try to get rid of it
-        // right now. Proving safety to thecompiler is not worth it: it turns
+        // right now. Proving safety to the compiler is not worth it: it turns
         // into a generics mess.
-        let succs = self.successors(blk_id, block).to_owned();
+        let succs = self.successors(blk_id).to_owned();
 
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
@@ -180,6 +179,19 @@ where
             }
         }
     }
+
+    /// This doesn't need to be part of the `Update` trait, since it's the same
+    /// for both granularities.
+    fn init_block_states(gr: &Graph, ctx: &Context) -> BlockStates<A::Domain> {
+        let bot = A::Domain::bottom(gr, ctx);
+        std::iter::repeat(bot.clone()).take(gr.len()).collect()
+    }
+
+    /// This doesn't need to be part of the `Update` trait, since it's the same
+    /// for both granularities.
+    fn update_block_state(&mut self, blk: BlockId, state: &A::Domain) {
+        self.block_states[blk] = state.clone();
+    }
 }
 
 pub trait Propagate<'a, A, D, G>
@@ -187,29 +199,35 @@ where
     A: DataflowAnalysis<D, G>,
     D: Direction,
     G: Granularity,
+    Self: Update<A, D, G>,
 {
-    fn successors<'b>(&'b self, blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId];
+    fn successors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId];
 
-    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock);
+    fn propagate(&mut self, state: &mut A::Domain, blk: BlockId);
 }
 
 impl<'a, A, G> Propagate<'a, A, Forward, G> for DataflowRunner<'a, A, Forward, G>
 where
     A: DataflowAnalysis<Forward, G>,
     G: Granularity,
+    Self: Update<A, Forward, G>,
 {
-    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
+    fn successors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId] {
+        let block = &self.gr[blk_id];
         block.successors()
     }
 
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
-    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
-        for stmt in block.stmts.iter() {
+    fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
+        let block = &self.gr[blk];
+        for (loc, stmt) in block.stmts.iter().enumerate() {
             self.analysis.trans_stmt(state, stmt);
+            self.update_stmt_state(blk, loc, state);
         }
         self.analysis.trans_block(state, &block.kind);
+        self.update_block_state(blk, state);
     }
 }
 
@@ -217,38 +235,39 @@ impl<'a, A, G> Propagate<'a, A, Backward, G> for DataflowRunner<'a, A, Backward,
 where
     A: DataflowAnalysis<Backward, G>,
     G: Granularity,
+    Self: Update<A, Backward, G>,
 {
-    fn successors<'b>(&'b self, blk_id: BlockId, _block: &BasicBlock) -> &[BlockId] {
+    fn successors<'b>(&'b self, blk_id: BlockId) -> &[BlockId] {
         &self.preds[blk_id]
     }
 
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
-    fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
+    fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
+        let block = &self.gr[blk];
         self.analysis.trans_block(state, &block.kind);
-        for stmt in block.stmts.iter().rev() {
+        self.update_block_state(blk, state);
+        for (loc, stmt) in block.stmts.iter().enumerate().rev() {
             self.analysis.trans_stmt(state, stmt);
+            self.update_stmt_state(blk, loc, state);
         }
     }
 }
 
-trait Update<A, D, G>
+pub trait Update<A, D, G>
 where
     A: DataflowAnalysis<D, G>,
     D: Direction,
     G: Granularity,
 {
-    /// Default implementation for both
-    fn init_block_states(gr: &Graph, ctx: &Context) -> BlockStates<A::Domain> {
-        let bot = A::Domain::bottom(gr, ctx);
-        std::iter::repeat(bot.clone()).take(gr.len()).collect()
-    }
-
     /// Default implementation for `Blockwise` case
     fn init_stmt_states(_gr: &Graph, _ctx: &Context) -> StmtStates<A::Domain> {
         Store::new()
     }
+
+    /// Default implementation for the `Blockwise` case: do nothing!
+    fn update_stmt_state(&mut self, _blk: BlockId, _loc: usize, _state: &A::Domain) {}
 }
 
 /// For the statementwise case, we must override the default implementations for the statement methods
@@ -266,8 +285,31 @@ where
             })
             .collect()
     }
+
+    fn update_stmt_state(&mut self, blk: BlockId, loc: usize, state: &A::Domain) {
+        self.stmt_states[blk][loc] = state.clone();
+    }
 }
 
+impl<'a, A, D> Update<A, D, Blockwise> for DataflowRunner<'a, A, D, Blockwise>
+where
+    A: DataflowAnalysis<D, Blockwise>,
+    D: Direction,
+{
+    fn init_stmt_states(gr: &Graph, ctx: &Context) -> StmtStates<A::Domain> {
+        let bot = A::Domain::bottom(gr, ctx);
+        gr.iter()
+            .map(|block| {
+                let len = block.stmts.len();
+                std::iter::repeat(bot.clone()).take(len).collect()
+            })
+            .collect()
+    }
+
+    fn update_stmt_state(&mut self, blk: BlockId, loc: usize, state: &A::Domain) {
+        self.stmt_states[blk][loc] = state.clone();
+    }
+}
 // == Summary analyses ==
 
 /// A simple analysis that makes only a single pass over all blocks, *regardless
