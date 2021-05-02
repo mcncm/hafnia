@@ -412,8 +412,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     /// Create a new block, inheriting the satellite data of the block currently
     /// under the cursor.
     fn new_block(&mut self) -> BlockId {
-        let mut block = BasicBlock::new();
-        block.data = self.gr[self.cursor].data.clone();
+        let block = BasicBlock::new();
         self.gr.insert_block(block)
     }
 
@@ -898,16 +897,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond = self.lower_into(&cond_place, cond);
         let tail_block = self.new_block();
 
-        let mut blk_data = self.gr[self.cursor].data.clone();
-        blk_data.sup_branch = Some(self.cursor);
-        if cond_ty.is_linear(self.ctx) {
-            blk_data.sup_lin_branch = Some(self.cursor);
-        }
-
         // Falsy branch
         let fls = match fls {
             Some(ind) => self.with_goto(tail_block, |this| {
-                this.gr[this.cursor].data = blk_data.clone();
                 this.lower_into_block(place.clone(), ind)?;
                 Ok(this.cursor)
             }),
@@ -916,7 +908,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
         // Truthy branch
         let tru = self.with_goto(tail_block, |this| {
-            this.gr[this.cursor].data = blk_data;
             this.lower_into_block(place, tru)?;
             Ok(this.cursor)
         });
@@ -1230,7 +1221,7 @@ mod typing {
                 ExprKind::Deref(expr) => {
                     let ty = self.type_expr(expr)?;
                     match self.ctx.types[ty] {
-                        Type::Ref(RefKind::Uniq, ty) => ty,
+                        Type::Ref(_, ty) => ty,
                         _ => {
                             return self.error(errors::NonDereferenceableType {
                                 span: expr.span,

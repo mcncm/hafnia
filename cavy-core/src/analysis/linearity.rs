@@ -4,7 +4,7 @@ use mir::Proj;
 
 use super::common::{DataflowAnalysis, Forward, Lattice};
 use crate::{
-    mir::{self, BlockData, BlockKind, LocalId, Operand, Place, RvalueKind},
+    mir::{self, BlockKind, LocalId, Operand, Place, RvalueKind},
     source::Span,
 };
 
@@ -227,10 +227,10 @@ pub struct LinearityAnalysis {}
 
 impl LinearityAnalysis {}
 
-impl DataflowAnalysis<'_, '_, Forward> for LinearityAnalysis {
+impl DataflowAnalysis<Forward> for LinearityAnalysis {
     type Domain = MoveState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _data: &BlockData) {
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
         let (place, rhs) = match &stmt.kind {
@@ -255,7 +255,7 @@ impl DataflowAnalysis<'_, '_, Forward> for LinearityAnalysis {
         state.move_into(&place);
     }
 
-    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _data: &BlockData) {
+    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {
         // TODO
     }
 }

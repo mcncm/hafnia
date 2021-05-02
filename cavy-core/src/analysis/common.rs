@@ -17,6 +17,16 @@ impl Direction for Forward {}
 pub struct Backward;
 impl Direction for Backward {}
 
+/// Does an analysis measure state for blocks alone, or at the
+/// statement-by-statement level?
+pub trait Granularity {}
+
+pub struct Blockwise;
+impl Granularity for Blockwise {}
+
+pub struct Statementwise;
+impl Granularity for Statementwise {}
+
 /// The main trait for analysis data, representing a join-semilattice.
 pub trait Lattice: Clone + PartialEq + Eq {
     fn join(&self, other: &Self) -> Self;
@@ -55,21 +65,19 @@ where
 }
 
 /// Trait for a general dataflow analysis
-pub trait DataflowAnalysis<'mir, 'ctx, D>
+pub trait DataflowAnalysis<D>
 where
     D: Direction,
 {
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, data: &mir::BlockData);
+    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &Stmt);
 
     /// Apply the transfer function for the end of a basic block
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind, data: &mir::BlockData);
+    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind);
 }
 
-/// The state of an an analysis on entry into each block.
-///
 /// NOTE Improvements that could be made: this is a good example of where we
 /// could (potentially) benefit from using persistent data structures. Also,
 /// rustc doesn't enforce generic parameters in type aliases. That makes this
@@ -82,53 +90,6 @@ where
 pub struct AnalysisStates<L: Lattice> {
     /// The state on entry to each block
     pub entry_states: Store<mir::BlockId, L>,
-    /// The state on return from the procedure
-    pub exit_state: L,
-}
-
-pub trait SuccGetter<'a> {
-    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self;
-
-    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
-        block.successors()
-    }
-}
-
-/// A helper struct to satisfy the borrow checker: used to compute the
-/// successors to a node.
-pub struct Successors<'a, D: Direction> {
-    preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
-    _d: D,
-}
-
-impl<'a> SuccGetter<'a> for Successors<'a, Forward> {
-    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self {
-        Self {
-            preds,
-            _d: Forward {},
-        }
-    }
-
-    /// It looks silly, but this has both arguments because we have access to
-    /// the `Block` going forwards, and only the `BlockId` going backwards.
-    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
-        block.successors()
-    }
-}
-
-impl<'a> SuccGetter<'a> for Successors<'a, Backward> {
-    fn new(preds: Ref<'a, Store<BlockId, Vec<BlockId>>>) -> Self {
-        Self {
-            preds,
-            _d: Backward {},
-        }
-    }
-
-    /// It looks silly, but this has both arguments because we have access to
-    /// the `Block` going forwards, and only the `BlockId` going backwards.
-    fn successors(&self, blk_id: BlockId, _block: &BasicBlock) -> &[BlockId] {
-        &self.preds[blk_id]
-    }
 }
 
 /// An execution environment for a dataflow analysis, using the Killdall method.
@@ -136,61 +97,59 @@ impl<'a> SuccGetter<'a> for Successors<'a, Backward> {
 /// NOTE Can we do this with a *single* pass per direction? Can we do it without
 /// generics? Probably only if we store the results in the analysis types
 /// themselves.
-pub struct DataflowRunner<'mir, 'ctx, A, D>
+pub struct DataflowRunner<'a, A, D>
 where
-    A: DataflowAnalysis<'mir, 'ctx, D>,
+    A: DataflowAnalysis<D>,
     D: Direction,
-    Successors<'mir, D>: SuccGetter<'mir>,
 {
     analysis: A,
-    results: AnalysisStates<A::Domain>,
-    gr: &'mir mir::Graph,
-    succs: Successors<'mir, D>,
-    ctx: &'mir Context<'ctx>,
-    /// The next set of blocks to be analyzed
-    working_set: HashSet<BlockId>,
+    states: AnalysisStates<A::Domain>,
+    gr: &'a mir::Graph,
+    preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
+    ctx: &'a Context<'a>,
+    /// The next set of blocks to be analyzed, together with their new starting
+    /// states
+    working_set: HashMap<BlockId, A::Domain>,
 }
 
-impl<'mir, 'ctx, A, D> DataflowRunner<'mir, 'ctx, A, D>
+impl<'a, A, D> DataflowRunner<'a, A, D>
 where
-    A: DataflowAnalysis<'mir, 'ctx, D>,
+    A: DataflowAnalysis<D>,
     D: Direction,
-    Self: Propagate<'mir, 'ctx, A, D>,
-    Successors<'mir, D>: SuccGetter<'mir>,
+    Self: Propagate<'a, A, D>,
 {
-    pub fn new(analysis: A, gr: &'mir Graph, ctx: &'mir Context<'ctx>) -> Self {
-        let succs = Successors::new(gr.get_preds());
+    pub fn new(analysis: A, gr: &'a Graph, ctx: &'a Context<'a>) -> Self {
+        let preds = gr.get_preds();
         let bot = A::Domain::bottom(gr, ctx);
         // FIXME this is doing a lot of extra work to fill in these "default"
         // values. Maybe we should use either a `Store<BlockId,
         // Option<A::Domain>>` or a `HashMap<BlockId, A::Domain>`, or somehow
         // guarantee that we walk the blocks in index-order.
         let entry_states = std::iter::repeat(bot.clone()).take(gr.len()).collect();
-        let exit_state = bot;
-        let results = AnalysisStates {
-            entry_states,
-            exit_state,
-        };
-        let mut working_set = HashSet::new();
-        working_set.insert(gr.entry_block);
+        let states = AnalysisStates { entry_states };
+        let mut working_set = HashMap::new();
+        working_set.insert(gr.entry_block, bot);
         Self {
             analysis,
-            results,
+            states,
             gr,
             ctx,
-            succs,
+            preds,
             working_set,
         }
     }
 
     pub fn run(mut self) -> AnalysisStates<A::Domain> {
         while !self.working_set.is_empty() {
-            let working_set: Vec<_> = self.working_set.drain().collect();
-            for block in working_set {
-                self.run_inner(block);
+            // Probably do need to reallocate, because the working set will be
+            // filled up inside this loop
+            let mut working_set: Vec<_> = self.working_set.drain().collect();
+            for (blk, state) in working_set.drain(0..) {
+                self.states.entry_states[blk] = state;
+                self.run_inner(blk);
             }
         }
-        self.results
+        self.states
     }
 
     /// Update the state associated with a single block. We'll take the previous
@@ -199,63 +158,71 @@ where
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
     fn run_inner(&mut self, blk_id: BlockId) {
-        let mut state = self.results.entry_states[blk_id].clone();
+        let mut state = self.states.entry_states[blk_id].clone();
         let block = &self.gr[blk_id];
         self.propagate(&mut state, &block);
 
-        // Compute the successor blocks and do any extra block-kind-dependent work.
-        if let BlockKind::Ret = block.kind {
-            self.results.exit_state = self.results.exit_state.join(&state);
-        }
-        let succs = self.succs.successors(blk_id, block);
+        // NOTE: yes, this allocation is unnecessary. No, don't try to get rid of it
+        // right now. Proving safety to thecompiler is not worth it: it turns
+        // into a generics mess.
+        let succs = self.successors(blk_id, block).to_owned();
 
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
         for succ in succs {
-            let prev_succ_state = &mut self.results.entry_states[*succ];
+            let prev_succ_state = &self.states.entry_states[succ];
             let succ_state = prev_succ_state.join(&state);
             if &succ_state != prev_succ_state {
-                *prev_succ_state = succ_state;
-                self.working_set.insert(*succ);
+                self.working_set.insert(succ, succ_state);
             }
         }
     }
 }
 
-pub trait Propagate<'m, 'c, A, D>
+pub trait Propagate<'a, A, D>
 where
-    A: DataflowAnalysis<'m, 'c, D>,
+    A: DataflowAnalysis<D>,
     D: Direction,
 {
+    fn successors<'b>(&'b self, blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId];
+
     fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock);
 }
 
-impl<'m, 'c, A> Propagate<'m, 'c, A, Forward> for DataflowRunner<'m, 'c, A, Forward>
+impl<'a, A> Propagate<'a, A, Forward> for DataflowRunner<'a, A, Forward>
 where
-    A: DataflowAnalysis<'m, 'c, Forward>,
+    A: DataflowAnalysis<Forward>,
 {
+    fn successors<'b>(&'b self, _blk_id: BlockId, block: &'b BasicBlock) -> &'b [BlockId] {
+        block.successors()
+    }
+
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
     fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
         for stmt in block.stmts.iter() {
-            self.analysis.trans_stmt(state, stmt, &block.data);
+            self.analysis.trans_stmt(state, stmt);
         }
-        self.analysis.trans_block(state, &block.kind, &block.data);
+        self.analysis.trans_block(state, &block.kind);
     }
 }
 
-impl<'m, 'c, A> Propagate<'m, 'c, A, Backward> for DataflowRunner<'m, 'c, A, Backward>
+impl<'a, A> Propagate<'a, A, Backward> for DataflowRunner<'a, A, Backward>
 where
-    A: DataflowAnalysis<'m, 'c, Backward>,
+    A: DataflowAnalysis<Backward>,
 {
+    fn successors<'b>(&'b self, blk_id: BlockId, _block: &BasicBlock) -> &[BlockId] {
+        &self.preds[blk_id]
+    }
+
     /// Apply the transfer function of a block, which is just the composition of
     /// the transfer functions of its statements. Begin with the state-on-entry,
     /// set the result value to this state, and mutate the state through the block.
     fn propagate(&mut self, state: &mut A::Domain, block: &BasicBlock) {
-        self.analysis.trans_block(state, &block.kind, &block.data);
+        self.analysis.trans_block(state, &block.kind);
         for stmt in block.stmts.iter().rev() {
-            self.analysis.trans_stmt(state, stmt, &block.data);
+            self.analysis.trans_stmt(state, stmt);
         }
     }
 }

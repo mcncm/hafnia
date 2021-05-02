@@ -77,7 +77,7 @@ pub struct GraphPosition {
     stmt: usize,
 }
 
-type Predecessors = Store<BlockId, Vec<BlockId>>;
+pub type Predecessors = Store<BlockId, Vec<BlockId>>;
 
 /// A lazily-computed CFG predecessor graph. Like many other parts of the Mir,
 /// this is basically the same as the data structure used by `rustc`. The
@@ -92,7 +92,7 @@ type Predecessors = Store<BlockId, Vec<BlockId>>;
 /// and should be (slightly) faster.
 struct PredGraph {
     /// The current predecessors graph.
-    preds: RefCell<Store<BlockId, Vec<BlockId>>>,
+    preds: RefCell<Predecessors>,
     /// Has the current graph been invalidated?
     invalid: RefCell<bool>,
 }
@@ -218,6 +218,11 @@ impl Graph {
         self.locals.type_of(place, ctx)
     }
 
+    // NOTE: See NLL RFC
+    pub fn supporting_prefixes(&self, _place: &Place, _ctx: &Context) -> Vec<Place> {
+        todo!()
+    }
+
     /// The local corresponding to the routine's return value
     pub fn return_site(&self) -> LocalId {
         LocalId::default()
@@ -287,9 +292,6 @@ pub struct BasicBlock {
     /// The tail of the basic block, which may be of multiple kinds: a switch, a
     /// function call, and so on
     pub kind: BlockKind,
-    /// Satellite data associated with this block, such as helpful precomputed
-    /// facts about its position in the graph
-    pub data: BlockData,
 }
 
 impl BasicBlock {
@@ -297,7 +299,6 @@ impl BasicBlock {
         Self {
             stmts: vec![],
             kind: BlockKind::Ret,
-            data: BlockData::default(),
         }
     }
 
@@ -305,26 +306,12 @@ impl BasicBlock {
         Self {
             stmts: vec![],
             kind: BlockKind::Goto(block),
-            data: BlockData::default(),
         }
     }
 
     pub fn successors(&self) -> &[BlockId] {
         self.kind.successors()
     }
-}
-
-/// Satellite data associated with a basic block
-#[derive(Debug, Clone, Default)]
-pub struct BlockData {
-    /// This extra datum contains the nearest enclosing branch, which may or may
-    /// not be linear. It may not be strictly necessary to collect this data
-    /// during graph building and maintain it throughout the lifecycle of the
-    /// mir, but it will otherwise be computed during code generation and
-    /// possibly multiple analyses.
-    pub sup_branch: Option<BlockId>,
-    /// The nearest enclosing *linear* branch. This is used for some analyses.
-    pub sup_lin_branch: Option<BlockId>,
 }
 
 /// This specifies where the block points to next: either it
@@ -402,11 +389,21 @@ impl Place {
         self.path.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.path.len() + 1
+    }
+
     /// Unlike in Rust, `Deref` projections don't actually refer to *different*
     /// memory locations, so it will often be useful to iterate over *just* the
     /// field projections, which represent actual memory offsets.
     pub fn iter_fields(&self) -> impl Iterator<Item = &usize> {
         self.path.iter().filter_map(|elem| elem.field_of())
+    }
+
+    pub fn is_prefix(&self, other: &Place) -> bool {
+        self.len() <= other.len()
+            && self.root == other.root
+            && self.path.iter().zip(other.path.iter()).all(|(l, r)| l == r)
     }
 }
 
@@ -417,6 +414,11 @@ impl From<LocalId> for Place {
             path: Vec::new(),
         }
     }
+}
+
+pub struct PlaceSlice<'p> {
+    root: &'p LocalId,
+    path: &'p [Proj],
 }
 
 /// A path element of a `Place`. Following `rustc`'s example, this can be either

@@ -11,7 +11,7 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::mir::{BlockData, BlockId, Graph, GraphLoc};
+use crate::mir::{BlockId, Graph, GraphLoc};
 use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};

@@ -12,7 +12,7 @@ use super::common::{Backward, DataflowAnalysis, Lattice, SummaryAnalysis};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,
-    mir::{self, BlockData, BlockId, BlockKind, GraphLoc, RvalueKind},
+    mir::{self, BlockId, BlockKind, GraphLoc, RvalueKind},
     source::Span,
     store::Store,
 };
