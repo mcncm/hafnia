@@ -7,6 +7,7 @@ use crate::store::Store;
 use super::dataflow::*;
 use bitvec::prelude::*;
 
+/// Graph algorithms
 mod algorithm;
 pub mod dominators;
 

@@ -7,6 +7,7 @@
 //! retrieve them. The second is `Interner<V, Idx>`, which is a wrapper around a
 //! `HashMap<V, Idx>`.
 
+use bitvec::prelude::*;
 use std::marker::PhantomData;
 use std::{borrow::Borrow, hash::Hash, rc::Rc};
 use std::{
@@ -41,6 +42,95 @@ impl<I: Index> Iterator for Counter<I> {
         let next = From::<u32>::from(self.inner);
         self.inner += 1;
         Some(next)
+    }
+}
+
+// NOTE: Not actually using this yet, but it should be useful.
+/// A set of indices backed by a `BitVec`
+#[derive(Clone, PartialEq, Eq)]
+pub struct BitSet<I: Index> {
+    data: BitVec,
+    _d: PhantomData<I>,
+}
+
+impl<I: Index> BitSet<I> {
+    pub fn full(n: usize) -> Self {
+        Self {
+            data: bitvec![1; n],
+            _d: PhantomData,
+        }
+    }
+
+    pub fn empty(n: usize) -> Self {
+        Self {
+            data: bitvec![0; n],
+            _d: PhantomData,
+        }
+    }
+
+    pub fn contains(&self, idx: &I) -> bool {
+        let u: u32 = (*idx).into();
+        let us = u as usize;
+        self.data[us]
+    }
+
+    pub fn iter(&self) -> impl '_ + Iterator<Item = I> {
+        self.data.iter().enumerate().filter_map(|(idx, bit)| {
+            if *bit {
+                Some(I::from(idx as u32))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn get_mut(&mut self, idx: I) -> Option<BitRef<'_, bitvec::ptr::Mut>> {
+        self.data.get_mut(idx.into() as usize)
+    }
+}
+
+impl<I: Index> From<BitVec> for BitSet<I> {
+    fn from(bits: BitVec) -> Self {
+        Self {
+            data: bits,
+            _d: PhantomData,
+        }
+    }
+}
+
+impl<I: Index> std::fmt::Debug for BitSet<I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut elems = self.iter();
+        f.write_str("{")?;
+        if let Some(head) = elems.next() {
+            write!(f, "{}", head.into())?;
+            for elem in elems {
+                write!(f, ", {}", elem.into())?;
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+impl<I: Index> std::ops::BitOr for BitSet<I> {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self {
+            data: self.data | rhs.data,
+            _d: PhantomData,
+        }
+    }
+}
+
+impl<I: Index> std::ops::BitAnd for BitSet<I> {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self {
+            data: self.data & rhs.data,
+            _d: PhantomData,
+        }
     }
 }
 

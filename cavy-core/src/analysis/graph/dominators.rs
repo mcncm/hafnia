@@ -1,21 +1,22 @@
 use std::marker::PhantomData;
 
-use crate::{context::Context, mir::*};
+use crate::{context::Context, mir::*, store::BitSet};
 
 use super::*;
 
-pub type Dominators = BitVec;
+#[derive(Clone, PartialEq, Eq)]
+pub struct Dominators(BitSet<BlockId>);
 
 impl Lattice for Dominators {
     /// This is really "top".
     fn bottom(gr: &Graph, _ctx: &Context) -> Self {
         let blocks = gr.len();
-        bitvec![1; blocks]
+        Self(BitSet::full(blocks))
     }
 
     /// Intersect. This is really a "meet," not what you would call a join.
     fn join(self, other: Self) -> Self {
-        self & other
+        Dominators(self.0 & other.0)
     }
 }
 
@@ -41,7 +42,7 @@ impl<D: Direction> DataflowAnalysis<D, Blockwise> for DominatorAnalysis<D> {
     fn initial_state(&self, blk: BlockId) -> Self::Domain {
         let mut bits = bitvec![0; self.blocks];
         *bits.get_mut(u32::from(blk) as usize).unwrap() = true;
-        bits
+        Dominators(BitSet::from(bits))
     }
 
     fn join_predecessors<'a, I: Iterator<Item = (BlockId, &'a Self::Domain)>>(
@@ -53,7 +54,28 @@ impl<D: Direction> DataflowAnalysis<D, Blockwise> for DominatorAnalysis<D> {
         Self::Domain: 'a,
     {
         let mut bits = DataflowAnalysis::<D, Blockwise>::join_predecessors_inner(self, blk, preds);
-        *bits.get_mut(u32::from(blk) as usize).unwrap() = true;
+        *bits.0.get_mut(blk).unwrap() = true;
         bits
     }
+}
+
+// == Some dominator-related computations ==
+
+/// For each block, compute the blocks it's controlled by. Block B is
+/// "controlled" by block A if A dominates B and B does not postdominate A.
+pub fn controls(
+    dom: &Store<BlockId, Dominators>,
+    postdom: &Store<BlockId, Dominators>,
+) -> Store<BlockId, BitSet<BlockId>> {
+    let mut controls = Store::new();
+    for (blk, doms) in dom.idx_enumerate() {
+        let mut ctrls = BitSet::empty(dom.len());
+        for dom in doms.0.iter() {
+            if !postdom[dom].0.contains(&blk) {
+                *ctrls.get_mut(dom).unwrap() = true;
+            }
+        }
+        controls.insert(ctrls);
+    }
+    controls
 }

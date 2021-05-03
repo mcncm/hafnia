@@ -33,17 +33,16 @@ mod dataflow;
 // mod conditional;
 mod feedback;
 mod linearity;
+mod liveness;
 mod subconditional;
 mod unsafety;
 // mod wires;
 /// Graph properties
 mod graph;
 
-use dataflow::Forward;
-
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::dataflow::{Backward, DataflowAnalysis, DataflowRunner, SummaryRunner};
+use self::dataflow::{Backward, DataflowAnalysis, DataflowRunner, Forward, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
@@ -79,12 +78,15 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         let (pre, post) = graph::traversals(gr);
 
         let dom = graph::DominatorAnalysis::<Forward>::new(gr);
-        let _dominators = DataflowRunner::new(dom, gr, &post, ctx).run();
+        let dominators = DataflowRunner::new(dom, gr, &post, ctx).run();
 
         let postdom = graph::DominatorAnalysis::<Backward>::new(gr);
-        let _post_dominators = DataflowRunner::new(postdom, gr, &pre, ctx).run();
+        let post_dominators = DataflowRunner::new(postdom, gr, &pre, ctx).run();
+
+        let controls = graph::dominators::controls(&dominators, &post_dominators);
 
         // == Summary analyses ==
+
         let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);
         let mut subcond_ana = subconditional::SubCondAnalysis::new(&mut sub_cond_data, &());
         let mut unsafe_ana = unsafety::UnsafeAnalysis::new(&mir.graph_data, fn_id);
