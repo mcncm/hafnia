@@ -7,16 +7,24 @@ use std::{
 
 use mir::Stmt;
 
+use super::graph::{Postorder, Preorder};
+
 use crate::{ast::FnId, context::Context, mir::*};
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
 
 pub trait Direction {
+    /// The _reverse_ of the traversal order for an analysis in this direction,
+    /// because we will be using our ordered list of blocks as a stack.
+    type RevOrder: Clone + Into<Vec<BlockId>>;
+
     fn init_worklist(gr: &Graph) -> Vec<BlockId>;
 }
 
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
 impl Direction for Forward {
+    type RevOrder = Postorder<BlockId>;
+
     fn init_worklist(gr: &Graph) -> Vec<BlockId> {
         // This probably isn't RPO. It's just *some* order, and the entry block
         // should be at the top of the stack. If I have time later, I'll go back
@@ -33,6 +41,8 @@ impl Direction for Forward {
 /// Marker type for backward-flowing dataflow analyses
 pub struct Backward;
 impl Direction for Backward {
+    type RevOrder = Preorder<BlockId>;
+
     fn init_worklist(gr: &Graph) -> Vec<BlockId> {
         // Again, basically just *some* order. The exit block should be last.
         let blks: Vec<BlockId> = gr.idx_enumerate().map(|(blk, _)| blk).collect();
@@ -223,10 +233,14 @@ where
     G: Granularity,
     Self: Propagate<'a, A, D, G>,
 {
-    pub fn new(analysis: A, gr: &'a Graph, ctx: &'a Context<'a>) -> Self {
+    // NOTE: This is starting to have a lot of arguments. I wonder if there's
+    // something better we could do here. Certainly all of them will have the
+    // graph and context in common; that's a start. But pretty code is not my
+    // goal at this second. This will do for now.
+    pub fn new(analysis: A, gr: &'a Graph, order: &D::RevOrder, ctx: &'a Context<'a>) -> Self {
         let preds = gr.get_preds();
         let worklist = UniqueStack {
-            stack: D::init_worklist(gr),
+            stack: order.clone().into(),
         };
         Self {
             analysis,

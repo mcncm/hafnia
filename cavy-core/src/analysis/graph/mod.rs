@@ -7,8 +7,10 @@ use crate::store::Store;
 use super::dataflow::*;
 use bitvec::prelude::*;
 
+mod algorithm;
 pub mod dominators;
 
+pub use algorithm::{traversals, Postorder, Preorder};
 pub use dominators::DominatorAnalysis;
 
 // We're going to interpret a `BitVec` as a set, whose elements are its nonzero

@@ -43,7 +43,7 @@ use dataflow::Forward;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::dataflow::{DataflowAnalysis, DataflowRunner, SummaryRunner};
+use self::dataflow::{Backward, DataflowAnalysis, DataflowRunner, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
@@ -75,8 +75,14 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         //     }
         // }
 
-        let dom_analysis = graph::DominatorAnalysis::<Forward>::new(gr);
-        let _dominators = DataflowRunner::new(dom_analysis, gr, ctx).run();
+        // Compute the pre- and post-order traversals of the graph.
+        let (pre, post) = graph::traversals(gr);
+
+        let dom = graph::DominatorAnalysis::<Forward>::new(gr);
+        let _dominators = DataflowRunner::new(dom, gr, &post, ctx).run();
+
+        let postdom = graph::DominatorAnalysis::<Backward>::new(gr);
+        let _post_dominators = DataflowRunner::new(postdom, gr, &pre, ctx).run();
 
         // == Summary analyses ==
         let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);
