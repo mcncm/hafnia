@@ -139,6 +139,8 @@ impl PredGraph {
     }
 }
 
+/// A location within the control flow graph
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GraphLoc {
     pub blk: BlockId,
     pub stmt: usize,
@@ -216,11 +218,6 @@ impl Graph {
 
     pub fn type_of(&self, place: &Place, ctx: &Context) -> TyId {
         self.locals.type_of(place, ctx)
-    }
-
-    // NOTE: See NLL RFC
-    pub fn supporting_prefixes(&self, _place: &Place, _ctx: &Context) -> Vec<Place> {
-        todo!()
     }
 
     /// The local corresponding to the routine's return value

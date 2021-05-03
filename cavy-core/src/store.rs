@@ -87,6 +87,10 @@ impl<I: Index> BitSet<I> {
     pub fn get_mut(&mut self, idx: I) -> Option<BitRef<'_, bitvec::ptr::Mut>> {
         self.data.get_mut(idx.into() as usize)
     }
+
+    pub fn set(&mut self, idx: I, val: bool) {
+        *self.get_mut(idx).unwrap() = val;
+    }
 }
 
 impl<I: Index> From<BitVec> for BitSet<I> {
