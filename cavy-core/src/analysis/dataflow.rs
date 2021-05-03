@@ -7,10 +7,52 @@ use std::{
 
 use mir::Stmt;
 
-use super::graph::{Postorder, Preorder};
+use super::graph::{self, Postorder, Preorder};
 
 use crate::{ast::FnId, context::Context, mir::*};
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
+
+/// The data we need available to perform dataflow analyses. This is just here
+/// to package the `DataflowRunner` arguments. It's also a poor data structure
+/// name.
+pub struct DataflowCtx<'a> {
+    pub ctx: &'a Context<'a>,
+    /// The graph itself
+    pub gr: &'a Graph,
+    /// Some precomputed graph properties
+    postorder: Postorder<BlockId>,
+    preorder: Preorder<BlockId>,
+}
+
+impl<'a> DataflowCtx<'a> {
+    pub fn new(gr: &'a Graph, ctx: &'a Context) -> Self {
+        let (pre, post) = graph::traversals(gr);
+        Self {
+            ctx,
+            gr,
+            postorder: post,
+            preorder: pre,
+        }
+    }
+}
+
+/// Also quite a poor name: this is something that's able to supply a postorder
+/// or preorder.
+pub trait OrderProvider<D: Direction> {
+    fn get_order(&self) -> &D::RevOrder;
+}
+
+impl<'a> OrderProvider<Forward> for DataflowCtx<'a> {
+    fn get_order(&self) -> &Postorder<BlockId> {
+        &self.postorder
+    }
+}
+
+impl<'a> OrderProvider<Backward> for DataflowCtx<'a> {
+    fn get_order(&self) -> &Preorder<BlockId> {
+        &self.preorder
+    }
+}
 
 pub trait Direction {
     /// The _reverse_ of the traversal order for an analysis in this direction,
@@ -232,15 +274,19 @@ where
     D: Direction,
     G: Granularity,
     Self: Propagate<'a, A, D, G>,
+    DataflowCtx<'a>: OrderProvider<D>,
 {
     // NOTE: This is starting to have a lot of arguments. I wonder if there's
     // something better we could do here. Certainly all of them will have the
     // graph and context in common; that's a start. But pretty code is not my
     // goal at this second. This will do for now.
-    pub fn new(analysis: A, gr: &'a Graph, order: &D::RevOrder, ctx: &'a Context<'a>) -> Self {
+    pub fn new(analysis: A, context: &DataflowCtx<'a>) -> Self {
+        let gr = context.gr;
+        let ctx = context.ctx;
         let preds = gr.get_preds();
+        let rev_order = OrderProvider::<D>::get_order(context);
         let worklist = UniqueStack {
-            stack: order.clone().into(),
+            stack: rev_order.clone().into(),
         };
         Self {
             analysis,

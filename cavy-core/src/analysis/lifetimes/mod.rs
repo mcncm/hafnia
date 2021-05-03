@@ -12,6 +12,8 @@ use std::collections::BTreeSet;
 use crate::store_type;
 use crate::{context::Context, mir::*};
 
+use super::dataflow::{DataflowCtx, DataflowRunner};
+
 mod liveness;
 
 pub struct LoanData();
@@ -19,7 +21,7 @@ pub struct LoanData();
 // A map from lightweight "lifetime" variables to the regions they represent
 store_type! { LifetimeStore : Lt -> Lifetime }
 
-struct Lifetime {
+pub struct Lifetime {
     locs: BTreeSet<GraphLoc>,
 }
 
@@ -36,10 +38,9 @@ struct BorrowChecker {
     constraints: Vec<Constraint>,
 }
 
-/// Precomputed data about the graph
-struct GraphData<'a> {
-    gr: &'a Graph,
-    rpo: Vec<BlockId>,
+pub fn borrow_check(context: DataflowCtx) {
+    let liveness_ana = liveness::LivenessAnalysis::new(context.gr);
+    let liveness = DataflowRunner::new(liveness_ana, &context);
 }
 
 impl Place {

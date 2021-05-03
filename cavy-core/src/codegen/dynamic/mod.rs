@@ -150,8 +150,11 @@ impl<'a> Interpreter<'a> {
         self.st.env.insert(ret, st.env.bits_at(&ret_local.into()));
     }
 
-    fn pop_stack(&mut self) {
-        todo!();
+    fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {
+        let cond_bits = self.st.env.bits_at(cond);
+        // No `match` statements yet; only `if`s.
+        debug_assert!(cond_bits.qbits.len() + cond_bits.cbits.len() == 1);
+        todo!()
     }
 
     pub fn run(&mut self) {
@@ -213,7 +216,10 @@ impl<'a> Interpreter<'a> {
         // TODO: procedure calls: figure out calling convention
         match kind {
             BlockKind::Goto(_) => {}
-            BlockKind::Switch { .. } => {}
+            BlockKind::Switch { cond, blks } => {
+                self.switch(cond, blks);
+                return;
+            }
             BlockKind::Call(call) => {
                 self.funcall(call);
             }
