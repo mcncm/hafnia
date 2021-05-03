@@ -76,7 +76,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         // }
 
         let dom_analysis = graph::DominatorAnalysis::<Forward>::new(gr);
-        let dominators = DataflowRunner::new(dom_analysis, gr, ctx).run();
+        let _dominators = DataflowRunner::new(dom_analysis, gr, ctx).run();
 
         // == Summary analyses ==
         let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);

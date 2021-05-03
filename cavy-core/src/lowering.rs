@@ -409,10 +409,16 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     // NOTE: This is the only call site of `Graph::insert_block`, and it's only
     // needed to carry around this satellite data you don't want. You can get rid of both.
-    /// Create a new block, inheriting the satellite data of the block currently
-    /// under the cursor.
+    /// Create a new block with the same tail data as the cursor.
     fn new_block(&mut self) -> BlockId {
-        let block = BasicBlock::new();
+        let mut block = BasicBlock::new();
+        block.kind = match self.gr[self.cursor].kind {
+            BlockKind::Goto(blk) => BlockKind::Goto(blk),
+            BlockKind::Ret => BlockKind::Ret,
+            // this is just an assertion about where this method will be called
+            // from.
+            _ => unreachable!(),
+        };
         self.gr.insert_block(block)
     }
 
@@ -624,13 +630,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // We can't *ignore* `place`, since it could be used if e.g. an assignment
         // without a terminator appears at the end of a block.
         let span = lhs.span.join(&rhs.span).unwrap();
-        let stmt = mir::StmtKind::Assn(
-            place,
-            Rvalue {
-                span: Span::default(), // FIXME always wrong
-                data: RvalueKind::Use(Operand::Const(Value::Unit)),
-            },
-        );
+        let stmt = mir::StmtKind::Assn(place, Rvalue::unit());
         self.push_stmt(span, stmt);
 
         let lhs = match &lhs.data {
@@ -895,21 +895,30 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         )?;
         let cond_place = self.gr.auto_place(cond_ty);
         let cond = self.lower_into(&cond_place, cond);
+
+        // The tail should be a new block that's going wherever the current
+        // block was going.
         let tail_block = self.new_block();
 
-        // Falsy branch
-        let fls = match fls {
-            Some(ind) => self.with_goto(tail_block, |this| {
-                this.lower_into_block(place.clone(), ind)?;
-                Ok(this.cursor)
-            }),
-            None => Ok(tail_block),
-        };
+        // Falsey branch
+        let fls = self.with_goto(tail_block, |this| {
+            // Capture a pointer to the *first* block on the branch, before
+            // any further lowering.
+            let branch = this.cursor;
+            if let Some(fls) = fls {
+                this.lower_into_block(place.clone(), fls)?;
+            } else {
+                // We still have to put something in that `Place`!.
+                this.assn_stmt(place.clone(), Rvalue::unit());
+            }
+            Ok(branch)
+        });
 
         // Truthy branch
         let tru = self.with_goto(tail_block, |this| {
+            let branch = this.cursor;
             this.lower_into_block(place, tru)?;
-            Ok(this.cursor)
+            Ok(branch)
         });
 
         // Propagate errors from branches

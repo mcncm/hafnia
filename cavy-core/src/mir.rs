@@ -125,7 +125,7 @@ impl PredGraph {
 
         for (idx, block) in blocks.idx_enumerate() {
             for succ in block.successors() {
-                preds[idx].push(*succ);
+                preds[*succ].push(idx);
             }
         }
         self.invalid.replace(false);
@@ -489,6 +489,15 @@ pub enum IoStmtKind {
 pub struct Rvalue {
     pub data: RvalueKind,
     pub span: Span,
+}
+
+impl Rvalue {
+    pub fn unit() -> Self {
+        Rvalue {
+            span: Span::default(), // FIXME always wrong
+            data: RvalueKind::Use(Operand::Const(Value::Unit)),
+        }
+    }
 }
 
 #[derive(Debug)]

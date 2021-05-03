@@ -15,7 +15,7 @@ pub use dominators::DominatorAnalysis;
 // bits. For internal debugging use only.
 impl std::fmt::Display for Store<BlockId, BitVec> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("per-block sets:")?;
+        f.write_str("per-block sets:\n")?;
         for (blk, bitv) in self.idx_enumerate() {
             write!(f, "\t{} [", blk)?;
             let mut elems =
