@@ -7,10 +7,10 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::common::{DataflowAnalysis, Forward, Lattice, Statementwise};
+use super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise};
 use crate::{
     ast::UnOpKind,
-    mir::{self, BlockKind, LocalId, Operand, Place, RvalueKind},
+    mir::{self, BlockId, BlockKind, GraphLoc, LocalId, Operand, Place, RvalueKind},
     source::Span,
 };
 
@@ -21,7 +21,7 @@ use crate::{
 /// anythin in `lin` is also in `delin`.
 ///
 /// Could be more efficiently packed into a bit vector.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct MeasState {
     /// This map points to the site a value's ancestor was measured
     pub delin: HashMap<LocalId, Span>,
@@ -30,21 +30,14 @@ pub struct MeasState {
 }
 
 impl Lattice for MeasState {
-    fn join(&self, other: &Self) -> Self {
-        let mut delin = self.delin.clone();
-        delin.extend(&other.delin);
-
-        let mut lin = self.lin.clone();
-        lin.extend(&other.lin);
-
-        Self { delin, lin }
+    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
+        Self::default()
     }
 
-    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
-        Self {
-            delin: HashMap::new(),
-            lin: HashMap::new(),
-        }
+    fn join(self, other: Self) -> Self {
+        let delin = self.delin.join(other.delin);
+        let lin = self.lin.join(other.lin);
+        Self { delin, lin }
     }
 }
 
@@ -69,7 +62,7 @@ pub struct FeedbackAnalysis {}
 impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     type Domain = MeasState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt) {
+    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphLoc) {
         use RvalueKind::*;
         let (place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
@@ -105,5 +98,9 @@ impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     }
 
     // TODO
-    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {}
+    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _loc: BlockId) {}
+
+    fn initial_state(&self, _blk: BlockId) -> Self::Domain {
+        Self::Domain::default()
+    }
 }

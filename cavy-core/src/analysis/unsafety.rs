@@ -9,7 +9,7 @@ use crate::{
     store::Store,
 };
 
-use super::common::SummaryAnalysis;
+use super::dataflow::SummaryAnalysis;
 
 /// The possible origins of unsafety
 enum UnsafetyKind {

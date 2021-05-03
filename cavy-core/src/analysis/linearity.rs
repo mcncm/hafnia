@@ -1,12 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use mir::Proj;
-
-use super::common::{DataflowAnalysis, Forward, Lattice, Statementwise};
-use crate::{
-    mir::{self, BlockKind, LocalId, Operand, Place, RvalueKind},
-    source::Span,
-};
+use super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise};
+use crate::{mir::*, source::Span};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MoveKind {
@@ -77,15 +72,15 @@ impl MoveTree {
     /// `std::collections::HashMap`.
     ///
     /// Invariant: `self` and `other` refer to the same path
-    fn extend(&mut self, other: &MoveTree) {
-        if let (None, m @ Some(_)) = (&mut self.mov, &other.mov) {
-            self.mov = m.clone()
+    fn extend(&mut self, other: MoveTree) {
+        if let (None, m @ Some(_)) = (&mut self.mov, other.mov) {
+            self.mov = m
         };
         // Before we finish the merge, there must be at least as many fields in
         // `self` as in `other`.
         self.ensure_fields(other.fields.len());
         // Finally, recurse on the subtrees
-        for (fl, fr) in self.fields.iter_mut().zip(other.fields.iter()) {
+        for (fl, fr) in self.fields.iter_mut().zip(other.fields.into_iter()) {
             fl.extend(fr);
         }
     }
@@ -114,7 +109,7 @@ struct DoubleMove {
 }
 
 /// Counts how many times a local has been moved.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct MoveState {
     /// This map points to the location of the first move of each local that is
     /// not currently live.
@@ -174,50 +169,43 @@ impl MoveState {
 }
 
 impl Lattice for MoveState {
-    fn join(&self, other: &Self) -> Self {
+    fn bottom(_: &Graph, _: &crate::context::Context) -> Self {
+        Self {
+            moves: HashMap::new(),
+            double_moves: HashMap::new(),
+        }
+    }
+
+    fn join(mut self, other: Self) -> Self {
         // We choose to extend a copy of the hashmap, overwriting `Span`s that
         // might be in there. That's ok: if we're merging from two paths, we
         // only care if at least one of them has moved something.
         //
         // Note as above, all the clones might be expensive.
-        let mut moved = self.moves.clone();
-        // Extend the move-sites maps by merging the trees
-        for (&local, other) in &other.moves {
-            match moved.entry(local) {
+        for (local, other) in other.moves {
+            match self.moves.entry(local) {
                 Entry::Occupied(mut e) => e.get_mut().extend(other),
                 Entry::Vacant(e) => {
                     e.insert(other.clone());
                 }
             }
         }
-
         // TODO it's an important condition to check that the `double_moves`
         // join operation is consistent with the `moves` join operation. They
         // might not be!
-        let mut double_moves = self.double_moves.clone();
+
         // We can't just use the `extend` API because `Place` is not `Copy`. We
         // could of course derive it, but I want to be careful about not copying
         // too many of them.
         for (place, moves) in &other.double_moves {
             // FIXME Ach, two lookups. This can be done with `raw_entry_mut`,
             // which is an unstable library feature.
-            if double_moves.get(place).is_none() {
+            if self.double_moves.get(place).is_none() {
                 println!("double move");
-                double_moves.insert(place.clone(), moves.clone());
+                self.double_moves.insert(place.clone(), moves.clone());
             }
         }
-
-        Self {
-            moves: moved,
-            double_moves,
-        }
-    }
-
-    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
-        Self {
-            moves: HashMap::new(),
-            double_moves: HashMap::new(),
-        }
+        self
     }
 }
 
@@ -230,11 +218,11 @@ impl LinearityAnalysis {}
 impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
     type Domain = MoveState;
 
-    fn trans_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt) {
+    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphLoc) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
         let (place, rhs) = match &stmt.kind {
-            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
+            StmtKind::Assn(place, rhs) => (place.clone(), rhs),
             _ => return,
         };
 
@@ -255,7 +243,11 @@ impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
         state.move_into(&place);
     }
 
-    fn trans_block(&self, _state: &mut Self::Domain, _block: &BlockKind) {
+    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _loc: BlockId) {
         // TODO
+    }
+
+    fn initial_state(&self, _blk: BlockId) -> Self::Domain {
+        Self::Domain::default()
     }
 }

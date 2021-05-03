@@ -1,21 +1,45 @@
-use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::{cell::Ref, collections::hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::FromIterator,
+};
 
 use mir::Stmt;
 
 use crate::{ast::FnId, context::Context, mir::*};
 use crate::{cavy_errors::ErrorBuf, mir, store::Store};
 
-pub trait Direction {}
+pub trait Direction {
+    fn init_worklist(gr: &Graph) -> Vec<BlockId>;
+}
 
 /// Marker type for forward-flowing dataflow analyses
 pub struct Forward;
-impl Direction for Forward {}
+impl Direction for Forward {
+    fn init_worklist(gr: &Graph) -> Vec<BlockId> {
+        // This probably isn't RPO. It's just *some* order, and the entry block
+        // should be at the top of the stack. If I have time later, I'll go back
+        // and compute the orders correctly and all that.
+        //
+        // This is also inefficient, does an extra allocation, etc.
+        let mut blks: Vec<BlockId> = gr.idx_enumerate().map(|(blk, _)| blk).collect();
+        blks.reverse();
+        debug_assert_eq!(blks.last().unwrap(), &gr.entry_block);
+        blks
+    }
+}
 
 /// Marker type for backward-flowing dataflow analyses
 pub struct Backward;
-impl Direction for Backward {}
+impl Direction for Backward {
+    fn init_worklist(gr: &Graph) -> Vec<BlockId> {
+        // Again, basically just *some* order. The exit block should be last.
+        let blks: Vec<BlockId> = gr.idx_enumerate().map(|(blk, _)| blk).collect();
+        debug_assert_eq!(blks.last().unwrap(), &gr.exit_block);
+        blks
+    }
+}
 
 /// Does an analysis measure state for blocks alone, or at the
 /// statement-by-statement level?
@@ -29,7 +53,10 @@ impl Granularity for Statementwise {}
 
 /// The main trait for analysis data, representing a join-semilattice.
 pub trait Lattice: Clone + PartialEq + Eq {
-    fn join(&self, other: &Self) -> Self;
+    /// Some of these will really be "meets". Instead of actually distinguishing
+    /// and abstracting over lattice orientation, I'll just reimplement a few
+    /// things a bunch of times. Fine for now.
+    fn join(self, other: Self) -> Self;
 
     fn bottom(gr: &Graph, ctx: &Context) -> Self;
 }
@@ -39,12 +66,13 @@ impl<T> Lattice for HashSet<T>
 where
     T: Clone + Eq + Hash,
 {
-    fn join(&self, other: &Self) -> Self {
-        self.union(other).cloned().collect()
-    }
-
     fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
         Self::new()
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.extend(other.into_iter());
+        self
     }
 }
 
@@ -53,14 +81,13 @@ where
     K: Clone + Eq + Hash,
     V: Clone + Eq,
 {
-    fn join(&self, other: &Self) -> Self {
-        let mut new = self.clone();
-        new.extend(other.clone());
-        new
-    }
-
     fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
         Self::new()
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.extend(other.into_iter().map(|(k, v)| (k, v)));
+        self
     }
 }
 
@@ -73,10 +100,51 @@ where
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement. Empty default implementation
-    fn trans_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt) {}
+    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _loc: GraphLoc) {}
 
     /// Apply the transfer function for the end of a basic block
-    fn trans_block(&self, state: &mut Self::Domain, block: &BlockKind);
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, loc: BlockId);
+
+    /// Compute state for the entry block
+    fn initial_state(&self, blk: BlockId) -> Self::Domain;
+
+    /// Transform predecessor blocks for joining
+    fn propagate_predecessor(&self, _blk: BlockId, pred: &Self::Domain) -> Self::Domain {
+        pred.clone()
+    }
+
+    /// A default inner implementation for `join_predecessors`. This is useful
+    /// because of analyses like dominators, where we'd like to take ({n} |
+    /// &_pred {dom(pred)}). This gives us maximum freedom to simply define
+    /// `join_predecessors` to simply use the default behavior, plus flipping a
+    /// single bit.
+    fn join_predecessors_inner<'a, I: Iterator<Item = (BlockId, &'a Self::Domain)>>(
+        &self,
+        blk: BlockId,
+        preds: I,
+    ) -> Self::Domain
+    where
+        Self::Domain: 'a,
+    {
+        let mut preds = preds.map(|(blk, pred)| self.propagate_predecessor(blk, pred));
+        if let Some(head) = preds.next() {
+            preds.fold(head, |acc, pred| acc.join(pred))
+        } else {
+            self.initial_state(blk)
+        }
+    }
+
+    /// Construct the state-on-entry to a block from the states of its predecessors
+    fn join_predecessors<'a, I: Iterator<Item = (BlockId, &'a Self::Domain)>>(
+        &self,
+        blk: BlockId,
+        preds: I,
+    ) -> Self::Domain
+    where
+        Self::Domain: 'a,
+    {
+        self.join_predecessors_inner(blk, preds)
+    }
 }
 
 /// NOTE Improvements that could be made: this is a good example of where we
@@ -100,10 +168,35 @@ type BlockStates<L> = Store<mir::BlockId, L>;
 type StmtStates<L> = Store<mir::BlockId, Vec<L>>;
 
 /// An execution environment for a dataflow analysis, using the Killdall method.
-///
-/// NOTE Can we do this with a *single* pass per direction? Can we do it without
-/// generics? Probably only if we store the results in the analysis types
-/// themselves.
+
+/// Ok, this is the data structure we'll use to back our worklist. The
+/// `BTreeMap::pop` API isn't stable yet, so we'll just use this. No idea if
+/// it's faster in practice (or not) to add a `HashSet` for uniqueness. One of
+/// those "asymptotically-faster-vs-in-practice-faster" questions.
+struct UniqueStack<T: PartialEq + Eq> {
+    stack: Vec<T>,
+}
+
+impl<T: PartialEq + Eq> UniqueStack<T> {
+    fn push(&mut self, elem: T) {
+        if !self.stack.contains(&elem) {
+            self.stack.push(elem);
+        }
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        self.stack.pop()
+    }
+}
+
+impl<T: PartialEq + Eq> FromIterator<T> for UniqueStack<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self {
+            stack: iter.into_iter().collect(),
+        }
+    }
+}
+
 pub struct DataflowRunner<'a, A, D, G>
 where
     A: DataflowAnalysis<D, G>,
@@ -120,7 +213,7 @@ where
     stmt_states: StmtStates<A::Domain>,
     /// The next set of blocks to be analyzed, together with their new starting
     /// states
-    working_set: Vec<BlockId>,
+    worklist: UniqueStack<BlockId>,
 }
 
 impl<'a, A, D, G> DataflowRunner<'a, A, D, G>
@@ -132,25 +225,23 @@ where
 {
     pub fn new(analysis: A, gr: &'a Graph, ctx: &'a Context<'a>) -> Self {
         let preds = gr.get_preds();
+        let worklist = UniqueStack {
+            stack: D::init_worklist(gr),
+        };
         Self {
             analysis,
-            block_states: BlockStates::new(),
-            stmt_states: StmtStates::new(),
+            block_states: Self::init_block_states(gr, ctx),
+            stmt_states: Self::init_stmt_states(gr, ctx),
             gr,
             ctx,
             preds,
-            working_set: vec![gr.entry_block],
+            worklist,
         }
     }
 
     pub fn run(mut self) -> BlockStates<A::Domain> {
-        while !self.working_set.is_empty() {
-            // Probably do need to reallocate, because the working set will be
-            // filled up inside this loop
-            let working_set: Vec<_> = self.working_set.drain(0..).collect();
-            for blk in working_set {
-                self.run_inner(blk);
-            }
+        while let Some(blk) = self.worklist.pop() {
+            self.run_inner(blk);
         }
         self.block_states
     }
@@ -161,7 +252,11 @@ where
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
     fn run_inner(&mut self, blk_id: BlockId) {
-        let mut state = self.block_states[blk_id].clone();
+        // First, get the starting state for this block from the exit states of
+        // its parents.
+        let preds = self.predecessors(blk_id);
+        let pred_states = preds.iter().map(|&pred| (pred, &self.block_states[pred]));
+        let mut state = self.analysis.join_predecessors(blk_id, pred_states);
         self.propagate(&mut state, blk_id);
 
         // NOTE: yes, this allocation is unnecessary. No, don't try to get rid of it
@@ -172,11 +267,7 @@ where
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
         for succ in succs {
-            let prev_succ_state = &self.block_states[succ];
-            let succ_state = prev_succ_state.join(&state);
-            if &succ_state != prev_succ_state {
-                self.working_set.push(succ);
-            }
+            self.worklist.push(succ);
         }
     }
 
@@ -203,6 +294,8 @@ where
 {
     fn successors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId];
 
+    fn predecessors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId];
+
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId);
 }
 
@@ -212,9 +305,13 @@ where
     G: Granularity,
     Self: Update<A, Forward, G>,
 {
-    fn successors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId] {
+    fn successors(&self, blk_id: BlockId) -> &[BlockId] {
         let block = &self.gr[blk_id];
         block.successors()
+    }
+
+    fn predecessors(&self, blk_id: BlockId) -> &[BlockId] {
+        &self.preds[blk_id]
     }
 
     /// Apply the transfer function of a block, which is just the composition of
@@ -223,10 +320,11 @@ where
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
         for (loc, stmt) in block.stmts.iter().enumerate() {
-            self.analysis.trans_stmt(state, stmt);
+            let gl = GraphLoc { blk, stmt: loc };
+            self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
         }
-        self.analysis.trans_block(state, &block.kind);
+        self.analysis.transfer_block(state, &block.kind, blk);
         self.update_block_state(blk, state);
     }
 }
@@ -237,8 +335,13 @@ where
     G: Granularity,
     Self: Update<A, Backward, G>,
 {
-    fn successors<'b>(&'b self, blk_id: BlockId) -> &[BlockId] {
+    fn successors(&self, blk_id: BlockId) -> &[BlockId] {
         &self.preds[blk_id]
+    }
+
+    fn predecessors(&self, blk_id: BlockId) -> &[BlockId] {
+        let block = &self.gr[blk_id];
+        block.successors()
     }
 
     /// Apply the transfer function of a block, which is just the composition of
@@ -246,10 +349,11 @@ where
     /// set the result value to this state, and mutate the state through the block.
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
-        self.analysis.trans_block(state, &block.kind);
+        self.analysis.transfer_block(state, &block.kind, blk);
         self.update_block_state(blk, state);
         for (loc, stmt) in block.stmts.iter().enumerate().rev() {
-            self.analysis.trans_stmt(state, stmt);
+            let gl = GraphLoc { blk, stmt: loc };
+            self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
         }
     }
@@ -305,11 +409,8 @@ where
             })
             .collect()
     }
-
-    fn update_stmt_state(&mut self, blk: BlockId, loc: usize, state: &A::Domain) {
-        self.stmt_states[blk][loc] = state.clone();
-    }
 }
+
 // == Summary analyses ==
 
 /// A simple analysis that makes only a single pass over all blocks, *regardless

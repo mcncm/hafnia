@@ -29,17 +29,21 @@
 //!   difficult if iteration is necessary.
 
 mod call_graph;
-mod common;
+mod dataflow;
 // mod conditional;
 mod feedback;
 mod linearity;
 mod subconditional;
 mod unsafety;
 // mod wires;
+/// Graph properties
+mod graph;
+
+use dataflow::Forward;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::common::{DataflowAnalysis, DataflowRunner, SummaryRunner};
+use self::dataflow::{DataflowAnalysis, DataflowRunner, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
@@ -70,6 +74,9 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         //         }
         //     }
         // }
+
+        let dom_analysis = graph::DominatorAnalysis::<Forward>::new(gr);
+        let dominators = DataflowRunner::new(dom_analysis, gr, ctx).run();
 
         // == Summary analyses ==
         let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);

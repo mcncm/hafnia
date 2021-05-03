@@ -82,9 +82,9 @@ macro_rules! index_type {
             }
         }
 
-        impl Into<u32> for $index {
-            fn into(self) -> u32 {
-                self.0
+        impl From<$index> for u32 {
+            fn from(idx: $index) -> u32 {
+                idx.0
             }
         }
     };

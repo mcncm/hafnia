@@ -16,7 +16,7 @@ use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};
 
-use super::common::SummaryAnalysis;
+use super::dataflow::SummaryAnalysis;
 
 // == Procedure-local analysis ==
 
