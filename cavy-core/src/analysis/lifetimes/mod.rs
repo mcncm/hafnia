@@ -16,7 +16,20 @@ use super::dataflow::{DataflowCtx, DataflowRunner};
 
 mod liveness;
 
-pub struct LoanData();
+/// Print some analysis results to the console for debugging
+macro_rules! ltdbg {
+    ($result:ident, $context:ident) => {
+        if $context.ctx.conf.debug {
+            let name: &'static str = stringify!($result);
+            let name = name.to_uppercase();
+            println!(
+                "{}:\n{}",
+                name,
+                crate::util::FmtWith::fmt_with(&$result, &$context)
+            );
+        }
+    };
+}
 
 // A map from lightweight "lifetime" variables to the regions they represent
 store_type! { LifetimeStore : Lt -> Lifetime }
@@ -40,13 +53,16 @@ struct BorrowChecker {
 
 pub fn borrow_check(context: DataflowCtx) {
     let liveness_ana = liveness::LivenessAnalysis::new(context.gr);
-    let liveness = DataflowRunner::new(liveness_ana, &context);
+    let liveness = DataflowRunner::new(liveness_ana, &context)
+        .run()
+        .stmt_states;
+    ltdbg!(liveness, context);
 }
 
 impl Place {
     /// The minimum path length for a subpath `Place` to be a supporting prefix
-    fn supporting_prefix_len(&self, ctx: &Context) -> usize {
-        let mut len = self.path.len();
+    fn supporting_prefix_len(&self, _ctx: &Context) -> usize {
+        let _len = self.path.len();
         for elem in self.path.iter().rev() {
             match elem {
                 Proj::Field(_) => {}

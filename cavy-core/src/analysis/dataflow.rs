@@ -199,20 +199,6 @@ where
     }
 }
 
-/// NOTE Improvements that could be made: this is a good example of where we
-/// could (potentially) benefit from using persistent data structures. Also,
-/// rustc doesn't enforce generic parameters in type aliases. That makes this
-/// alias a little less constraining than it really should be. I think it also
-/// might be better to store the state on *exit* from each block. It eliminates
-/// the need to store a separate `exit_state`, eliminates the redundancy of the
-/// starting states at a switch, and eliminates the zero-information starting
-/// state at the entry block.
-#[derive(Debug)]
-pub struct AnalysisStates<L: Lattice> {
-    /// The state on entry to each block
-    pub entry_states: Store<mir::BlockId, L>,
-}
-
 /// Dataflow states for a block-granularity analysis
 type BlockStates<L> = Store<mir::BlockId, L>;
 
@@ -260,9 +246,9 @@ where
     gr: &'a mir::Graph,
     preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
     /// Per-block analysis states, used for granularity `Blockwise`
-    block_states: BlockStates<A::Domain>,
+    pub block_states: BlockStates<A::Domain>,
     /// Per-statement analysis states, used for granularity `Statementwise`
-    stmt_states: StmtStates<A::Domain>,
+    pub stmt_states: StmtStates<A::Domain>,
     /// The next set of blocks to be analyzed, together with their new starting
     /// states
     worklist: UniqueStack<BlockId>,
@@ -299,11 +285,17 @@ where
         }
     }
 
-    pub fn run(mut self) -> BlockStates<A::Domain> {
+    /*
+    NOTE: to self: do *not* try to make this method consume `self` and return a
+    type generic over `G`. You've already wasted more time on it than it could
+    possibly save you between now and your immediate deadline.
+    */
+
+    pub fn run(mut self) -> Self {
         while let Some(blk) = self.worklist.pop() {
             self.run_inner(blk);
         }
-        self.block_states
+        self
     }
 
     /// Update the state associated with a single block. We'll take the previous

@@ -37,6 +37,7 @@ mod linearity;
 mod subconditional;
 mod unsafety;
 // mod wires;
+mod fmt;
 /// Graph properties
 mod graph;
 
@@ -76,15 +77,19 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         //     }
         // }
 
+        // == Dataflow analyses ==
+
         let context = DataflowCtx::new(gr, ctx);
 
         let dom = graph::DominatorAnalysis::<Forward>::new(gr);
-        let dominators = DataflowRunner::new(dom, &context).run();
+        let dominators = DataflowRunner::new(dom, &context).run().block_states;
 
         let postdom = graph::DominatorAnalysis::<Backward>::new(gr);
-        let postdominators = DataflowRunner::new(postdom, &context).run();
+        let postdominators = DataflowRunner::new(postdom, &context).run().block_states;
 
-        let controls = graph::dominators::controls(&dominators, &postdominators);
+        let _controls = graph::dominators::controls(&dominators, &postdominators);
+
+        lifetimes::borrow_check(context);
 
         // == Summary analyses ==
 

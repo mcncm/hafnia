@@ -109,3 +109,11 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
         }
     }
 }
+
+// === formatting impls ===
+
+impl std::fmt::Debug for LiveVars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
