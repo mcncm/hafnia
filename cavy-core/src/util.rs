@@ -1,5 +1,7 @@
 //! Global, handy traits and functions
 
+// === formatting ===
+
 use std::fmt;
 
 /// A trait for formatting things with with the help of a `Context`

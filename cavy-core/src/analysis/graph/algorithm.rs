@@ -5,23 +5,29 @@ use std::hash::Hash;
 
 use crate::mir::{BlockId, Graph};
 
-#[derive(Clone)]
-pub struct Preorder<T>(Vec<T>);
+/// Make wrapper types for graph traversal orders
+macro_rules! traversal_orders {
+    ($($name:ident),*) => {
+        $(
+            #[derive(Clone)]
+            pub struct $name<T>(Vec<T>);
 
-#[derive(Clone)]
-pub struct Postorder<T>(Vec<T>);
+            impl<T> $name<T> {
+                pub fn iter(&self) -> impl Iterator<Item = &T> + DoubleEndedIterator {
+                    self.0.iter()
+                }
+            }
 
-impl<T> From<Preorder<T>> for Vec<T> {
-    fn from(p: Preorder<T>) -> Self {
-        p.0
-    }
+            impl<T> From<$name<T>> for Vec<T> {
+                fn from(p: $name<T>) -> Self {
+                    p.0
+                }
+            }
+        )*
+    };
 }
 
-impl<T> From<Postorder<T>> for Vec<T> {
-    fn from(p: Postorder<T>) -> Self {
-        p.0
-    }
-}
+traversal_orders! { Preorder, Postorder }
 
 pub fn traversals(gr: &Graph) -> (Preorder<BlockId>, Postorder<BlockId>) {
     gr.traversals()
