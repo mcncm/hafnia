@@ -10,6 +10,11 @@
 //!
 //! So, the first step for us is to compute variable liveness, and then extend
 //! this to livetime/region liveness by generating constraints from the results.
+//!
+//! NOTE: Constraint generation based on liveness doesn't appear here, but in
+//! live_const.rs. They're conceptually linked, but I might want to move the
+//! liveness dataflow analysis *up*, and make it available outside of region
+//! inference and borrow checking.
 
 use std::marker::PhantomData;
 

@@ -37,26 +37,10 @@ use crate::{
 
 use super::{util::enumerate_stmts, LifetimeStore, LtId};
 
-/// all the ascriptions for this graph: we hang lifetimes on the branches of
-/// each `Place` tree, and associate one with each reference we take.
-pub struct Ascriptions<'g> {
-    /// Lifetime ascriptions of locals types
-    pub locals: Store<LocalId, Option<AscriptionNode>>,
-    /// Ascriptions to `Ref` statements
-    pub refs: BTreeMap<GraphLoc, LtId>,
-    _d: PhantomData<&'g ()>,
-}
-
-/// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
-/// practice, noting that few variables will have wide-branching `Place` trees.
-pub struct AscriptionNode {
-    /// Ascroption at this `Place`
-    this: Option<LtId>,
-    /// Ascriptions at deeper paths
-    slots: Vec<Option<AscriptionNode>>,
-}
-
-pub fn ascribe<'a>(lifetimes: &'a mut LifetimeStore, context: &'a DataflowCtx) -> Ascriptions<'a> {
+pub fn ascribe<'l, 'a>(
+    lifetimes: &'l mut LifetimeStore,
+    context: &'a DataflowCtx,
+) -> Ascriptions<'a> {
     let mut ascriber = Ascriber::new(lifetimes, context);
     for local in context.gr.locals.iter() {
         ascriber.ascribe_local(local);
@@ -65,6 +49,16 @@ pub fn ascribe<'a>(lifetimes: &'a mut LifetimeStore, context: &'a DataflowCtx) -
     ascriber.ascribe_refs(&context.gr);
 
     ascriber.ascriptions
+}
+
+/// all the ascriptions for this graph: we hang lifetimes on the branches of
+/// each `Place` tree, and associate one with each reference we take.
+pub struct Ascriptions<'g> {
+    /// Lifetime ascriptions of locals types
+    pub locals: Store<LocalId, Option<AscriptionNode>>,
+    /// Ascriptions to `Ref` statements
+    pub refs: BTreeMap<GraphLoc, LtId>,
+    _d: PhantomData<&'g ()>,
 }
 
 impl LifetimeStore {
@@ -78,14 +72,14 @@ impl LifetimeStore {
 
 /// This bit of machinery builds the ascriptions tree, temporarily holding on to
 /// the inherited global state
-struct Ascriber<'a> {
+struct Ascriber<'l, 'a> {
     ascriptions: Ascriptions<'a>,
-    lifetimes: &'a mut LifetimeStore,
+    lifetimes: &'l mut LifetimeStore,
     types: &'a CachedTypeInterner,
 }
 
-impl<'a> Ascriber<'a> {
-    fn new(lifetimes: &'a mut LifetimeStore, context: &DataflowCtx<'a>) -> Self {
+impl<'l, 'a> Ascriber<'l, 'a> {
+    fn new(lifetimes: &'l mut LifetimeStore, context: &DataflowCtx<'a>) -> Self {
         Self {
             ascriptions: Ascriptions::new(),
             lifetimes,
@@ -158,5 +152,26 @@ impl<'g> Ascriptions<'g> {
             refs: BTreeMap::new(),
             _d: PhantomData,
         }
+    }
+}
+
+/// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
+/// practice, noting that few variables will have wide-branching `Place` trees.
+pub struct AscriptionNode {
+    /// Ascroption at this `Place`
+    this: Option<LtId>,
+    /// Ascriptions at deeper paths
+    slots: Vec<Option<AscriptionNode>>,
+}
+
+impl AscriptionNode {
+    // NOTE: can't use an opaque type (`impl Iterator<..>`) because of recursion
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = LtId> + 'a> {
+        let children = self
+            .slots
+            .iter()
+            .map(|slot| slot.iter().map(|asc| asc.iter()).flatten())
+            .flatten();
+        Box::new(self.this.iter().cloned().chain(children))
     }
 }

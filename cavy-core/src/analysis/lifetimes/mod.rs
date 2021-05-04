@@ -14,10 +14,6 @@ use crate::{context::Context, mir::*};
 
 use super::dataflow::{DataflowCtx, DataflowRunner};
 
-mod ascription;
-mod liveness;
-mod util;
-
 /// Print some analysis results to the console for debugging
 macro_rules! ltdbg {
     ($result:ident, $context:ident) => {
@@ -33,6 +29,13 @@ macro_rules! ltdbg {
     };
 }
 
+pub(crate) use ltdbg;
+
+mod ascription;
+mod liveness;
+mod regions;
+mod util;
+
 // A map from lightweight "lifetime" variables to the regions they represent
 store_type! { LifetimeStore : LtId -> Lifetime }
 
@@ -40,25 +43,8 @@ pub struct Lifetime {
     locs: BTreeSet<GraphLoc>,
 }
 
-/// The lifetime subtype constraint representation described in `#Lifetime
-/// inference constraints` of the NLL RFC.
-struct Outlives {
-    long: LtId,
-    shrt: LtId,
-    loc: GraphLoc,
-}
-
-struct BorrowChecker {
-    regions: LifetimeStore,
-    constraints: Vec<Outlives>,
-}
-
 pub fn borrow_check(context: DataflowCtx) {
-    let liveness_ana = liveness::LivenessAnalysis::new(context.gr);
-    let liveness = DataflowRunner::new(liveness_ana, &context)
-        .run()
-        .stmt_states;
-    ltdbg!(liveness, context);
+    let lifetimes = regions::infer_regions(&context);
 }
 
 impl Place {
