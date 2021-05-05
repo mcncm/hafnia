@@ -70,13 +70,6 @@ pub struct TypedSig {
     pub span: Span,
 }
 
-/// A precise position within the MIR control-flow graph
-#[derive(Debug)]
-pub struct GraphPosition {
-    blk: BlockId,
-    stmt: usize,
-}
-
 pub type Predecessors = Store<BlockId, Vec<BlockId>>;
 
 /// A lazily-computed CFG predecessor graph. Like many other parts of the Mir,

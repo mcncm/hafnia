@@ -32,7 +32,7 @@ use crate::{
     analysis::dataflow::{DataflowCtx, Forward, OrderProvider},
     mir::*,
     store::Store,
-    types::{CachedTypeInterner, TyId, Type},
+    types::{CachedTypeInterner, RefKind, TyId, Type},
 };
 
 use super::{util::enumerate_stmts, LifetimeStore, LtId};
@@ -40,7 +40,7 @@ use super::{util::enumerate_stmts, LifetimeStore, LtId};
 pub fn ascribe<'l, 'a>(
     lifetimes: &'l mut LifetimeStore,
     context: &'a DataflowCtx,
-) -> Ascriptions<'a> {
+) -> AscriptionStore<'a> {
     let mut ascriber = Ascriber::new(lifetimes, context);
     for local in context.gr.locals.iter() {
         ascriber.ascribe_local(local);
@@ -53,18 +53,18 @@ pub fn ascribe<'l, 'a>(
 
 /// all the ascriptions for this graph: we hang lifetimes on the branches of
 /// each `Place` tree, and associate one with each reference we take.
-pub struct Ascriptions<'g> {
+pub struct AscriptionStore<'g> {
     /// Lifetime ascriptions of locals types
-    pub locals: Store<LocalId, Option<AscriptionNode>>,
+    pub locals: Store<LocalId, Option<AscrNode>>,
     /// Ascriptions to `Ref` statements
-    pub refs: BTreeMap<GraphPt, LtId>,
+    pub refs: BTreeMap<GraphPt, LtAscr>,
     _d: PhantomData<&'g ()>,
 }
 
 /// This bit of machinery builds the ascriptions tree, temporarily holding on to
 /// the inherited global state
 struct Ascriber<'l, 'a> {
-    ascriptions: Ascriptions<'a>,
+    ascriptions: AscriptionStore<'a>,
     lifetimes: &'l mut LifetimeStore,
     types: &'a CachedTypeInterner,
 }
@@ -72,7 +72,7 @@ struct Ascriber<'l, 'a> {
 impl<'l, 'a> Ascriber<'l, 'a> {
     fn new(lifetimes: &'l mut LifetimeStore, context: &DataflowCtx<'a>) -> Self {
         Self {
-            ascriptions: Ascriptions::new(),
+            ascriptions: AscriptionStore::new(),
             lifetimes,
             types: &context.ctx.types,
         }
@@ -85,12 +85,13 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                 StmtKind::Assn(
                     _,
                     Rvalue {
-                        data: RvalueKind::Ref(_kind, _rhs),
+                        data: RvalueKind::Ref(kind, _rhs),
                         span: _,
                     },
                 ) => {
                     let lt = self.lifetimes.new_region();
-                    let key = self.ascriptions.refs.insert(loc, lt);
+                    let ascr = LtAscr { kind: *kind, lt };
+                    let key = self.ascriptions.refs.insert(loc, ascr);
                     // We better visit each line only once!
                     debug_assert_eq!(key, None);
                 }
@@ -105,7 +106,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
         self.ascriptions.locals.insert(node);
     }
 
-    fn node_from_ty(&mut self, ty: TyId) -> Option<AscriptionNode> {
+    fn node_from_ty(&mut self, ty: TyId) -> Option<AscrNode> {
         let ty = &self.types[ty];
         if ty.is_owned(self.types) {
             return None;
@@ -118,17 +119,18 @@ impl<'l, 'a> Ascriber<'l, 'a> {
             Type::Func(_, _) => todo!(),
             // FIXME
             Type::UserType(_) => None,
-            Type::Ref(_ref, ty) => {
+            Type::Ref(kind, ty) => {
                 let lt = self.lifetimes.new_region();
-                self.node_from_inners(Some(lt), &[*ty])
+                let ascr = LtAscr { kind: *kind, lt };
+                self.node_from_inners(Some(ascr), &[*ty])
             }
             _ => None,
         }
     }
 
-    fn node_from_inners(&mut self, lt: Option<LtId>, inners: &[TyId]) -> Option<AscriptionNode> {
+    fn node_from_inners(&mut self, lt: Option<LtAscr>, inners: &[TyId]) -> Option<AscrNode> {
         let inners = inners.iter().map(|ty| self.node_from_ty(*ty)).collect();
-        let node = AscriptionNode {
+        let node = AscrNode {
             this: lt,
             slots: inners,
         };
@@ -136,7 +138,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
     }
 }
 
-impl<'g> Ascriptions<'g> {
+impl<'g> AscriptionStore<'g> {
     fn new() -> Self {
         Self {
             locals: Store::new(),
@@ -146,12 +148,12 @@ impl<'g> Ascriptions<'g> {
     }
 
     /// Get all the livetime ascriptions to the type of `local`.
-    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = LtId> + 'a {
+    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = LtAscr> + 'a {
         self.place_ascriptions(&<Place>::from(local))
     }
 
     /// Get all the lifetime ascriptions to the type of `place`.
-    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = LtId> + 'a {
+    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = LtAscr> + 'a {
         let err = "Attempted to read missing lifetime ascriptions";
 
         self.locals[place.root]
@@ -170,18 +172,25 @@ impl<'g> Ascriptions<'g> {
     }
 }
 
-/// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
-/// practice, noting that few variables will have wide-branching `Place` trees.
-pub struct AscriptionNode {
-    /// Ascroption at this `Place`
-    this: Option<LtId>,
-    /// Ascriptions at deeper paths
-    slots: Vec<Option<AscriptionNode>>,
+/// The actual ascription data
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LtAscr {
+    pub kind: RefKind,
+    pub lt: LtId,
 }
 
-impl AscriptionNode {
+/// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
+/// practice, noting that few variables will have wide-branching `Place` trees.
+pub struct AscrNode {
+    /// Ascription at this `Place`
+    pub this: Option<LtAscr>,
+    /// Ascriptions at deeper paths
+    pub slots: Vec<Option<AscrNode>>,
+}
+
+impl AscrNode {
     // NOTE: can't use an opaque type (`impl Iterator<..>`) because of recursion
-    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = LtId> + 'a> {
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = LtAscr> + 'a> {
         let children = self
             .slots
             .iter()

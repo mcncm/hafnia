@@ -15,23 +15,6 @@ use crate::{store_type, util::FmtWith};
 
 use super::dataflow::{DataflowCtx, DataflowRunner};
 
-/// Print some analysis results to the console for debugging
-macro_rules! ltdbg {
-    ($result:expr, $context:ident) => {
-        if cfg!(debug_assertions) {
-            let name: &'static str = stringify!($result);
-            let name = name.to_uppercase();
-            println!(
-                "{}:\n{}",
-                name,
-                crate::util::FmtWith::fmt_with(&$result, &$context)
-            );
-        }
-    };
-}
-
-pub(crate) use ltdbg;
-
 mod ascription;
 mod liveness;
 mod regions;
