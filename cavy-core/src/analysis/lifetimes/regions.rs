@@ -381,7 +381,10 @@ mod dbg {
             writeln!($f, table_fmtter!($width; $($cols),+), $(stringify!($cols)),+)?;
             // Write the rows
             for unzip_bind!($($cols),+) in nzip!($($cols),+) {
-                writeln!($f, table_fmtter!($width; $($cols$([$colw])?),+), $(format!("{}", $cols)),+)?;
+                writeln!($f, table_fmtter!($width; $($cols$([$colw])?),+),
+                         // must call `format!` for format specifiers to work
+                         // in the obvious way by default
+                         $(format!("{}", $cols)),+)?;
             }
         }
     }
@@ -396,11 +399,15 @@ mod dbg {
 
                 // Make the columns
                 let linum = 0..;
-                let stmt = block.stmts.iter();
+                let stmt = block
+                    .stmts
+                    .iter()
+                    .map(|stmt| stmt as &dyn std::fmt::Display)
+                    // ...and include the block tail.
+                    .chain(std::iter::once(&block.kind as &dyn std::fmt::Display));
                 let vars = self.liveness[blk_id].iter();
                 let regions = lts[blk_id].iter();
                 let constrs = constrs[blk_id].iter();
-                // let constrs = self.constraints.constrs.filter(|constr|)
 
                 table!( [width = 10] f << linum[6], stmt[16], vars, regions, constrs );
 
@@ -418,7 +425,7 @@ mod dbg {
         let num_regions = lifetimes.len();
         let mut store = Store::new();
         for block in context.gr.iter() {
-            store.insert(vec![BitSet::empty(num_regions); block.stmts.len()]);
+            store.insert(vec![BitSet::empty(num_regions); block.len()]);
         }
 
         for (lt, lifetime) in lifetimes.idx_enumerate() {
@@ -436,7 +443,7 @@ mod dbg {
     ) -> Store<BlockId, Vec<Seq<OutlivesP>>> {
         let mut store = Store::new();
         for block in context.gr.iter() {
-            store.insert(vec![Seq(vec![]); block.stmts.len()]);
+            store.insert(vec![Seq(vec![]); block.len()]);
         }
 
         for constr in constraints.iter() {

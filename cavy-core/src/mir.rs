@@ -292,6 +292,11 @@ impl BasicBlock {
         }
     }
 
+    /// The length of this block, *including* its tail
+    pub fn len(&self) -> usize {
+        self.stmts.len() + 1
+    }
+
     pub fn goto(block: BlockId) -> Self {
         Self {
             stmts: vec![],

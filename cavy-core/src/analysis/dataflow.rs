@@ -259,7 +259,7 @@ where
     A: DataflowAnalysis<D, G>,
     D: Direction,
     G: Granularity,
-    Self: Propagate<'a, A, D, G>,
+    Self: Propagate<A, D, G>,
     DataflowCtx<'a>: OrderProvider<D>,
 {
     // NOTE: This is starting to have a lot of arguments. I wonder if there's
@@ -303,18 +303,28 @@ where
     /// states of any successor block. If they differ, they are updated and
     /// these blocks are entered into the working set. We'll also take any
     /// action associated with the block kind.
-    fn run_inner(&mut self, blk_id: BlockId) {
-        // First, get the starting state for this block from the exit states of
-        // its parents.
-        let preds = self.predecessors(blk_id);
+    fn run_inner(&mut self, blk: BlockId) {
+        /*
+        First, get the starting state for this block from the exit states of
+        its parents.
+
+        In the `Statementwise` case, we'll keep this generic over direction for
+        now by using the `block_states` for something: we'll clone the *last*
+        state in the block, whether at the top (first statement) or bottom
+        (block tail), into the `block_states` entry for that block. This entails
+        a little extra bookkeeping that must be synchronized, but it also means
+        we aren't writing *still more* generics boilerplate to pick the "last"
+        state from either the top or bottom of the block.
+        */
+        let preds = self.predecessors(blk);
         let pred_states = preds.iter().map(|&pred| (pred, &self.block_states[pred]));
-        let mut state = self.analysis.join_predecessors(blk_id, pred_states);
-        self.propagate(&mut state, blk_id);
+        let mut state = self.analysis.join_predecessors(blk, pred_states);
+        self.propagate(&mut state, blk);
 
         // NOTE: yes, this allocation is unnecessary. No, don't try to get rid of it
         // right now. Proving safety to the compiler is not worth it: it turns
         // into a generics mess.
-        let succs = self.successors(blk_id).to_owned();
+        let succs = self.successors(blk).to_owned();
 
         // If the propagated state differs from that of any successor, enter it
         // into the working set.
@@ -337,7 +347,7 @@ where
     }
 }
 
-pub trait Propagate<'a, A, D, G>
+pub trait Propagate<A, D, G>
 where
     A: DataflowAnalysis<D, G>,
     D: Direction,
@@ -351,7 +361,7 @@ where
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId);
 }
 
-impl<'a, A, G> Propagate<'a, A, Forward, G> for DataflowRunner<'a, A, Forward, G>
+impl<'a, A, G> Propagate<A, Forward, G> for DataflowRunner<'a, A, Forward, G>
 where
     A: DataflowAnalysis<Forward, G>,
     G: Granularity,
@@ -377,11 +387,13 @@ where
             self.update_stmt_state(blk, loc, state);
         }
         self.analysis.transfer_block(state, &block.kind, blk);
+        // Update the *block tail* state
+        self.update_stmt_state(blk, block.stmts.len(), state);
         self.update_block_state(blk, state);
     }
 }
 
-impl<'a, A, G> Propagate<'a, A, Backward, G> for DataflowRunner<'a, A, Backward, G>
+impl<'a, A, G> Propagate<A, Backward, G> for DataflowRunner<'a, A, Backward, G>
 where
     A: DataflowAnalysis<Backward, G>,
     G: Granularity,
@@ -402,12 +414,17 @@ where
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
         self.analysis.transfer_block(state, &block.kind, blk);
-        self.update_block_state(blk, state);
+        // Update the *block tail* state
+        self.update_stmt_state(blk, block.stmts.len(), state);
         for (loc, stmt) in block.stmts.iter().enumerate().rev() {
             let gl = GraphPt { blk, stmt: loc };
             self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
         }
+        // NOTE: keep this at the end! The `block_state` should be the *last*
+        // state computed, whether at the top or bottom (`Backward` or `Forward`
+        // case, resp.) of the block.
+        self.update_block_state(blk, state);
     }
 }
 
@@ -436,7 +453,8 @@ where
         let bot = A::Domain::bottom(gr, ctx);
         gr.iter()
             .map(|block| {
-                let len = block.stmts.len();
+                // One state for each statement and one for the block tail
+                let len = block.len();
                 std::iter::repeat(bot.clone()).take(len).collect()
             })
             .collect()
@@ -452,11 +470,13 @@ where
     A: DataflowAnalysis<D, Blockwise>,
     D: Direction,
 {
+    /// Can I make this call unnecessary? The `stmt_states` don't even need to
+    /// be initialized for blockwise granularity.
     fn init_stmt_states(gr: &Graph, ctx: &Context) -> StmtStates<A::Domain> {
         let bot = A::Domain::bottom(gr, ctx);
         gr.iter()
             .map(|block| {
-                let len = block.stmts.len();
+                let len = block.len();
                 std::iter::repeat(bot.clone()).take(len).collect()
             })
             .collect()
