@@ -1,22 +1,21 @@
 use std::marker::PhantomData;
 
-use crate::{context::Context, mir::*, store::BitSet};
+use crate::{bitset, context::Context, mir::*, store::BitSet};
 
 use super::*;
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct Dominators(BitSet<BlockId>);
+bitset! { Dominators(BlockId) }
 
 impl Lattice for Dominators {
     /// This is really "top".
     fn bottom(gr: &Graph, _ctx: &Context) -> Self {
         let blocks = gr.len();
-        Self(BitSet::full(blocks))
+        Self::full(blocks)
     }
 
     /// Intersect. This is really a "meet," not what you would call a join.
     fn join(self, other: Self) -> Self {
-        Dominators(self.0 & other.0)
+        self & other
     }
 }
 

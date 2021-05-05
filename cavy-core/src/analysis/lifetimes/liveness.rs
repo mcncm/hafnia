@@ -18,7 +18,7 @@
 
 use std::marker::PhantomData;
 
-use crate::{context::Context, mir::*, store::BitSet};
+use crate::{bitset, context::Context, mir::*, store::BitSet};
 
 use super::{
     super::dataflow::{Backward, DataflowAnalysis, Lattice, Statementwise},
@@ -27,8 +27,7 @@ use super::{
 
 use bitvec::prelude::*;
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct LiveVars(BitSet<LocalId>);
+bitset! { LiveVars(LocalId) }
 
 // The canonical set lattice
 impl Lattice for LiveVars {
@@ -39,7 +38,7 @@ impl Lattice for LiveVars {
 
     /// Simple set union
     fn join(self, other: Self) -> Self {
-        Self(self.0 | other.0)
+        self | other
     }
 }
 
@@ -112,13 +111,5 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
             },
             StmtKind::Nop => {}
         }
-    }
-}
-
-// === formatting impls ===
-
-impl std::fmt::Debug for LiveVars {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
     }
 }

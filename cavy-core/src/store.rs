@@ -88,6 +88,7 @@ impl<I: Index> BitSet<I> {
         self.data.get_mut(idx.into() as usize)
     }
 
+    /// FIXME: should really have "insert, remove"
     pub fn set(&mut self, idx: I, val: bool) {
         *self.get_mut(idx).unwrap() = val;
     }
@@ -136,6 +137,63 @@ impl<I: Index> std::ops::BitAnd for BitSet<I> {
             _d: PhantomData,
         }
     }
+}
+
+/// Create a newtyped bitset that implements all the right things
+#[macro_export]
+macro_rules! bitset {
+    ($name:ident($I:ty)) => {
+        #[derive(Clone, PartialEq, Eq)]
+        pub struct $name($crate::store::BitSet<$I>);
+
+        impl $name {
+            pub fn full(n: usize) -> Self {
+                Self(BitSet::<$I>::full(n))
+            }
+
+            pub fn empty(n: usize) -> Self {
+                Self(BitSet::<$I>::empty(n))
+            }
+
+            pub fn contains(&self, idx: &$I) -> bool {
+                self.0.contains(idx)
+            }
+
+            pub fn iter(&self) -> impl '_ + Iterator<Item = $I> {
+                self.0.iter()
+            }
+
+            pub fn get_mut(&mut self, idx: $I) -> Option<BitRef<'_, bitvec::ptr::Mut>> {
+                self.0.get_mut(idx)
+            }
+
+            pub fn set(&mut self, idx: $I, val: bool) {
+                self.0.set(idx, val)
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{:?}", self.0)
+            }
+        }
+
+        impl std::ops::BitOr for $name {
+            type Output = Self;
+
+            fn bitor(self, rhs: Self) -> Self::Output {
+                Self(self.0 | rhs.0)
+            }
+        }
+
+        impl std::ops::BitAnd for $name {
+            type Output = Self;
+
+            fn bitand(self, rhs: Self) -> Self::Output {
+                Self(self.0 & rhs.0)
+            }
+        }
+    };
 }
 
 /// A trait automatically implemented by index types
