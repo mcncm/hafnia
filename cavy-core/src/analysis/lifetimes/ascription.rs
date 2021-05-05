@@ -57,14 +57,14 @@ pub struct Ascriptions<'g> {
     /// Lifetime ascriptions of locals types
     pub locals: Store<LocalId, Option<AscriptionNode>>,
     /// Ascriptions to `Ref` statements
-    pub refs: BTreeMap<GraphLoc, LtId>,
+    pub refs: BTreeMap<GraphPt, LtId>,
     _d: PhantomData<&'g ()>,
 }
 
 impl LifetimeStore {
     fn new_region(&mut self) -> LtId {
         let lifetime = super::Lifetime {
-            locs: std::collections::BTreeSet::new(),
+            pts: std::collections::BTreeSet::new(),
         };
         self.insert(lifetime)
     }

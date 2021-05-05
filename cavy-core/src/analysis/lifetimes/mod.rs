@@ -7,10 +7,11 @@
 // TODO
 // + Collect liveness constraints
 
+use core::fmt;
 use std::collections::BTreeSet;
 
-use crate::store_type;
 use crate::{context::Context, mir::*};
+use crate::{store_type, util::FmtWith};
 
 use super::dataflow::{DataflowCtx, DataflowRunner};
 
@@ -40,11 +41,18 @@ mod util;
 store_type! { LifetimeStore : LtId -> Lifetime }
 
 pub struct Lifetime {
-    locs: BTreeSet<GraphLoc>,
+    pts: BTreeSet<GraphPt>,
+}
+
+impl Lifetime {
+    /// Add a single point to the lifetime
+    pub fn insert(&mut self, pt: GraphPt) -> bool {
+        self.pts.insert(pt)
+    }
 }
 
 pub fn borrow_check(context: DataflowCtx) {
-    let lifetimes = regions::infer_regions(&context);
+    let _lifetimes = regions::infer_regions(&context);
 }
 
 impl Place {
@@ -58,5 +66,13 @@ impl Place {
             }
         }
         todo!()
+    }
+}
+
+// === fmt impls ===
+
+impl fmt::Display for LtId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "'{}", self.0)
     }
 }

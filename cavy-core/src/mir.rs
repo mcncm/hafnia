@@ -139,9 +139,9 @@ impl PredGraph {
     }
 }
 
-/// A location within the control flow graph
+/// A precise location within the control flow graph
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GraphLoc {
+pub struct GraphPt {
     pub blk: BlockId,
     pub stmt: usize,
 }
@@ -678,7 +678,7 @@ impl fmt::Display for Rvalue {
     }
 }
 
-impl fmt::Debug for GraphLoc {
+impl fmt::Debug for GraphPt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.blk, self.stmt)
     }

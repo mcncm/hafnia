@@ -4,7 +4,7 @@
 use crate::{
     ast::FnId,
     cavy_errors::{Diagnostic, ErrorBuf},
-    mir::{self, BlockId, BlockKind, FnCall, GraphData, GraphLoc},
+    mir::{self, BlockId, BlockKind, FnCall, GraphData, GraphPt},
     source::Span,
     store::Store,
 };
@@ -65,7 +65,7 @@ impl<'a> UnsafeAnalysis<'a> {
 }
 
 impl<'a> SummaryAnalysis for UnsafeAnalysis<'a> {
-    fn trans_stmt(&mut self, stmt: &mir::Stmt, _loc: &GraphLoc) {
+    fn trans_stmt(&mut self, stmt: &mir::Stmt, _loc: &GraphPt) {
         match stmt.kind {
             mir::StmtKind::Assert(_) => {
                 if !stmt.scope_data.in_unsafe {

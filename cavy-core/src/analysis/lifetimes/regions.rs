@@ -1,12 +1,14 @@
 use std::fmt;
 
-use crate::{mir::*, store::Store};
+use crate::{mir::*, store::Store, util::FmtWith};
 
 use super::{
     super::{DataflowCtx, DataflowRunner},
     ascription::{self, Ascriptions},
     liveness::{self, LiveVars},
-    ltdbg, LifetimeStore, LtId,
+    ltdbg,
+    util::enumerate_stmts,
+    LifetimeStore, LtId,
 };
 
 pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
@@ -51,7 +53,15 @@ type Constraints = Vec<Outlives>;
 struct Outlives {
     long: LtId,
     shrt: LtId,
-    loc: GraphLoc,
+    pt: GraphPt,
+}
+
+/// A liveness constraint. This struct isn't *used* for much--it's entered
+/// straight into the lifetime set--but it is useful to keep around for its
+/// `Debug` implementation.
+struct LiveAt {
+    lt: LtId,
+    pt: GraphPt,
 }
 
 impl<'a> RegionInf<'a> {
@@ -60,7 +70,19 @@ impl<'a> RegionInf<'a> {
     ///
     /// See [Liveness](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#liveness)
     fn collect_liveness_constraints(&mut self) {
-        todo!()
+        // Iterate over the graph in *any* order; we're only entering
+        // statement-local data here
+        for (_pt, _stmt) in enumerate_stmts(self.context.gr) {}
+    }
+
+    // For the liveness constraints, we'll just work at the variable granularity
+    // for now.
+    fn live_vars_at(&self, _pt: GraphPt) -> u32 {
+        todo!();
+    }
+
+    fn insert_liveness_constraint(&mut self, constr: LiveAt) {
+        self.lifetimes[constr.lt].insert(constr.pt);
     }
 
     /// See [Subtyping](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#subtyping)
@@ -76,12 +98,24 @@ impl<'a> RegionInf<'a> {
 impl fmt::Debug for Outlives {
     /// Exact format from NLL RFC: `('foo: 'p) @ A/1`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}: {}) @ {:?}", self.long, self.shrt, self.loc)
+        write!(f, "({}: {}) @ {:?}", self.long, self.shrt, self.pt)
     }
 }
 
-impl fmt::Display for LtId {
+impl fmt::Debug for LiveAt {
+    // Exactly as in the NLL RFC: `('p: {A/1}) @ A/1`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "'{}", self.0)
+        write!(f, "({}: {{{:?}}}) @ {:?}", self.lt, self.pt, self.pt)
+    }
+}
+
+impl FmtWith<LifetimeStore> for LtId {
+    fn fmt(&self, store: &LifetimeStore, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lifetime = &store[*self];
+        for pt in lifetime.pts.iter() {
+            let constr = LiveAt { lt: *self, pt: *pt };
+            writeln!(f, "{:?}", constr)?;
+        }
+        Ok(())
     }
 }

@@ -11,7 +11,7 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::mir::{BlockId, Graph, GraphLoc};
+use crate::mir::{BlockId, Graph, GraphPt};
 use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};
@@ -45,7 +45,7 @@ impl<'a> CallGraphAnalysis<'a> {
 impl<'a> SummaryAnalysis for CallGraphAnalysis<'a> {
     /// Do absolutely nothing: calls appear in basic block tails, so these are
     /// all we care about.
-    fn trans_stmt(&mut self, _stmt: &crate::mir::Stmt, _loc: &GraphLoc) {}
+    fn trans_stmt(&mut self, _stmt: &crate::mir::Stmt, _loc: &GraphPt) {}
 
     fn trans_block(&mut self, block: &BlockKind, _loc: &BlockId) {
         if let BlockKind::Call(call) = block {

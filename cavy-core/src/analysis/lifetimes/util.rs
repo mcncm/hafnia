@@ -5,11 +5,11 @@
 use crate::mir::*;
 
 /// Walk all the statements of the CFG, in no particular ordere
-pub fn enumerate_stmts(gr: &Graph) -> impl Iterator<Item = (GraphLoc, &Stmt)> {
+pub fn enumerate_stmts(gr: &Graph) -> impl Iterator<Item = (GraphPt, &Stmt)> {
     gr.idx_enumerate()
         .map(|(blk, block)| {
             block.stmts.iter().enumerate().map(move |(pos, stmt)| {
-                let loc = GraphLoc { blk, stmt: pos };
+                let loc = GraphPt { blk, stmt: pos };
                 (loc, stmt)
             })
         })

@@ -218,7 +218,7 @@ impl LinearityAnalysis {}
 impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
     type Domain = MoveState;
 
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphLoc) {
+    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphPt) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
         let (place, rhs) = match &stmt.kind {

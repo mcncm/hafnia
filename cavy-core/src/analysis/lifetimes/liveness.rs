@@ -99,7 +99,7 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
         LiveVars(BitSet::empty(self.vars))
     }
 
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphLoc) {
+    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphPt) {
         match &stmt.kind {
             StmtKind::Assn(lhs, rhs) => {
                 self.gen_rvalue(state, rhs);

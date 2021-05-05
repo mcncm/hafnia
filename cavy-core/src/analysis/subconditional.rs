@@ -12,7 +12,7 @@ use super::dataflow::{Backward, DataflowAnalysis, Lattice, SummaryAnalysis};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,
-    mir::{self, BlockId, BlockKind, GraphLoc, RvalueKind},
+    mir::{self, BlockId, BlockKind, GraphPt, RvalueKind},
     source::Span,
     store::Store,
 };
@@ -66,7 +66,7 @@ impl<'a> SubCondAnalysis<'a> {
 
 impl<'a> SummaryAnalysis for SubCondAnalysis<'a> {
     /// If we encounter a delinearization operator, add that.
-    fn trans_stmt(&mut self, _stmt: &mir::Stmt, _loc: &GraphLoc) {
+    fn trans_stmt(&mut self, _stmt: &mir::Stmt, _loc: &GraphPt) {
         // let (_place, rhs) = match &stmt.kind {
         //     mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
         //     _ => return,

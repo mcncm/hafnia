@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise};
 use crate::{
     ast::UnOpKind,
-    mir::{self, BlockId, BlockKind, GraphLoc, LocalId, Operand, Place, RvalueKind},
+    mir::{self, BlockId, BlockKind, GraphPt, LocalId, Operand, Place, RvalueKind},
     source::Span,
 };
 
@@ -62,7 +62,7 @@ pub struct FeedbackAnalysis {}
 impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     type Domain = MeasState;
 
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphLoc) {
+    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphPt) {
         use RvalueKind::*;
         let (place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),

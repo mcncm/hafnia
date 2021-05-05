@@ -1,9 +1,9 @@
-use std::hash::Hash;
 use std::{cell::Ref, collections::hash_map::Entry};
 use std::{
     collections::{HashMap, HashSet},
     iter::FromIterator,
 };
+use std::{hash::Hash, ops};
 
 use mir::Stmt;
 
@@ -152,7 +152,7 @@ where
     type Domain: Lattice;
 
     /// Apply the transfer function for a single statement. Empty default implementation
-    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _loc: GraphLoc) {}
+    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _loc: GraphPt) {}
 
     /// Apply the transfer function for the end of a basic block
     fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, loc: BlockId);
@@ -372,7 +372,7 @@ where
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
         for (loc, stmt) in block.stmts.iter().enumerate() {
-            let gl = GraphLoc { blk, stmt: loc };
+            let gl = GraphPt { blk, stmt: loc };
             self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
         }
@@ -404,7 +404,7 @@ where
         self.analysis.transfer_block(state, &block.kind, blk);
         self.update_block_state(blk, state);
         for (loc, stmt) in block.stmts.iter().enumerate().rev() {
-            let gl = GraphLoc { blk, stmt: loc };
+            let gl = GraphPt { blk, stmt: loc };
             self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
         }
@@ -470,7 +470,7 @@ where
 /// non-block-local) instance of the analysis state.
 pub trait SummaryAnalysis {
     /// Apply the transfer function for a single statement
-    fn trans_stmt(&mut self, stmt: &Stmt, loc: &GraphLoc);
+    fn trans_stmt(&mut self, stmt: &Stmt, loc: &GraphPt);
 
     /// Apply the transfer function for the end of a basic block
     fn trans_block(&mut self, block: &BlockKind, loc: &BlockId);
@@ -516,7 +516,7 @@ impl<'a> SummaryRunner<'a> {
     pub fn run(mut self) {
         for (blk_id, blk) in self.gr.idx_enumerate() {
             for (pos, stmt) in blk.stmts.iter().enumerate() {
-                let loc = GraphLoc {
+                let loc = GraphPt {
                     blk: blk_id,
                     stmt: pos,
                 };
@@ -537,5 +537,26 @@ impl<'a> SummaryRunner<'a> {
         for ana in &mut self.analyses {
             ana.check(&mut self.errs);
         }
+    }
+}
+
+// === Some impls ===
+
+// FIXME: for now, assume that *any* data of this shape is the result of a
+// statement-granularity dataflow analysis. That's not a "true" assumption, but
+// we can probably get away with it while we're hacking these modules out.
+// Ideally, we should return some `DataflowResults<Granularity>` type, but this
+// turns out to be surprisingly finicky.
+impl<T> ops::Index<GraphPt> for Store<BlockId, Vec<T>> {
+    type Output = T;
+
+    fn index(&self, pt: GraphPt) -> &Self::Output {
+        &self[pt.blk][pt.stmt]
+    }
+}
+
+impl<T> ops::IndexMut<GraphPt> for Store<BlockId, Vec<T>> {
+    fn index_mut(&mut self, pt: GraphPt) -> &mut Self::Output {
+        &mut self[pt.blk][pt.stmt]
     }
 }
