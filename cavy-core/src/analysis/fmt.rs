@@ -10,7 +10,7 @@ use super::dataflow::{DataflowCtx, Lattice};
 // Let's assume that *any* such store contains statementwise analysis results
 impl<'a, T> FmtWith<DataflowCtx<'a>> for Store<BlockId, Vec<T>>
 where
-    T: Debug,
+    T: Display,
 {
     fn fmt(&self, context: &DataflowCtx<'_>, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (blk_id, data) in self.idx_enumerate() {
@@ -18,7 +18,7 @@ where
             let block = &context.gr[blk_id];
             writeln!(f, "{} :: {}", blk_id, block.kind)?;
 
-            let elems: Vec<_> = data.iter().map(|elem| format!("{:?}", elem)).collect();
+            let elems: Vec<_> = data.iter().map(|elem| format!("{}", elem)).collect();
             let len = elems.iter().map(|elem| elem.len()).max().unwrap_or(0);
             for (elem, stmt) in elems.iter().zip(block.stmts.iter()) {
                 writeln!(f, "\t{:<width$}{}", elem, stmt, width = len + 4)?;

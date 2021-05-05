@@ -103,7 +103,7 @@ impl<I: Index> From<BitVec> for BitSet<I> {
     }
 }
 
-impl<I: Index> std::fmt::Debug for BitSet<I> {
+impl<I: Index> std::fmt::Display for BitSet<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut elems = self.iter();
         f.write_str("{")?;
@@ -172,9 +172,10 @@ macro_rules! bitset {
             }
         }
 
-        impl std::fmt::Debug for $name {
+        // Yeah, use the inner Debug for the outer Display for now.
+        impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{:?}", self.0)
+                write!(f, "{}", self.0)
             }
         }
 

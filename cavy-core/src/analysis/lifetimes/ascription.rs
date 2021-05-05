@@ -61,15 +61,6 @@ pub struct Ascriptions<'g> {
     _d: PhantomData<&'g ()>,
 }
 
-impl LifetimeStore {
-    fn new_region(&mut self) -> LtId {
-        let lifetime = super::Lifetime {
-            pts: std::collections::BTreeSet::new(),
-        };
-        self.insert(lifetime)
-    }
-}
-
 /// This bit of machinery builds the ascriptions tree, temporarily holding on to
 /// the inherited global state
 struct Ascriber<'l, 'a> {
@@ -152,6 +143,30 @@ impl<'g> Ascriptions<'g> {
             refs: BTreeMap::new(),
             _d: PhantomData,
         }
+    }
+
+    /// Get all the livetime ascriptions to the type of `local`.
+    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = LtId> + 'a {
+        self.place_ascriptions(&<Place>::from(local))
+    }
+
+    /// Get all the lifetime ascriptions to the type of `place`.
+    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = LtId> + 'a {
+        let err = "Attempted to read missing lifetime ascriptions";
+
+        self.locals[place.root]
+            .as_ref()
+            .and_then(|mut node| {
+                for proj in &place.path {
+                    node = match proj {
+                        Proj::Field(n) => node.slots[*n].as_ref().expect(err),
+                        Proj::Deref => node.slots[0].as_ref().expect(err),
+                    };
+                }
+                Some(node.iter())
+            })
+            .into_iter()
+            .flatten()
     }
 }
 

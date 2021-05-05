@@ -17,7 +17,7 @@ use super::dataflow::{DataflowCtx, DataflowRunner};
 
 /// Print some analysis results to the console for debugging
 macro_rules! ltdbg {
-    ($result:ident, $context:ident) => {
+    ($result:expr, $context:ident) => {
         if cfg!(debug_assertions) {
             let name: &'static str = stringify!($result);
             let name = name.to_uppercase();
@@ -37,6 +37,11 @@ mod liveness;
 mod regions;
 mod util;
 
+/// Main entry point for region inference and borrow checking
+pub fn borrow_check(context: DataflowCtx) {
+    let _lifetimes = regions::infer_regions(&context);
+}
+
 // A map from lightweight "lifetime" variables to the regions they represent
 store_type! { LifetimeStore : LtId -> Lifetime }
 
@@ -49,10 +54,19 @@ impl Lifetime {
     pub fn insert(&mut self, pt: GraphPt) -> bool {
         self.pts.insert(pt)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = GraphPt> + '_ {
+        self.pts.iter().cloned()
+    }
 }
 
-pub fn borrow_check(context: DataflowCtx) {
-    let _lifetimes = regions::infer_regions(&context);
+impl LifetimeStore {
+    fn new_region(&mut self) -> LtId {
+        let lifetime = Lifetime {
+            pts: BTreeSet::new(),
+        };
+        self.insert(lifetime)
+    }
 }
 
 impl Place {
