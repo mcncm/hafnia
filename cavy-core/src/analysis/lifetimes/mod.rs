@@ -30,8 +30,17 @@ pub fn borrow_check(context: DataflowCtx) {
 // A map from lightweight "lifetime" variables to the regions they represent
 store_type! { LifetimeStore : LtId -> Lifetime }
 
+/// See [Named
+/// lifetimes](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#layer-4-named-lifetimes):
+/// this is exactly the data structure j
 pub struct Lifetime {
+    /// The "finite" points within the graph
     pts: Store<BlockId, BitVec>,
+    /// The "points at infinity" in the caller. For now, we're making the
+    /// simplifying assumption that there is a single such point; that is, that
+    /// all function arguments and return values have the *same* lifetime. This
+    /// bit is set if this lifetime extends to infinity.
+    end: bool,
 }
 
 impl Lifetime {
@@ -62,9 +71,20 @@ impl Lifetime {
 }
 
 impl LifetimeStore {
+    /// Construct an empty lifetime
     fn new_region(&mut self, block_sizes: &[usize]) -> LtId {
         let lifetime = Lifetime {
             pts: block_sizes.iter().map(|sz| bitvec![0; *sz]).collect(),
+            end: false,
+        };
+        self.insert(lifetime)
+    }
+
+    /// Construct a lifetime that extends into the caller
+    fn end_region(&mut self, block_sizes: &[usize]) -> LtId {
+        let lifetime = Lifetime {
+            pts: block_sizes.iter().map(|sz| bitvec![1; *sz]).collect(),
+            end: true,
         };
         self.insert(lifetime)
     }

@@ -66,6 +66,10 @@ pub struct AscriptionStore<'g> {
 struct Ascriber<'l, 'a> {
     ascriptions: AscriptionStore<'a>,
     lifetimes: &'l mut LifetimeStore,
+    /// The lifetime of references that extend into the caller. There should be
+    /// possibly many of these for parameters with different lifetimes, but we
+    /// will temporarily simplify the problem by using only (at most) one.
+    end: Option<LtId>,
     types: &'a CachedTypeInterner,
     block_sizes: &'a [usize],
 }
@@ -75,8 +79,21 @@ impl<'l, 'a> Ascriber<'l, 'a> {
         Self {
             ascriptions: AscriptionStore::new(),
             lifetimes,
+            end: None,
             types: &context.ctx.types,
             block_sizes: &context.block_sizes,
+        }
+    }
+
+    fn new_lifetime(&mut self, is_end: bool) -> LtId {
+        let block_sizes = &self.block_sizes;
+        if is_end {
+            let lifetimes = &mut self.lifetimes;
+            self.end
+                .get_or_insert_with(|| lifetimes.end_region(block_sizes))
+                .clone()
+        } else {
+            self.lifetimes.new_region(block_sizes)
         }
     }
 
@@ -91,7 +108,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                         span: _,
                     },
                 ) => {
-                    let lt = self.lifetimes.new_region(self.block_sizes);
+                    let lt = self.new_lifetime(false);
                     let ascr = LtAscr { kind: *kind, lt };
                     let key = self.ascriptions.refs.insert(loc, ascr);
                     // We better visit each line only once!
@@ -104,34 +121,43 @@ impl<'l, 'a> Ascriber<'l, 'a> {
 
     /// Assumption: locals arrive in the same order the `Graph` keeps them in.
     fn ascribe_local(&mut self, local: &Local) {
-        let node = self.node_from_ty(local.ty);
+        let is_end = local.kind == LocalKind::Param;
+        let node = self.node_from_ty(local.ty, is_end);
         self.ascriptions.locals.insert(node);
     }
 
-    fn node_from_ty(&mut self, ty: TyId) -> Option<AscrNode> {
+    fn node_from_ty(&mut self, ty: TyId, is_end: bool) -> Option<AscrNode> {
         let ty = &self.types[ty];
         if ty.is_owned(self.types) {
             return None;
         }
 
         match ty {
-            Type::Tuple(tys) => self.node_from_inners(None, tys),
-            Type::Array(ty) => self.node_from_inners(None, &[*ty]),
+            Type::Tuple(tys) => self.node_from_inners(None, tys, is_end),
+            Type::Array(ty) => self.node_from_inners(None, &[*ty], is_end),
             // FIXME
             Type::Func(_, _) => todo!(),
             // FIXME
             Type::UserType(_) => None,
             Type::Ref(kind, ty) => {
-                let lt = self.lifetimes.new_region(self.block_sizes);
+                let lt = self.new_lifetime(is_end);
                 let ascr = LtAscr { kind: *kind, lt };
-                self.node_from_inners(Some(ascr), &[*ty])
+                self.node_from_inners(Some(ascr), &[*ty], is_end)
             }
             _ => None,
         }
     }
 
-    fn node_from_inners(&mut self, lt: Option<LtAscr>, inners: &[TyId]) -> Option<AscrNode> {
-        let inners = inners.iter().map(|ty| self.node_from_ty(*ty)).collect();
+    fn node_from_inners(
+        &mut self,
+        lt: Option<LtAscr>,
+        inners: &[TyId],
+        is_end: bool,
+    ) -> Option<AscrNode> {
+        let inners = inners
+            .iter()
+            .map(|ty| self.node_from_ty(*ty, is_end))
+            .collect();
         let node = AscrNode {
             this: lt,
             slots: inners,

@@ -113,7 +113,10 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
                 // doesn't matter, but it will.
                 let _ = callee;
             }
-            BlockKind::Ret => {}
+            BlockKind::Ret => {
+                // read from the return value
+                self.gen(state, &Graph::return_site().into())
+            }
         }
     }
 

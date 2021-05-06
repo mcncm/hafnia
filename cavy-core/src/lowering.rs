@@ -334,19 +334,19 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let table = func.table;
         let body = &ast.bodies[func.body];
 
-        let mut gr = Graph::new(&sigs[id]);
+        let mut gr = Graph::new(id, &sigs[id]);
         let mut st = SymbolTable::new();
         let cursor = gr.entry_block;
 
         gr.locals.insert(Local {
             ty: *output,
-            kind: LocalKind::User,
+            kind: LocalKind::Param,
         });
 
         for (param, ty) in params {
             let local = gr.locals.insert(Local {
                 ty: *ty,
-                kind: LocalKind::User,
+                kind: LocalKind::Param,
             });
             st.insert(*param, local);
         }
@@ -480,7 +480,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     // store an `Option<Graph>` in each slot, or to keep a hash table of graphs
     // in the `Mir` data structure.
     fn lower(mut self) -> Result<Graph, (Graph, ErrorBuf)> {
-        let place = self.gr.return_site().into();
+        let place = Graph::return_site().into();
         let _ = self.lower_into(&place, self.body);
         // NOTE: is this always correct?
         self.gr.exit_block = self.cursor;

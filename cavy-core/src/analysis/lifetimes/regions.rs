@@ -137,15 +137,23 @@ impl<'a> RegionInf<'a> {
                 // treatment for this case, because the guard needs to live
                 // until the end of the conditional.
                 BlockKind::Switch { .. } => {}
-                // NOTE: here we have to identify *which* lifetime the
-                // return value has.
+                // NOTE: here we have to identify *which* lifetime the return
+                // value has. For the time being, we're somewhat punting on this
+                // problem, and treating all lifetimes in a function signature
+                // as equal.
                 BlockKind::Call(call) => {
                     let FnCall {
-                        ref callee,
+                        callee: _,
                         ref args,
                         ref ret,
                         ..
                     } = **call;
+                    for arg in args {
+                        for &blk in self.context.gr[pt.blk].successors() {
+                            let pt = GraphPt::first(blk);
+                            self.sub_constr_oper(pt, ret, arg);
+                        }
+                    }
                 }
                 BlockKind::Ret => {}
             }
@@ -241,8 +249,10 @@ impl<'a> RegionInf<'a> {
             .map(|constr| {
                 let long = constr.prop.long;
                 let shrt = constr.prop.shrt;
+                // Return early: this constraint is a no-op. We could opt not to
+                // even insert these constraints, but this early-return establishes
+                // the safety of the following line *locally*.
                 if shrt == long {
-                    dbg!("got the same lifetime twice");
                     return false;
                 }
 
@@ -490,6 +500,11 @@ mod dbg {
     // NOTE: deliberately quick and dirty
     impl std::fmt::Debug for RegionInf<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let gr = &self.context.gr;
+
+            // Put up a function header
+            writeln!(f, "{:^40}", format!("== function {:?} ==", gr.id))?;
+
             let lts = transpose_lifetimes(self.lifetimes, self.context);
             let constrs = transpose_constraints(&self.constraints, self.context);
 
@@ -514,9 +529,9 @@ mod dbg {
 
             f.write_str("\n")?;
 
-            for (blk_id, block) in self.context.gr.idx_enumerate() {
+            for (blk_id, block) in gr.idx_enumerate() {
                 // Write the block headline
-                writeln!(f, "== {}: {} ==", blk_id, block.kind)?;
+                writeln!(f, "[[ {}: {} ]]", blk_id, block.kind)?;
 
                 // Make the columns
                 let linum = 0..;
@@ -536,7 +551,7 @@ mod dbg {
 
                 f.write_str("\n")?;
             }
-
+            f.write_str("\n")?;
             Ok(())
         }
     }

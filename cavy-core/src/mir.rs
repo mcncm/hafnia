@@ -139,9 +139,17 @@ pub struct GraphPt {
     pub stmt: usize,
 }
 
+impl GraphPt {
+    pub fn first(blk: BlockId) -> Self {
+        Self { blk, stmt: 0 }
+    }
+}
+
 /// The control-flow graph of a function
 #[derive(Debug)]
 pub struct Graph {
+    /// The Id of the function this graph is lowered from
+    pub id: FnId,
     /// The variables used within the CFG. This also contains the parameter and
     /// return values.
     pub locals: LocalStore,
@@ -162,12 +170,13 @@ pub struct Graph {
 
 impl Graph {
     /// Create a graph with a single empty block
-    pub fn new(sig: &TypedSig) -> Self {
+    pub fn new(id: FnId, sig: &TypedSig) -> Self {
         let mut blocks = BlockStore::new();
         let entry_block = blocks.insert(BasicBlock::new());
         let exit_block = entry_block;
         let nargs = sig.params.len();
         Self {
+            id,
             locals: LocalStore::new(),
             blocks,
             preds: PredGraph::new(),
@@ -214,7 +223,7 @@ impl Graph {
     }
 
     /// The local corresponding to the routine's return value
-    pub fn return_site(&self) -> LocalId {
+    pub fn return_site() -> LocalId {
         LocalId::default()
     }
 
@@ -361,13 +370,15 @@ pub struct Local {
     pub kind: LocalKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum LocalKind {
     /// A temporary variable inserted by the compiler
     Auto,
-    /// A user-defined variable, as a in a `let` statement or function
+    /// A user-defined variable, as in a `let` statement or function
     /// parameter.
     User,
+    /// A variable visible to the caller: either an argument or a return site.
+    Param,
 }
 
 /// As in rustc, a `Place` where data can be stored is a path rooted at a local
