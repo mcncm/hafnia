@@ -7,7 +7,7 @@ use super::{
     ascription::{self, AscrNode, AscriptionStore, LtAscr},
     liveness::{self, LiveVars},
     util::enumerate_stmts,
-    LifetimeStore, LtId,
+    Lifetime, LifetimeStore, LtId,
 };
 
 pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
@@ -28,6 +28,7 @@ pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
     };
 
     reginf.collect_constraints();
+    reginf.solve_constraints();
 
     println!("{:?}", reginf);
     for constr in reginf.constraints.constrs {
@@ -187,6 +188,57 @@ impl<'a> RegionInf<'a> {
     /// See [Reborrow
     /// Constriants](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#reborrow-constraints)
     fn collect_reborrow_constraints(&mut self) {}
+
+    /*
+    Now comes constraint solving, in which we extend the lifetimes of subtypes
+    (which should be longer) to those of their supertypes (which should be
+    shorter; that is, less specialized, and therefore less useful).
+
+    Following the RFC, we'll first do this by the most naive-possible loop over
+    constraints. We'll repeatedly extend the subtype of each constraint `('a:
+    'b) @ P` until no constraint changes any further. A subtype will be extended
+    by DFS over the control-flow graph, exiting whenever we leave the shorter
+    lifetime.
+
+    Later, once we get this working, we can optimize the algorithm by adding a
+    worklist, and so on.
+    */
+
+    /// See [Solving
+    /// constraints](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#solving-constraints)
+    fn solve_constraints(&mut self) {
+        while self.extend_constraints() {}
+    }
+
+    /// Extend the inferior lifetime in each constraint; return `true` if any changed
+    fn extend_constraints(&mut self) -> bool {
+        let lifetimes = &mut self.lifetimes;
+        self.constraints
+            .iter()
+            .map(|constr| {
+                let long = constr.prop.long;
+                let shrt = constr.prop.shrt;
+                if shrt == long {
+                    dbg!("got the same lifetime twice");
+                    return false;
+                }
+
+                // Safety: already returned if the two lifetimes are identical.
+                let (long, shrt) = unsafe { lifetimes.get_two_unchecked_mut(long, shrt) };
+
+                long.extend_to(shrt, constr.pt)
+            })
+            .any(|x| x)
+    }
+}
+
+impl Lifetime {
+    /// Minimally extend a lifetime to another one, starting from a given graph
+    /// point. Return `true` if changed.
+    fn extend_to(&mut self, _other: &Lifetime, _pt: GraphPt) -> bool {
+        // TODO
+        false
+    }
 }
 
 impl Constraints {
@@ -378,7 +430,7 @@ mod dbg {
     macro_rules! table {
         ([width = $width:expr] $f:ident << $($cols:ident$([$colw:expr])?),+) => {
             // Write the column headers
-            writeln!($f, table_fmtter!($width; $($cols),+), $(stringify!($cols)),+)?;
+            writeln!($f, table_fmtter!($width; $($cols$([$colw])?),+), $(stringify!($cols)),+)?;
             // Write the rows
             for unzip_bind!($($cols),+) in nzip!($($cols),+) {
                 writeln!($f, table_fmtter!($width; $($cols$([$colw])?),+),
@@ -395,7 +447,7 @@ mod dbg {
             let constrs = transpose_constraints(&self.constraints, self.context);
             for (blk_id, block) in self.context.gr.idx_enumerate() {
                 // Write the block headline
-                writeln!(f, "== {} :: {} ==", blk_id, block.kind)?;
+                writeln!(f, "== {} ==", blk_id)?;
 
                 // Make the columns
                 let linum = 0..;

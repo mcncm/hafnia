@@ -304,6 +304,19 @@ impl<Idx: Index, V> Store<Idx, V> {
         self.backing_store.iter_mut()
     }
 
+    // Safety: `idx` out of bounds is undefined behavior
+    pub unsafe fn get_unchecked_mut(&mut self, idx: Idx) -> &mut V {
+        self.backing_store.get_unchecked_mut(idx.into() as usize)
+    }
+
+    // Safety: `idx` out of bounds is undefined behavior; `fst` and `snd` must
+    // not be equal.
+    pub unsafe fn get_two_unchecked_mut(&mut self, fst: Idx, snd: Idx) -> (&mut V, &mut V) {
+        let fst = &mut *(self.get_unchecked_mut(fst) as *mut _);
+        let snd = &mut *(self.get_unchecked_mut(snd) as *mut _);
+        (fst, snd)
+    }
+
     // This isn't really the conventional Rust API: `enumerate` is something that takes
     // an _iterator_. I _could_ define this on the thing that *iter* returns, but
     // I'd need two new iterable types.
