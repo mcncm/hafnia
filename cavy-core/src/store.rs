@@ -103,14 +103,17 @@ impl<I: Index> From<BitVec> for BitSet<I> {
     }
 }
 
-impl<I: Index> std::fmt::Display for BitSet<I> {
+impl<I: Index> std::fmt::Display for BitSet<I>
+where
+    I: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut elems = self.iter();
         f.write_str("{")?;
         if let Some(head) = elems.next() {
-            write!(f, "{}", head.into())?;
+            write!(f, "{}", head)?;
             for elem in elems {
-                write!(f, ", {}", elem.into())?;
+                write!(f, ", {}", elem)?;
             }
         }
         f.write_str("}")

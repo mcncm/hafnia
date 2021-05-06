@@ -22,7 +22,7 @@ pub struct DataflowCtx<'a> {
     /// Some precomputed graph properties
     pub postorder: Postorder<BlockId>,
     pub preorder: Preorder<BlockId>,
-    /// The length of each block in the graph
+    /// The length of each block in the graph, including its tail.
     pub block_sizes: Vec<usize>,
 }
 
@@ -37,6 +37,21 @@ impl<'a> DataflowCtx<'a> {
             preorder: pre,
             block_sizes,
         }
+    }
+
+    /// Iterate over all the points in the graph, including block tails, in no
+    /// particular order.
+    pub fn iter_pts(&self) -> impl Iterator<Item = GraphPt> + '_ {
+        self.block_sizes
+            .iter()
+            .enumerate()
+            .map(|(blk, sz)| {
+                (0..*sz).map(move |stmt| GraphPt {
+                    blk: BlockId::from(blk as u32),
+                    stmt,
+                })
+            })
+            .flatten()
     }
 }
 

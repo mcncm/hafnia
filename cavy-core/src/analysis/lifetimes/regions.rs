@@ -6,8 +6,7 @@ use super::{
     super::{graph, DataflowCtx, DataflowRunner},
     ascription::{self, AscrNode, AscriptionStore, LtAscr},
     liveness::{self, LiveVars},
-    util::enumerate_stmts,
-    Lifetime, LifetimeStore, LtId,
+    util, Lifetime, LifetimeStore, LtId,
 };
 
 pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
@@ -29,7 +28,7 @@ pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
 
     reginf.collect_constraints();
 
-    println!("{:?}", reginf);
+    // println!("{:?}", reginf);
 
     reginf.solve_constraints();
 
@@ -89,7 +88,7 @@ impl<'a> RegionInf<'a> {
     fn collect_liveness_constraints(&mut self) {
         // Iterate over the graph in *any* order; we're only entering
         // statement-local data here
-        for (pt, _stmt) in enumerate_stmts(self.context.gr) {
+        for pt in self.context.iter_pts() {
             // For now, working at the variable granularity.
             for var in self.liveness[pt].iter() {
                 for ascr in self.ascriptions.local_ascriptions(var) {
@@ -107,7 +106,7 @@ impl<'a> RegionInf<'a> {
     ///
     /// See [Subtyping](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#subtyping)
     fn collect_subtyping_constraints(&mut self) {
-        for (pt, stmt) in enumerate_stmts(self.context.gr) {
+        for (pt, stmt) in util::enumerate_stmts(self.context.gr) {
             // StmtKind::Assn(lhs, Rvalue::) => {}
             let (lhs, rvalue) = match &stmt.kind {
                 StmtKind::Assn(lhs, Rvalue { data: rvalue, .. }) => (lhs, rvalue),
@@ -127,6 +126,29 @@ impl<'a> RegionInf<'a> {
                     self.sub_constr_refr(*refr, pt, lhs, place);
                 }
             };
+        }
+
+        // We also need to collect constraints from the block tails: they
+        // matters too, because assignments happen in them!
+        for (pt, tail) in util::enumerate_tails(self.context.gr) {
+            match tail {
+                BlockKind::Goto(_) => {}
+                // NOTE: unlike Rust, we might actually need some special
+                // treatment for this case, because the guard needs to live
+                // until the end of the conditional.
+                BlockKind::Switch { .. } => {}
+                // NOTE: here we have to identify *which* lifetime the
+                // return value has.
+                BlockKind::Call(call) => {
+                    let FnCall {
+                        ref callee,
+                        ref args,
+                        ref ret,
+                        ..
+                    } = **call;
+                }
+                BlockKind::Ret => {}
+            }
         }
     }
 
@@ -470,6 +492,28 @@ mod dbg {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let lts = transpose_lifetimes(self.lifetimes, self.context);
             let constrs = transpose_constraints(&self.constraints, self.context);
+
+            // Let's have some other columns, too, that aren't tied to the
+            // statement order. I want to see what all the lifetimes in each
+            // variable are.
+            let (locals, types): (Vec<_>, Vec<_>) = self
+                .context
+                .gr
+                .locals
+                .idx_enumerate()
+                .map(|(idx, local)| (idx, local.ty.fmt_with(self.context.ctx)))
+                .unzip();
+            let local = locals.iter();
+            let type_ = types.iter();
+            let refs = locals
+                .iter()
+                .map(|local| self.ascriptions.local_ascriptions(*local))
+                .map(|ascrs| Seq(ascrs.collect()));
+
+            table!([width = 10] f << local[8], type_[8], refs[16]);
+
+            f.write_str("\n")?;
+
             for (blk_id, block) in self.context.gr.idx_enumerate() {
                 // Write the block headline
                 writeln!(f, "== {}: {} ==", blk_id, block.kind)?;
@@ -486,32 +530,13 @@ mod dbg {
                 let regions = lts[blk_id].iter();
                 let constrs = constrs[blk_id].iter();
 
-                // Let's have some other columns, too, that aren't tied to the
-                // statement order. I want to see what all the lifetimes in each
-                // variable are.
-                let s = std::iter::repeat("|");
-                let (locals, types): (Vec<_>, Vec<_>) = self
-                    .context
-                    .gr
-                    .locals
-                    .idx_enumerate()
-                    .map(|(idx, local)| (idx, local.ty.fmt_with(self.context.ctx)))
-                    .unzip();
-                let local = locals.iter();
-                let type_ = types.iter();
-                let lts = locals
-                    .iter()
-                    .map(|local| self.ascriptions.local_ascriptions(*local))
-                    .map(|ascrs| Seq(ascrs.collect()));
-
-                table!(
-                    [width = 10] f <<
-                        linum[6], stmt[16], vars[12], regions, constrs,
-                    s[3], local[8], type_[8], lts[16]
+                table!([width = 10] f <<
+                       linum[6], stmt[16], vars[14], regions[14], constrs
                 );
 
                 f.write_str("\n")?;
             }
+
             Ok(())
         }
     }
