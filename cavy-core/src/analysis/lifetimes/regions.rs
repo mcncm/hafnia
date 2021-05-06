@@ -4,12 +4,12 @@ use crate::{mir::*, store::Store, types::RefKind, util::FmtWith};
 
 use super::{
     super::{graph, DataflowCtx, DataflowRunner},
-    ascription::{self, AscrNode, AscriptionStore, LtAscr},
+    ascription::{self, Ascr, AscrNode, AscriptionStore},
     liveness::{self, LiveVars},
     util, Lifetime, LifetimeStore, LtId,
 };
 
-pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
+pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
     let mut lifetimes = LifetimeStore::new();
     let ascriptions = ascription::ascribe(&mut lifetimes, &context);
 
@@ -19,7 +19,7 @@ pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
         .stmt_states;
 
     let mut reginf = RegionInf {
-        lifetimes: &mut lifetimes,
+        lifetimes,
         ascriptions,
         liveness,
         context,
@@ -27,19 +27,16 @@ pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
     };
 
     reginf.collect_constraints();
-
-    // println!("{:?}", reginf);
-
     reginf.solve_constraints();
 
-    println!("{:?}", reginf);
-
-    lifetimes
+    // finally, return the data computed in this phase, to use it for borrow
+    // checking and error reporting.
+    reginf
 }
 
 /// This struct does region inference to compute lifetimes.
-struct RegionInf<'a> {
-    lifetimes: &'a mut LifetimeStore,
+pub struct RegionInf<'a> {
+    lifetimes: LifetimeStore,
     ascriptions: AscriptionStore<'a>,
     liveness: Store<BlockId, Vec<LiveVars>>,
     context: &'a DataflowCtx<'a>,
@@ -123,7 +120,7 @@ impl<'a> RegionInf<'a> {
                     self.sub_constr_oper(pt, lhs, op);
                 }
                 RvalueKind::Ref(refr, place) => {
-                    self.sub_constr_refr(*refr, pt, lhs, place);
+                    self.sub_constr_loan(*refr, pt, lhs, place);
                 }
             };
         }
@@ -186,7 +183,7 @@ impl<'a> RegionInf<'a> {
     /// `Self::sub_constr`, except that the sides are "unbalanced", so we have
     /// to manually insert one level of constraint before entering the
     /// `Constraints::insert_sub_constr_{..}` recursive pair.
-    fn sub_constr_refr(&mut self, refr: RefKind, pt: GraphPt, lhs: &Place, rhs: &Place) {
+    fn sub_constr_loan(&mut self, refr: RefKind, pt: GraphPt, lhs: &Place, rhs: &Place) {
         let ltree = self.ascriptions.locals[lhs.root]
             .as_ref()
             .expect("lhs of borrow must have a lifetime");
@@ -194,7 +191,11 @@ impl<'a> RegionInf<'a> {
             .this
             .as_ref()
             .expect("lhs must have a root-level ascription");
-        let shrt = &self.ascriptions.refs[&pt];
+        let shrt = &self
+            .ascriptions
+            .get_ref(&pt)
+            .expect("loan was not ascribed")
+            .ascr;
         debug_assert!(long.kind == refr && shrt.kind == refr);
 
         // insert the constraint at the unbalanced level
@@ -308,11 +309,11 @@ impl Constraints {
     fn insert_sub_constr(&mut self, pt: GraphPt, shrt: &AscrNode, long: &AscrNode) {
         match (&shrt.this, &long.this) {
             (
-                Some(LtAscr {
+                Some(Ascr {
                     kind: shrt_kind,
                     lt: shrt_lt,
                 }),
-                Some(LtAscr {
+                Some(Ascr {
                     kind: long_kind,
                     lt: long_lt,
                 }),
@@ -505,7 +506,7 @@ mod dbg {
             // Put up a function header
             writeln!(f, "{:^40}", format!("== function {:?} ==", gr.id))?;
 
-            let lts = transpose_lifetimes(self.lifetimes, self.context);
+            let lts = transpose_lifetimes(&self.lifetimes, self.context);
             let constrs = transpose_constraints(&self.constraints, self.context);
 
             // Let's have some other columns, too, that aren't tied to the

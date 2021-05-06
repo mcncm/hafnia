@@ -1,3 +1,38 @@
+//! A generic framework for dataflow analyses[1]. Like some other parts of the
+//! middle-end (in particular the IR `mir.rs` [2]), I started this by looking
+//! `rustc`'s implementation and trying to do something similar, while stripping
+//! out as much of the heavy machinery as possible. Unlike those other parts, it
+//! may have ended up *different*, but not necessarily simpler.
+//!
+//! The implementation of `DataflowRunner` is completely indepdendent. The
+//! top-level types, however, are similar: the lattice-analysis-runner
+//! trichotomy is the same, as well as some name choices like `Domain`; the idea
+//! of being generic over direction was shamelessly cribbed.
+//!
+//! This framework is also generic over "granularity": whether an analysis
+//! records its state for each basic block, or each statement. In principle,
+//! "statementwise" granularity is an unnecessary waste of memory: you can
+//! always recompute the state at each statement *just* from that at the
+//! beginning of a basic block. But this adds some complexity, since we will
+//! need to reproduce the statement-local state (lazily, probably) later on.
+//! Some values may need to be recomputed agan and again. On the other hand, an
+//! advantage of recomputing is that it forces you to take the lifetime of the
+//! `Graph` reference, making analysis results inaccessible if they have been
+//! invalidated by `Graph` mutation.
+//!
+//! I've opted to simply save the statement-local states and index into them
+//! later. This may or may not be a good idea: it, too, adds complexity,
+//! evidenced by the 500-line tangle of generics below. It makes it difficult to
+//! give `DataflowRunner::run` a useful return type.It might also use a great
+//! deal of memory. But programs are likely to be small, and I doubt that this
+//! will prove too expensive.
+//!
+//! [1] There are also types for summary analyses, which are independent of
+//! `rustc`.
+//!
+//! [2] The borrow checker, on the other hand, is based directly on
+//! Niko Matsakis' NLL RFC, not on rustc.
+
 use std::{cell::Ref, collections::hash_map::Entry};
 use std::{
     collections::{HashMap, HashSet},
@@ -128,8 +163,6 @@ pub trait Lattice: Clone + PartialEq + Eq {
     /// and abstracting over lattice orientation, I'll just reimplement a few
     /// things a bunch of times. Fine for now.
     fn join(self, other: Self) -> Self;
-
-    fn bottom(gr: &Graph, ctx: &Context) -> Self;
 }
 
 /// Any set forms a join-semilattice under unions.
@@ -137,10 +170,6 @@ impl<T> Lattice for HashSet<T>
 where
     T: Clone + Eq + Hash,
 {
-    fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
-        Self::new()
-    }
-
     fn join(mut self, other: Self) -> Self {
         self.extend(other.into_iter());
         self
@@ -152,10 +181,6 @@ where
     K: Clone + Eq + Hash,
     V: Clone + Eq,
 {
-    fn bottom(_gr: &Graph, _ctx: &Context) -> Self {
-        Self::new()
-    }
-
     fn join(mut self, other: Self) -> Self {
         self.extend(other.into_iter().map(|(k, v)| (k, v)));
         self
@@ -169,6 +194,12 @@ where
     G: Granularity,
 {
     type Domain: Lattice;
+
+    // NOTE: This shouldn't be a method of `Lattice` because it it might have a
+    // size that depends on some arbitrary type. We could pile on still more
+    // generic bounds, but it will get ugly, quickly.
+    /// Produce the bottom element of the domain.
+    fn bottom(&self) -> Self::Domain;
 
     /// Apply the transfer function for a single statement. Empty default implementation
     fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _loc: GraphPt) {}
@@ -264,7 +295,8 @@ where
     ctx: &'a Context<'a>,
     gr: &'a mir::Graph,
     preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
-    /// Per-block analysis states, used for granularity `Blockwise`
+    /// Per-block analysis states, used for granularity `Blockwise`, and for
+    /// terminal state--independent of direction--for `Statementwise`.
     pub block_states: BlockStates<A::Domain>,
     /// Per-statement analysis states, used for granularity `Statementwise`
     pub stmt_states: StmtStates<A::Domain>,
@@ -295,8 +327,8 @@ where
         };
         Self {
             analysis,
-            block_states: Self::init_block_states(gr, ctx),
-            stmt_states: Self::init_stmt_states(gr, ctx),
+            block_states: BlockStates::new(),
+            stmt_states: StmtStates::new(),
             gr,
             ctx,
             preds,
@@ -311,6 +343,8 @@ where
     */
 
     pub fn run(mut self) -> Self {
+        self.init_block_states();
+        self.init_stmt_states();
         while let Some(blk) = self.worklist.pop() {
             self.run_inner(blk);
         }
@@ -354,9 +388,10 @@ where
 
     /// This doesn't need to be part of the `Update` trait, since it's the same
     /// for both granularities.
-    fn init_block_states(gr: &Graph, ctx: &Context) -> BlockStates<A::Domain> {
-        let bot = A::Domain::bottom(gr, ctx);
-        std::iter::repeat(bot.clone()).take(gr.len()).collect()
+    fn init_block_states(&mut self) {
+        let bot = self.analysis.bottom();
+        let states = std::iter::repeat(bot.clone()).take(self.gr.len());
+        self.block_states.extend(states);
     }
 
     /// This doesn't need to be part of the `Update` trait, since it's the same
@@ -453,10 +488,8 @@ where
     D: Direction,
     G: Granularity,
 {
-    /// Default implementation for `Blockwise` case
-    fn init_stmt_states(_gr: &Graph, _ctx: &Context) -> StmtStates<A::Domain> {
-        Store::new()
-    }
+    /// Default implementation for `Blockwise` case: empty states
+    fn init_stmt_states(&mut self) {}
 
     /// Default implementation for the `Blockwise` case: do nothing!
     fn update_stmt_state(&mut self, _blk: BlockId, _loc: usize, _state: &A::Domain) {}
@@ -468,15 +501,14 @@ where
     A: DataflowAnalysis<D, Statementwise>,
     D: Direction,
 {
-    fn init_stmt_states(gr: &Graph, ctx: &Context) -> StmtStates<A::Domain> {
-        let bot = A::Domain::bottom(gr, ctx);
-        gr.iter()
-            .map(|block| {
-                // One state for each statement and one for the block tail
-                let len = block.len();
-                std::iter::repeat(bot.clone()).take(len).collect()
-            })
-            .collect()
+    fn init_stmt_states(&mut self) {
+        let bot = self.analysis.bottom();
+        let states = self.gr.iter().map(|block| {
+            // One state for each statement and one for the block tail
+            let len = block.len();
+            std::iter::repeat(bot.clone()).take(len).collect()
+        });
+        self.stmt_states.extend(states);
     }
 
     fn update_stmt_state(&mut self, blk: BlockId, loc: usize, state: &A::Domain) {
@@ -491,14 +523,13 @@ where
 {
     /// Can I make this call unnecessary? The `stmt_states` don't even need to
     /// be initialized for blockwise granularity.
-    fn init_stmt_states(gr: &Graph, ctx: &Context) -> StmtStates<A::Domain> {
-        let bot = A::Domain::bottom(gr, ctx);
-        gr.iter()
-            .map(|block| {
-                let len = block.len();
-                std::iter::repeat(bot.clone()).take(len).collect()
-            })
-            .collect()
+    fn init_stmt_states(&mut self) {
+        let bot = self.analysis.bottom();
+        let states = self.gr.iter().map(|block| {
+            let len = block.len();
+            std::iter::repeat(bot.clone()).take(len).collect()
+        });
+        self.stmt_states.extend(states)
     }
 }
 
@@ -511,7 +542,7 @@ pub trait SummaryAnalysis {
     /// Apply the transfer function for a single statement
     fn trans_stmt(&mut self, stmt: &Stmt, loc: &GraphPt);
 
-    /// Apply the transfer function for the end of a basic block
+    /// Apply the transfer function for the tail of a basic block
     fn trans_block(&mut self, block: &BlockKind, loc: &BlockId);
 
     /// If this analysis identified any errors, check for them

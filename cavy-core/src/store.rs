@@ -307,6 +307,13 @@ impl<Idx: Index, V> Store<Idx, V> {
         self.backing_store.iter_mut()
     }
 
+    pub fn extend<It>(&mut self, iter: It)
+    where
+        It: Iterator<Item = V>,
+    {
+        self.backing_store.extend(iter)
+    }
+
     // Safety: `idx` out of bounds is undefined behavior
     pub unsafe fn get_unchecked_mut(&mut self, idx: Idx) -> &mut V {
         self.backing_store.get_unchecked_mut(idx.into() as usize)

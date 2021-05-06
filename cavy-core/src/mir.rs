@@ -1,7 +1,15 @@
 //! The control-flow graph representation of the program. This is analogous to
-//! rustc's MIR. Like the MIR, it is a fully-typed version of the program, with
-//! all names resolved, and its structure is *very* similar. This module is
-//! *essentially* a simplified version of `rustc_middle/src/mir/mod.rs`.
+//! rustc's MIR. Like the rustc MIR, it is a fully-typed version of the program,
+//! with all names fully resolved. Its structure is *very* similar. There's good
+//! reason to use a simplified version of essentially the same CFG data
+//! structure. Working backwards from the goal of implementing a borrow checker
+//! similar to Rust's, it's sensible to operate over a similar domain, rather
+//! than add the incidental complexity of translating from to another. Because
+//! our surface syntax is also quite rusty, this entails good "impedance
+//! matching" looking in the other direction, too.
+//!
+//! To compare these data structures with with the analogous ones in rustc, take
+//! a look at the module in `rustc_middle/src/mir/mod.rs`.
 
 use crate::store_type;
 use crate::{

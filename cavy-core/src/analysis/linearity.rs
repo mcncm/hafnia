@@ -169,13 +169,6 @@ impl MoveState {
 }
 
 impl Lattice for MoveState {
-    fn bottom(_: &Graph, _: &crate::context::Context) -> Self {
-        Self {
-            moves: HashMap::new(),
-            double_moves: HashMap::new(),
-        }
-    }
-
     fn join(mut self, other: Self) -> Self {
         // We choose to extend a copy of the hashmap, overwriting `Span`s that
         // might be in there. That's ok: if we're merging from two paths, we
@@ -213,10 +206,15 @@ impl Lattice for MoveState {
 /// two bits for each local, for a whole procedure.
 pub struct LinearityAnalysis {}
 
-impl LinearityAnalysis {}
-
 impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
     type Domain = MoveState;
+
+    fn bottom(&self) -> Self::Domain {
+        Self::Domain {
+            moves: HashMap::new(),
+            double_moves: HashMap::new(),
+        }
+    }
 
     fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphPt) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an

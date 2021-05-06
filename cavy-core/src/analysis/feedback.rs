@@ -30,10 +30,6 @@ pub struct MeasState {
 }
 
 impl Lattice for MeasState {
-    fn bottom(_: &mir::Graph, _: &crate::context::Context) -> Self {
-        Self::default()
-    }
-
     fn join(self, other: Self) -> Self {
         let delin = self.delin.join(other.delin);
         let lin = self.lin.join(other.lin);
@@ -61,6 +57,10 @@ pub struct FeedbackAnalysis {}
 
 impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     type Domain = MeasState;
+
+    fn bottom(&self) -> Self::Domain {
+        Self::Domain::default()
+    }
 
     fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphPt) {
         use RvalueKind::*;

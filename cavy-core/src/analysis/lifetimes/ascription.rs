@@ -32,10 +32,13 @@ use crate::{
     analysis::dataflow::{DataflowCtx, Forward, OrderProvider},
     mir::*,
     store::Store,
+    store_type,
     types::{CachedTypeInterner, RefKind, TyId, Type},
 };
 
 use super::{util::enumerate_stmts, LifetimeStore, LtId};
+
+store_type! { LoanStore: LoanId -> Loan }
 
 pub fn ascribe<'l, 'a>(
     lifetimes: &'l mut LifetimeStore,
@@ -46,7 +49,7 @@ pub fn ascribe<'l, 'a>(
         ascriber.ascribe_local(local);
     }
 
-    ascriber.ascribe_refs(&context.gr);
+    ascriber.ascribe_loans(&context.gr);
 
     ascriber.ascriptions
 }
@@ -56,9 +59,19 @@ pub fn ascribe<'l, 'a>(
 pub struct AscriptionStore<'g> {
     /// Lifetime ascriptions of locals types
     pub locals: Store<LocalId, Option<AscrNode>>,
-    /// Ascriptions to `Ref` statements
-    pub refs: BTreeMap<GraphPt, LtAscr>,
+    /// Every loan (`Ascr` * `Place`) in the CFG
+    pub loans: Store<LoanId, Loan>,
+    /// Ascriptions to `Ref` statements at each point: the indirection here
+    /// supports later borrowchecker analyses that will need to look up loans by
+    /// `LoanId`.
+    pub refs: BTreeMap<GraphPt, LoanId>,
     _d: PhantomData<&'g ()>,
+}
+
+impl<'g> AscriptionStore<'g> {
+    pub fn get_ref(&self, pt: &GraphPt) -> Option<&Loan> {
+        self.refs.get(pt).and_then(|id| Some(&self.loans[*id]))
+    }
 }
 
 /// This bit of machinery builds the ascriptions tree, temporarily holding on to
@@ -97,20 +110,25 @@ impl<'l, 'a> Ascriber<'l, 'a> {
         }
     }
 
-    fn ascribe_refs(&mut self, gr: &Graph) {
+    fn ascribe_loans(&mut self, gr: &Graph) {
         // Doesn't matter what order we traverse the graph in; this is just a summary pass
         for (loc, stmt) in enumerate_stmts(gr) {
             match &stmt.kind {
                 StmtKind::Assn(
                     _,
                     Rvalue {
-                        data: RvalueKind::Ref(kind, _rhs),
+                        data: RvalueKind::Ref(kind, rhs),
                         span: _,
                     },
                 ) => {
                     let lt = self.new_lifetime(false);
-                    let ascr = LtAscr { kind: *kind, lt };
-                    let key = self.ascriptions.refs.insert(loc, ascr);
+                    let ascr = Ascr { kind: *kind, lt };
+                    let loan = Loan {
+                        ascr,
+                        place: rhs.clone(),
+                    };
+                    let id = self.ascriptions.loans.insert(loan);
+                    let key = self.ascriptions.refs.insert(loc, id);
                     // We better visit each line only once!
                     debug_assert_eq!(key, None);
                 }
@@ -141,7 +159,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
             Type::UserType(_) => None,
             Type::Ref(kind, ty) => {
                 let lt = self.new_lifetime(is_end);
-                let ascr = LtAscr { kind: *kind, lt };
+                let ascr = Ascr { kind: *kind, lt };
                 self.node_from_inners(Some(ascr), &[*ty], is_end)
             }
             _ => None,
@@ -150,7 +168,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
 
     fn node_from_inners(
         &mut self,
-        lt: Option<LtAscr>,
+        lt: Option<Ascr>,
         inners: &[TyId],
         is_end: bool,
     ) -> Option<AscrNode> {
@@ -170,18 +188,19 @@ impl<'g> AscriptionStore<'g> {
     fn new() -> Self {
         Self {
             locals: Store::new(),
+            loans: Store::new(),
             refs: BTreeMap::new(),
             _d: PhantomData,
         }
     }
 
     /// Get all the livetime ascriptions to the type of `local`.
-    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = LtAscr> + 'a {
+    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = Ascr> + 'a {
         self.place_ascriptions(&<Place>::from(local))
     }
 
     /// Get all the lifetime ascriptions to the type of `place`.
-    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = LtAscr> + 'a {
+    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = Ascr> + 'a {
         let err = "Attempted to read missing lifetime ascriptions";
 
         self.locals[place.root]
@@ -202,23 +221,32 @@ impl<'g> AscriptionStore<'g> {
 
 /// The actual ascription data
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LtAscr {
+pub struct Ascr {
     pub kind: RefKind,
     pub lt: LtId,
+}
+
+/// The ascription data of a reference, together with the `Place` it references.
+/// See [computing loans in
+/// scope](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#borrow-checker-phase-1-computing-loans-in-scope)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Loan {
+    pub ascr: Ascr,
+    pub place: Place,
 }
 
 /// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
 /// practice, noting that few variables will have wide-branching `Place` trees.
 pub struct AscrNode {
     /// Ascription at this `Place`
-    pub this: Option<LtAscr>,
+    pub this: Option<Ascr>,
     /// Ascriptions at deeper paths
     pub slots: Vec<Option<AscrNode>>,
 }
 
 impl AscrNode {
     // NOTE: can't use an opaque type (`impl Iterator<..>`) because of recursion
-    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = LtAscr> + 'a> {
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = Ascr> + 'a> {
         let children = self
             .slots
             .iter()
@@ -230,7 +258,7 @@ impl AscrNode {
 
 // == boilerplate impls ==
 
-impl std::fmt::Display for LtAscr {
+impl std::fmt::Display for Ascr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.kind, self.lt)
     }

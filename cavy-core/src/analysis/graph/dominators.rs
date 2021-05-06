@@ -7,12 +7,6 @@ use super::*;
 bitset! { Dominators(BlockId) }
 
 impl Lattice for Dominators {
-    /// This is really "top".
-    fn bottom(gr: &Graph, _ctx: &Context) -> Self {
-        let blocks = gr.len();
-        Self::full(blocks)
-    }
-
     /// Intersect. This is really a "meet," not what you would call a join.
     fn join(self, other: Self) -> Self {
         self & other
@@ -35,6 +29,11 @@ impl<D: Direction> DominatorAnalysis<D> {
 
 impl<D: Direction> DataflowAnalysis<D, Blockwise> for DominatorAnalysis<D> {
     type Domain = Dominators;
+
+    /// This is really a "top".
+    fn bottom(&self) -> Self::Domain {
+        Self::Domain::full(self.blocks)
+    }
 
     fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _loc: BlockId) {}
 

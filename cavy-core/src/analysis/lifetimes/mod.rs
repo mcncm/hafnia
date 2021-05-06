@@ -19,15 +19,17 @@ use super::dataflow::{DataflowCtx, DataflowRunner};
 
 mod ascription;
 mod liveness;
+mod loan_scope;
 mod regions;
 mod util;
 
 /// Main entry point for region inference and borrow checking
 pub fn borrow_check(context: DataflowCtx) {
-    let _lifetimes = regions::infer_regions(&context);
+    let regions = regions::infer_regions(&context);
+    println!("{:?}", regions);
 }
 
-// A map from lightweight "lifetime" variables to the regions they represent
+// A map from lightweight lifetime variables to the regions they represent
 store_type! { LifetimeStore : LtId -> Lifetime }
 
 /// See [Named

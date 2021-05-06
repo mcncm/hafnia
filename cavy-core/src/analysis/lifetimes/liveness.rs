@@ -25,17 +25,10 @@ use super::{
     *,
 };
 
-use bitvec::prelude::*;
-
 bitset! { LiveVars(LocalId) }
 
 // The canonical set lattice
 impl Lattice for LiveVars {
-    fn bottom(gr: &Graph, _ctx: &Context) -> Self {
-        let blocks = gr.len();
-        Self(BitSet::empty(blocks))
-    }
-
     /// Simple set union
     fn join(self, other: Self) -> Self {
         self | other
@@ -91,6 +84,10 @@ impl LivenessAnalysis {
 
 impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
     type Domain = LiveVars;
+
+    fn bottom(&self) -> Self::Domain {
+        LiveVars::empty(self.vars)
+    }
 
     fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, _loc: BlockId) {
         match block {
