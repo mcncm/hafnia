@@ -67,14 +67,16 @@ struct Ascriber<'l, 'a> {
     ascriptions: AscriptionStore<'a>,
     lifetimes: &'l mut LifetimeStore,
     types: &'a CachedTypeInterner,
+    block_sizes: &'a [usize],
 }
 
 impl<'l, 'a> Ascriber<'l, 'a> {
-    fn new(lifetimes: &'l mut LifetimeStore, context: &DataflowCtx<'a>) -> Self {
+    fn new(lifetimes: &'l mut LifetimeStore, context: &'a DataflowCtx<'a>) -> Self {
         Self {
             ascriptions: AscriptionStore::new(),
             lifetimes,
             types: &context.ctx.types,
+            block_sizes: &context.block_sizes,
         }
     }
 
@@ -89,7 +91,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                         span: _,
                     },
                 ) => {
-                    let lt = self.lifetimes.new_region();
+                    let lt = self.lifetimes.new_region(self.block_sizes);
                     let ascr = LtAscr { kind: *kind, lt };
                     let key = self.ascriptions.refs.insert(loc, ascr);
                     // We better visit each line only once!
@@ -120,7 +122,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
             // FIXME
             Type::UserType(_) => None,
             Type::Ref(kind, ty) => {
-                let lt = self.lifetimes.new_region();
+                let lt = self.lifetimes.new_region(self.block_sizes);
                 let ascr = LtAscr { kind: *kind, lt };
                 self.node_from_inners(Some(ascr), &[*ty])
             }

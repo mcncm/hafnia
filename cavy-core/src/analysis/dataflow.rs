@@ -20,18 +20,22 @@ pub struct DataflowCtx<'a> {
     /// The graph itself
     pub gr: &'a Graph,
     /// Some precomputed graph properties
-    postorder: Postorder<BlockId>,
-    preorder: Preorder<BlockId>,
+    pub postorder: Postorder<BlockId>,
+    pub preorder: Preorder<BlockId>,
+    /// The length of each block in the graph
+    pub block_sizes: Vec<usize>,
 }
 
 impl<'a> DataflowCtx<'a> {
     pub fn new(gr: &'a Graph, ctx: &'a Context) -> Self {
         let (pre, post) = graph::traversals(gr);
+        let block_sizes = gr.iter().map(|block| block.len()).collect();
         Self {
             ctx,
             gr,
             postorder: post,
             preorder: pre,
+            block_sizes,
         }
     }
 }

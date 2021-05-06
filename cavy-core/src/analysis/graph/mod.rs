@@ -11,7 +11,7 @@ use bitvec::prelude::*;
 mod algorithm;
 pub mod dominators;
 
-pub use algorithm::{traversals, Postorder, Preorder};
+pub use algorithm::{traversals, Digraph, Postorder, Preorder};
 pub use dominators::DominatorAnalysis;
 
 // We're going to interpret a `BitVec` as a set, whose elements are its nonzero

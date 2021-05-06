@@ -3,7 +3,7 @@ use std::fmt;
 use crate::{mir::*, store::Store, types::RefKind, util::FmtWith};
 
 use super::{
-    super::{DataflowCtx, DataflowRunner},
+    super::{graph, DataflowCtx, DataflowRunner},
     ascription::{self, AscrNode, AscriptionStore, LtAscr},
     liveness::{self, LiveVars},
     util::enumerate_stmts,
@@ -213,6 +213,7 @@ impl<'a> RegionInf<'a> {
     /// Extend the inferior lifetime in each constraint; return `true` if any changed
     fn extend_constraints(&mut self) -> bool {
         let lifetimes = &mut self.lifetimes;
+        let gr = &self.context.gr;
         self.constraints
             .iter()
             .map(|constr| {
@@ -223,10 +224,10 @@ impl<'a> RegionInf<'a> {
                     return false;
                 }
 
-                // Safety: already returned if the two lifetimes are identical.
+                // Safety: if the two lifetimes are identical, we have already returned.
                 let (long, shrt) = unsafe { lifetimes.get_two_unchecked_mut(long, shrt) };
 
-                long.extend_to(shrt, constr.pt)
+                long.extend_to(shrt, constr.pt, gr)
             })
             .any(|x| x)
     }
@@ -235,9 +236,32 @@ impl<'a> RegionInf<'a> {
 impl Lifetime {
     /// Minimally extend a lifetime to another one, starting from a given graph
     /// point. Return `true` if changed.
-    fn extend_to(&mut self, _other: &Lifetime, _pt: GraphPt) -> bool {
-        // TODO
-        false
+    fn extend_to(&mut self, other: &Lifetime, pt: GraphPt, gr: &Graph) -> bool {
+        let mut changed = false;
+        let mut stmt = pt.stmt; // starts at a nonzero value!
+        let mut blocks = vec![pt.blk];
+        while let Some(blk) = blocks.pop() {
+            let this = &mut self[blk][stmt..];
+            let other = &other[blk][stmt..];
+            let mask = other.leading_ones();
+
+            let ones = this.count_ones();
+            // Add the other lifetime's points
+            this[..mask].set_all(true);
+            // Mark whether we got new points
+            changed |= ones != this.count_ones();
+
+            // End when we go out of the other lifetime
+            if other.first_zero().is_some() {
+                continue;
+            }
+
+            // Otherwise, move on to the next blocks!
+            blocks.extend(gr[blk].successors());
+            // In all blocks but the first, start at the first statement.
+            stmt = 0;
+        }
+        changed
     }
 }
 
@@ -378,10 +402,10 @@ impl fmt::Display for LiveAt {
 impl FmtWith<LifetimeStore> for LtId {
     fn fmt(&self, store: &LifetimeStore, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lifetime = &store[*self];
-        for pt in lifetime.pts.iter() {
+        for pt in lifetime.iter() {
             let constr = LiveAt {
                 prop: LiveP(*self),
-                pt: *pt,
+                pt,
             };
             writeln!(f, "{}", constr)?;
         }

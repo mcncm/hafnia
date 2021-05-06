@@ -34,7 +34,7 @@ pub fn traversals(gr: &Graph) -> (Preorder<BlockId>, Postorder<BlockId>) {
 }
 
 /// A (currently uniquely) rooted directed graph
-trait Digraph<T>
+pub trait Digraph<T>
 where
     T: Clone + Hash + PartialEq + Eq,
     Self: Sized,
