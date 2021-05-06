@@ -201,3 +201,11 @@ impl AscrNode {
         Box::new(self.this.iter().cloned().chain(children))
     }
 }
+
+// == boilerplate impls ==
+
+impl std::fmt::Display for LtAscr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.kind, self.lt)
+    }
+}

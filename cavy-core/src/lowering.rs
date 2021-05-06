@@ -889,7 +889,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // `bool`, when it could also be a `?bool`.
         let cond_ty = self.type_expr(cond)?;
         self.expect_type(
-            &[self.ctx.common.bool, self.ctx.common.q_bool],
+            &[self.ctx.common.bool, self.ctx.common.shrd_q_bool],
             cond_ty,
             cond.span,
         )?;

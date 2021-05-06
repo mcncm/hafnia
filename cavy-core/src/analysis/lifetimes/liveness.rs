@@ -92,7 +92,30 @@ impl LivenessAnalysis {
 impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
     type Domain = LiveVars;
 
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _loc: BlockId) {}
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, _loc: BlockId) {
+        match block {
+            BlockKind::Goto(_) => {}
+            BlockKind::Switch { cond, .. } => self.gen(state, cond),
+            BlockKind::Call(call) => {
+                let FnCall {
+                    ref args,
+                    ref ret,
+                    ref callee,
+                    ..
+                } = **call;
+                // read from the args
+                for arg in args.iter() {
+                    self.gen_operand(state, arg);
+                }
+                // write to the return value
+                self.kill(state, ret);
+                // And then, what do we do with the function? At the moment this
+                // doesn't matter, but it will.
+                let _ = callee;
+            }
+            BlockKind::Ret => {}
+        }
+    }
 
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
         LiveVars(BitSet::empty(self.vars))

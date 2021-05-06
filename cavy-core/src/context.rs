@@ -1,13 +1,16 @@
 //! This module is home to the `Context` data structure central to the
 //! compilation process.
 
-use crate::source::{SrcId, SrcStore};
 use crate::types::{CachedTypeInterner, TyId, Type};
 use crate::{cavy_errors::ErrorBuf, num::Uint};
 use crate::{interner_type, types::TypeSize};
 use crate::{
     session::{Config, Phase, Statistics},
     util::FmtWith,
+};
+use crate::{
+    source::{SrcId, SrcStore},
+    types::RefKind,
 };
 use std::{collections::HashMap, fmt};
 
@@ -24,6 +27,7 @@ macro_rules! common_types {
 common_types! {
     unit, bool, u4, u8, u16, u32,
     q_bool, q_u4, q_u8, q_u16, q_u32,
+    shrd_q_bool,
     // This is a provisional type not intended to stay in the compiler forever
     ord
 }
@@ -50,6 +54,7 @@ pub struct Context<'ctx> {
 impl<'ctx> Context<'ctx> {
     pub fn new(conf: &'ctx Config, stats: &'ctx mut Statistics) -> Self {
         let mut types = CachedTypeInterner::new();
+        let q_bool = types.intern(Type::Q_Bool);
         let common = CommonTypes {
             unit: types.intern(Type::unit()),
             bool: types.intern(Type::Bool),
@@ -57,11 +62,12 @@ impl<'ctx> Context<'ctx> {
             u8: types.intern(Type::Uint(Uint::U8)),
             u16: types.intern(Type::Uint(Uint::U16)),
             u32: types.intern(Type::Uint(Uint::U32)),
-            q_bool: types.intern(Type::Q_Bool),
+            q_bool,
             q_u4: types.intern(Type::Q_Uint(Uint::U4)),
             q_u8: types.intern(Type::Q_Uint(Uint::U8)),
             q_u16: types.intern(Type::Q_Uint(Uint::U16)),
             q_u32: types.intern(Type::Q_Uint(Uint::U32)),
+            shrd_q_bool: types.intern(Type::Ref(RefKind::Shrd, q_bool)),
             ord: types.intern(Type::Ord),
         };
         Self {

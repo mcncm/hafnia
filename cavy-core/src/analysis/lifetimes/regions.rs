@@ -28,12 +28,12 @@ pub fn infer_regions(context: &DataflowCtx) -> LifetimeStore {
     };
 
     reginf.collect_constraints();
+
+    println!("{:?}", reginf);
+
     reginf.solve_constraints();
 
     println!("{:?}", reginf);
-    for constr in reginf.constraints.constrs {
-        println!("{}", constr);
-    }
 
     lifetimes
 }
@@ -465,13 +465,14 @@ mod dbg {
         }
     }
 
+    // NOTE: deliberately quick and dirty
     impl std::fmt::Debug for RegionInf<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let lts = transpose_lifetimes(self.lifetimes, self.context);
             let constrs = transpose_constraints(&self.constraints, self.context);
             for (blk_id, block) in self.context.gr.idx_enumerate() {
                 // Write the block headline
-                writeln!(f, "== {} ==", blk_id)?;
+                writeln!(f, "== {}: {} ==", blk_id, block.kind)?;
 
                 // Make the columns
                 let linum = 0..;
@@ -480,12 +481,34 @@ mod dbg {
                     .iter()
                     .map(|stmt| stmt as &dyn std::fmt::Display)
                     // ...and include the block tail.
-                    .chain(std::iter::once(&block.kind as &dyn std::fmt::Display));
+                    .chain(std::iter::once(&"term" as &dyn std::fmt::Display));
                 let vars = self.liveness[blk_id].iter();
                 let regions = lts[blk_id].iter();
                 let constrs = constrs[blk_id].iter();
 
-                table!( [width = 10] f << linum[6], stmt[16], vars, regions, constrs );
+                // Let's have some other columns, too, that aren't tied to the
+                // statement order. I want to see what all the lifetimes in each
+                // variable are.
+                let s = std::iter::repeat("|");
+                let (locals, types): (Vec<_>, Vec<_>) = self
+                    .context
+                    .gr
+                    .locals
+                    .idx_enumerate()
+                    .map(|(idx, local)| (idx, local.ty.fmt_with(self.context.ctx)))
+                    .unzip();
+                let local = locals.iter();
+                let type_ = types.iter();
+                let lts = locals
+                    .iter()
+                    .map(|local| self.ascriptions.local_ascriptions(*local))
+                    .map(|ascrs| Seq(ascrs.collect()));
+
+                table!(
+                    [width = 10] f <<
+                        linum[6], stmt[16], vars[12], regions, constrs,
+                    s[3], local[8], type_[8], lts[16]
+                );
 
                 f.write_str("\n")?;
             }
