@@ -104,23 +104,35 @@ impl<'a> RegionInf<'a> {
     /// See [Subtyping](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#subtyping)
     fn collect_subtyping_constraints(&mut self) {
         for (pt, stmt) in util::enumerate_stmts(self.context.gr) {
-            // StmtKind::Assn(lhs, Rvalue::) => {}
+            // The constraint must take effect in the *next* statement. Because
+            // we are not in a tail block, this is always safe.
+            let mut nxt = pt;
+            nxt.stmt += 1;
+
             let (lhs, rvalue) = match &stmt.kind {
                 StmtKind::Assn(lhs, Rvalue { data: rvalue, .. }) => (lhs, rvalue),
-                // only assignments should generate subtyping constraints
+                // only assignments (and calls) should generate subtyping constraints
                 _ => return,
             };
 
             match rvalue {
                 RvalueKind::BinOp(_, lop, rop) => {
-                    self.sub_constr_oper(pt, lhs, lop);
-                    self.sub_constr_oper(pt, lhs, rop);
+                    self.sub_constr_oper(nxt, lhs, lop);
+                    self.sub_constr_oper(nxt, lhs, rop);
                 }
                 RvalueKind::UnOp(_, op) | RvalueKind::Use(op) => {
-                    self.sub_constr_oper(pt, lhs, op);
+                    self.sub_constr_oper(nxt, lhs, op);
                 }
                 RvalueKind::Ref(refr, place) => {
-                    self.sub_constr_loan(*refr, pt, lhs, place);
+                    // Prefer if this weren't here; it's a hopeless tangle.
+                    let ascr = self
+                        .ascriptions
+                        .get_ref(&pt)
+                        .expect("loan was not ascribed")
+                        .ascr
+                        .clone();
+                    debug_assert_eq!(&ascr.kind, refr);
+                    self.sub_constr_loan(nxt, lhs, ascr, place);
                 }
             };
         }
@@ -146,6 +158,8 @@ impl<'a> RegionInf<'a> {
                         ..
                     } = **call;
                     for arg in args {
+                        // Here, we *do* need to look forward into the
+                        // next block(s) to get the point(s) to insert the statement.
                         for &blk in self.context.gr[pt.blk].successors() {
                             let pt = GraphPt::first(blk);
                             self.sub_constr_oper(pt, ret, arg);
@@ -171,7 +185,8 @@ impl<'a> RegionInf<'a> {
             &self.ascriptions.locals[rhs.root],
         ) {
             (Some(ltree), Some(rtree)) => {
-                // Recursively apply the subtyping rule, with `rtree <: ltree`
+                // Recursively apply the subtyping rule, with `rtree <: ltree`,
+                // from the *next* point, which is where the constraint takes effect.
                 self.constraints.insert_sub_constr(pt, rtree, ltree);
             }
             (None, None) => {}
@@ -183,33 +198,28 @@ impl<'a> RegionInf<'a> {
     /// `Self::sub_constr`, except that the sides are "unbalanced", so we have
     /// to manually insert one level of constraint before entering the
     /// `Constraints::insert_sub_constr_{..}` recursive pair.
-    fn sub_constr_loan(&mut self, refr: RefKind, pt: GraphPt, lhs: &Place, rhs: &Place) {
+    fn sub_constr_loan(&mut self, pt: GraphPt, lhs: &Place, ascr: Ascr, rhs_inner: &Place) {
         let ltree = self.ascriptions.locals[lhs.root]
             .as_ref()
             .expect("lhs of borrow must have a lifetime");
-        let long = ltree
+        let shrt = ltree
             .this
             .as_ref()
             .expect("lhs must have a root-level ascription");
-        let shrt = &self
-            .ascriptions
-            .get_ref(&pt)
-            .expect("loan was not ascribed")
-            .ascr;
-        debug_assert!(long.kind == refr && shrt.kind == refr);
 
         // insert the constraint at the unbalanced level
-        self.constraints.outlives_at(long.lt, shrt.lt, pt);
+        // FIXME: this fails to enforce `&mut`'s invariance
+        self.constraints.outlives_from(ascr.lt, shrt.lt, pt);
 
         // finally, recurse on any contained types
         debug_assert_eq!(ltree.slots.len(), 1);
         match (
             ltree.slots[0].as_ref(),
-            self.ascriptions.locals[rhs.root].as_ref(),
+            self.ascriptions.locals[rhs_inner.root].as_ref(),
         ) {
             (Some(ltree), Some(rtree)) => {
                 self.constraints
-                    .insert_sub_constr_inner(Some(refr), pt, rtree, ltree);
+                    .insert_sub_constr_inner(Some(ascr.kind), pt, rtree, ltree);
             }
             (None, None) => {}
             _ => unreachable!("lhs and rhs ascription trees differ"),
@@ -266,38 +276,6 @@ impl<'a> RegionInf<'a> {
     }
 }
 
-impl Lifetime {
-    /// Minimally extend a lifetime to another one, starting from a given graph
-    /// point. Return `true` if changed.
-    fn extend_to(&mut self, other: &Lifetime, pt: GraphPt, gr: &Graph) -> bool {
-        let mut changed = false;
-        let mut stmt = pt.stmt; // starts at a nonzero value!
-        let mut blocks = vec![pt.blk];
-        while let Some(blk) = blocks.pop() {
-            let this = &mut self[blk][stmt..];
-            let other = &other[blk][stmt..];
-            let mask = other.leading_ones();
-
-            let ones = this.count_ones();
-            // Add the other lifetime's points
-            this[..mask].set_all(true);
-            // Mark whether we got new points
-            changed |= ones != this.count_ones();
-
-            // End when we go out of the other lifetime
-            if other.first_zero().is_some() {
-                continue;
-            }
-
-            // Otherwise, move on to the next blocks!
-            blocks.extend(gr[blk].successors());
-            // In all blocks but the first, start at the first statement.
-            stmt = 0;
-        }
-        changed
-    }
-}
-
 impl Constraints {
     fn new() -> Self {
         Self {
@@ -322,7 +300,7 @@ impl Constraints {
                 // were, you could break all the rules.
             ) if shrt_kind == long_kind => {
                 // insert the constraints at this level
-                self.outlives_at(*long_lt, *shrt_lt, pt);
+                self.outlives_from(*long_lt, *shrt_lt, pt);
 
                 // finally, recurse on any inner types that have lifetime
                 // ascriptions
@@ -374,11 +352,43 @@ impl Constraints {
         }
     }
 
-    fn outlives_at(&mut self, long: LtId, shrt: LtId, pt: GraphPt) {
+    fn outlives_from(&mut self, long: LtId, shrt: LtId, pt: GraphPt) {
         self.constrs.push(LocalP {
             prop: OutlivesP { long, shrt },
             pt,
         });
+    }
+}
+
+impl Lifetime {
+    /// Minimally extend a lifetime to another one, starting from a given graph
+    /// point. Return `true` if changed.
+    fn extend_to(&mut self, other: &Lifetime, pt: GraphPt, gr: &Graph) -> bool {
+        let mut changed = false;
+        let mut stmt = pt.stmt; // starts at a nonzero value!
+        let mut blocks = vec![pt.blk];
+        while let Some(blk) = blocks.pop() {
+            let this = &mut self[blk][stmt..];
+            let other = &other[blk][stmt..];
+            let mask = other.leading_ones();
+
+            let ones = this.count_ones();
+            // Add the other lifetime's points
+            this[..mask].set_all(true);
+            // Mark whether we got new points
+            changed |= ones != this.count_ones();
+
+            // End when we go out of the other lifetime
+            if other.first_zero().is_some() {
+                continue;
+            }
+
+            // Otherwise, move on to the next blocks!
+            blocks.extend(gr[blk].successors());
+            // In all blocks but the first, start at the first statement.
+            stmt = 0;
+        }
+        changed
     }
 }
 
@@ -521,12 +531,12 @@ mod dbg {
                 .unzip();
             let local = locals.iter();
             let type_ = types.iter();
-            let refs = locals
+            let regions = locals
                 .iter()
                 .map(|local| self.ascriptions.local_ascriptions(*local))
                 .map(|ascrs| Seq(ascrs.collect()));
 
-            table!([width = 10] f << local[8], type_[8], refs[16]);
+            table!([width = 10] f << local[8], type_[8], regions[16]);
 
             f.write_str("\n")?;
 
@@ -545,9 +555,16 @@ mod dbg {
                 let vars = self.liveness[blk_id].iter();
                 let regions = lts[blk_id].iter();
                 let constrs = constrs[blk_id].iter();
+                let refs = (0..).map(|stmt| {
+                    let pt = GraphPt { blk: blk_id, stmt };
+                    self.ascriptions.refs.get(&pt).map_or_else(
+                        || String::new(),
+                        |ln| format!("{}", self.ascriptions.loans[*ln].ascr),
+                    )
+                });
 
                 table!([width = 10] f <<
-                       linum[6], stmt[16], vars[14], regions[14], constrs
+                       linum[6], stmt[20], vars[16], regions[18], constrs[12], refs
                 );
 
                 f.write_str("\n")?;

@@ -264,6 +264,7 @@ type StmtStates<L> = Store<mir::BlockId, Vec<L>>;
 /// `BTreeMap::pop` API isn't stable yet, so we'll just use this. No idea if
 /// it's faster in practice (or not) to add a `HashSet` for uniqueness. One of
 /// those "asymptotically-faster-vs-in-practice-faster" questions.
+#[derive(Debug)]
 struct UniqueStack<T: PartialEq + Eq> {
     stack: Vec<T>,
 }
@@ -277,6 +278,10 @@ impl<T: PartialEq + Eq> UniqueStack<T> {
 
     fn pop(&mut self) -> Option<T> {
         self.stack.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.stack.len()
     }
 }
 
@@ -328,6 +333,8 @@ where
         let worklist = UniqueStack {
             stack: rev_order.clone().into(),
         };
+        debug_assert_eq!(worklist.len(), gr.len());
+
         Self {
             analysis,
             block_states: BlockStates::new(),
@@ -440,8 +447,8 @@ where
         let block = &self.gr[blk];
         for (loc, stmt) in block.stmts.iter().enumerate() {
             let gl = GraphPt { blk, stmt: loc };
-            self.analysis.transfer_stmt(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
+            self.analysis.transfer_stmt(state, stmt, gl);
         }
         self.analysis.transfer_block(state, &block.kind, blk);
         // Update the *block tail* state

@@ -115,13 +115,14 @@ where
                     }
                     // No unvisited successor elements: back up the stack!
                     None => {
+                        // "leaving" callback with `node`
+                        let ret = post(node.clone());
                         match stack.pop() {
                             Some((mut pred, mut old_succs)) => {
                                 // Restore the previous stack frame
                                 std::mem::swap(&mut successors, &mut old_succs);
                                 std::mem::swap(&mut node, &mut pred);
-                                // "leaving" callback with `node`
-                                Some(post(pred))
+                                Some(ret)
                             }
                             // No more nodes to find
                             None => None,
