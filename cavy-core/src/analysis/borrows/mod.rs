@@ -35,18 +35,3 @@ pub fn check(context: DataflowCtx, errs: &mut ErrorBuf) {
 
     borrow_check::borrow_check(&regions, &scopes, &context, errs);
 }
-
-// Put me somewhere else; probably in `regions.rs`
-impl Place {
-    /// The minimum path length for a subpath `Place` to be a supporting prefix
-    fn supporting_prefix_len(&self, _ctx: &Context) -> usize {
-        let _len = self.path.len();
-        for elem in self.path.iter().rev() {
-            match elem {
-                Proj::Field(_) => {}
-                Proj::Deref => {}
-            }
-        }
-        todo!()
-    }
-}

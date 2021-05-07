@@ -1,6 +1,11 @@
 //! The second borrow-checking phase, per [Borrow checker phase
 //! 2](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#borrow-checker-phase-2-reporting-errors)
-use super::{loan_scope::LocalLoans, regions::RegionInf, util};
+use super::{
+    ascription::Loan,
+    loan_scope::{LoanId, LocalLoans},
+    regions::RegionInf,
+    util,
+};
 use crate::{
     analysis::{dataflow::StmtStates, DataflowCtx},
     cavy_errors::ErrorBuf,
@@ -21,7 +26,7 @@ pub fn borrow_check(
         context,
         errs,
     };
-    bc.check();
+    bc.run();
 }
 
 struct BorrowChecker<'a> {
@@ -29,6 +34,45 @@ struct BorrowChecker<'a> {
     scopes: &'a StmtStates<LocalLoans>,
     context: &'a DataflowCtx<'a>,
     errs: &'a mut ErrorBuf,
+}
+
+impl<'a> BorrowChecker<'a> {
+    fn run(mut self) {
+        let actions = ActionStream::new(&self.context);
+        for action in actions {
+            self.check(action);
+        }
+    }
+
+    /// Virtually identical to the pseudocode function `access_legal` in the RFC
+    fn check(&mut self, action: Action<'a>) {
+        // NOTE: why are they called 'borrows' here in the RFC, rather than
+        // 'loans'? Aren't they talking about loans?
+        let relevant_borrows = self.scopes[action.pt]
+            .iter()
+            .map(|ln| &self.regions.ascriptions.loans[ln])
+            .filter(|loan| self.is_relevant(&action, loan));
+
+        for borrow in relevant_borrows {
+            if !(action.is_read() && borrow.is_shrd()) {
+                panic!("BORROW CHECK VIOLATION");
+            }
+        }
+    }
+
+    /// Check is a loan is "relevant" to a given action
+    fn is_relevant(&self, action: &Action, loan: &Loan) -> bool {
+        // it's a loan against the lvalue or a (strict) prefix of it
+        loan.place.is_prefix(action.place)
+            || if action.is_shallow() {
+                // the lvalue is a so-called "shallow prefix" of the loan place
+                action.place.is_shallow_prefix(&loan.place)
+            } else {
+                action
+                    .place
+                    .is_supporting_prefix(&loan.place, self.context.gr, self.context.ctx)
+            }
+    }
 }
 
 /// The image of the 'action' abstraction function described in the RFC.
@@ -39,14 +83,24 @@ struct Action<'p> {
     span: (),
 }
 
+impl<'p> Action<'p> {
+    fn is_read(&self) -> bool {
+        matches!(self.kind, ActionKind::DeepRead)
+    }
+
+    fn is_shallow(&self) -> bool {
+        matches!(&self.kind, ActionKind::ShallowWrite)
+    }
+}
+
+// probably not worth refactoring as `ActionKind(Depth, Direction)`
 enum ActionKind {
     DeepWrite,
     DeepRead,
     ShallowWrite,
-    // No such thing as a deep write!
+    // No such thing as a shallow read!
 }
 
-// No harm in bringing these into module scope here
 use ActionKind::*;
 
 // NOTE: this is really just a lazy version of the `Summaryrunner`. I should
@@ -95,7 +149,11 @@ impl<'a> ActionStream<'a> {
                 self.consume_rvalue(&rhs.data);
             }
             StmtKind::Assert(_) => {}
-            StmtKind::Drop(_) => {}
+            StmtKind::Drop(place) => {
+                // NOTE: as per RFC comment, this might be more conservative
+                // than necessary.
+                self.action(place, DeepWrite);
+            }
             StmtKind::Io(_) => {}
             StmtKind::Nop => {}
         }
@@ -184,20 +242,4 @@ impl<'a> Iterator for ActionStream<'a> {
 
         self.actionbuf.pop()
     }
-}
-
-impl<'a> BorrowChecker<'a> {
-    fn check(mut self) {
-        for (pt, stmt) in util::enumerate_stmts(self.context.gr) {
-            self.check_stmt(pt, stmt);
-        }
-
-        for (pt, tail) in util::enumerate_tails(self.context.gr) {
-            self.check_blk_tail(pt, tail);
-        }
-    }
-
-    fn check_stmt(&mut self, pt: GraphPt, stmt: &Stmt) {}
-
-    fn check_blk_tail(&mut self, pt: GraphPt, tail: &BlockKind) {}
 }

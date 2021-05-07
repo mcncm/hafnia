@@ -240,6 +240,16 @@ pub struct Ascr {
     pub lt: LtId,
 }
 
+impl Ascr {
+    pub fn is_uniq(&self) -> bool {
+        self.kind == RefKind::Uniq
+    }
+
+    pub fn is_shrd(&self) -> bool {
+        self.kind == RefKind::Shrd
+    }
+}
+
 /// The ascription data of a reference, together with the `Place` it references.
 /// See [computing loans in
 /// scope](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#borrow-checker-phase-1-computing-loans-in-scope)
@@ -247,6 +257,16 @@ pub struct Ascr {
 pub struct Loan {
     pub ascr: Ascr,
     pub place: Place,
+}
+
+impl Loan {
+    pub fn is_uniq(&self) -> bool {
+        self.ascr.is_uniq()
+    }
+
+    pub fn is_shrd(&self) -> bool {
+        self.ascr.is_shrd()
+    }
 }
 
 /// Ok, this is a bit of an odd tree, but it might actually be the most efficient in

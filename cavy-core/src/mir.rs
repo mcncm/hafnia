@@ -414,10 +414,64 @@ impl Place {
         self.path.iter().filter_map(|elem| elem.field_of())
     }
 
+    /// Check if this is a prefix of another `Place`
     pub fn is_prefix(&self, other: &Place) -> bool {
-        self.len() <= other.len()
-            && self.root == other.root
-            && self.path.iter().zip(other.path.iter()).all(|(l, r)| l == r)
+        self.is_prefix_with(|proj, in_self| true, other)
+    }
+
+    /// Check if this is a 'shallow prefix' of another `Place`; that is, it can
+    /// be formed by removing elements that are not dereferences.
+    pub fn is_shallow_prefix(&self, other: &Place) -> bool {
+        self.is_prefix_with(|proj, in_self| in_self || proj != &Proj::Deref, other)
+    }
+
+    /// Check if this is a 'supporting prefix' of another `Place`; that is, it
+    /// can be formed by removing elements that are not dereferences of a shared
+    /// reference.
+    ///
+    /// See the NLL RFC at [Reborrow
+    /// constraints](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#reborrow-constraints)
+    pub fn is_supporting_prefix(&self, other: &Place, gr: &Graph, ctx: &Context) -> bool {
+        let local = &gr.locals[other.root];
+        // The type at the last-visited node of the path
+        let mut ty = &ctx.types[local.ty];
+        self.is_prefix_with(
+            |proj, in_self| {
+                if !in_self && (proj == &Proj::Deref) && matches!(ty, Type::Ref(RefKind::Shrd, _)) {
+                    false
+                } else {
+                    ty = &ctx.types[ty.slot(proj)];
+                    true
+                }
+            },
+            other,
+        )
+    }
+
+    /// Check if this is a prefix of another `Place`, and a predicate is
+    /// satisfied at *all* points within the other `Place`.
+    ///
+    /// The predicate will take two arguments: the `Proj` from `other`, and a
+    /// bool that is `true` if we are still within `self`.
+    fn is_prefix_with<P>(&self, mut pred: P, other: &Place) -> bool
+    where
+        P: FnMut(&Proj, bool) -> bool,
+    {
+        // check prefixhood
+        if self.root != other.root {
+            return false;
+        }
+
+        let mut this = self.path.iter();
+        let mut other = other.path.iter();
+        while let Some(l) = this.next() {
+            if !(other.next() == Some(l) && pred(l, true)) {
+                return false;
+            }
+        }
+        // and now check the rest of the other `Place`: if we are *above* any
+        // satisfying place, we should test false.
+        !other.any(|proj| pred(proj, false))
     }
 }
 

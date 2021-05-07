@@ -6,10 +6,12 @@ use crate::{bitset, store::BitSet};
 
 use super::{
     super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise, StmtStates},
-    ascription::{AscriptionStore, LoanId},
+    ascription::AscriptionStore,
     regions::{LifetimeStore, RegionInf},
     *,
 };
+
+pub use super::ascription::LoanId;
 
 bitset! { LocalLoans(LoanId) }
 
