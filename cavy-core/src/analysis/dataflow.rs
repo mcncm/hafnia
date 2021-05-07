@@ -564,6 +564,7 @@ pub trait SummaryAnalysis {
     }
 }
 
+// NOTE: this can, and maybe should, be made lazy.
 /// An execution environment for simple analyses.
 pub struct SummaryRunner<'a> {
     fn_id: FnId,

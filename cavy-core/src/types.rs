@@ -18,8 +18,8 @@ interner_type! { TypeInterner : TyId -> Type }
 pub struct TypeProperties {
     /// The number of quantum and classical bits referenced by this type
     size: TypeSize,
-    /// True if this type is linear
-    linear: bool,
+    /// True if this type is uncloneable
+    affine: bool,
     /// True if this type is owned
     owned: bool,
     /// True if the type is ord
@@ -54,7 +54,7 @@ impl CachedTypeInterner {
         let props = TypeProperties {
             size: ty.size(self),
             owned: ty.is_owned(self),
-            linear: ty.is_linear(self),
+            affine: ty.is_affine(self),
             ord: ty.is_ord(self),
             ref_kind: ty.ref_kind(self),
             offsets: ty.offsets(self),
@@ -129,12 +129,12 @@ impl TyId {
     }
 
     /// Check the linearity of a type, with the help of the global context
-    pub fn is_linear(&self, ctx: &Context) -> bool {
-        self.is_linear_inner(&ctx.types)
+    pub fn is_affine(&self, ctx: &Context) -> bool {
+        self.is_affine_inner(&ctx.types)
     }
 
-    fn is_linear_inner(&self, interner: &CachedTypeInterner) -> bool {
-        interner.cache[self].linear
+    fn is_affine_inner(&self, interner: &CachedTypeInterner) -> bool {
+        interner.cache[self].affine
     }
 
     /// Check the bit size of a type, with the help of the global context
@@ -211,7 +211,7 @@ pub enum Discriminant {
 }
 
 impl Discriminant {
-    fn is_linear(&self) -> bool {
+    fn is_affine(&self) -> bool {
         if let Self::Q(_) = self {
             true
         } else {
@@ -484,23 +484,23 @@ impl Type {
         }
     }
 
-    pub fn is_linear(&self, interner: &CachedTypeInterner) -> bool {
+    pub fn is_affine(&self, interner: &CachedTypeInterner) -> bool {
         match self {
             Type::Bool => false,
             Type::Uint(_) => false,
             Type::Q_Bool => true,
             Type::Q_Uint(_) => true,
-            Type::Tuple(tys) => tys.iter().any(|ty| ty.is_linear_inner(interner)),
-            Type::Array(ty) => ty.is_linear_inner(interner),
+            Type::Tuple(tys) => tys.iter().any(|ty| ty.is_affine_inner(interner)),
+            Type::Array(ty) => ty.is_affine_inner(interner),
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
             Type::UserType(ty) => {
-                let lin_tag = ty.tag.as_ref().map_or(false, |ty| ty.is_linear());
+                let lin_tag = ty.tag.as_ref().map_or(false, |ty| ty.is_affine());
                 lin_tag
                     || ty
                         .fields
                         .iter()
-                        .any(|field| field.1.is_linear_inner(interner))
+                        .any(|field| field.1.is_affine_inner(interner))
             }
             Type::Ref(ref_kind, _) => match ref_kind {
                 RefKind::Shrd => false,
@@ -585,21 +585,21 @@ mod tests {
     #[test]
     fn arrays_inherit_linearity_1() {
         let qubit_array_type = Array(Box::new(Bool));
-        assert!(!qubit_array_type.is_linear());
+        assert!(!qubit_array_type.is_affine());
     }
 
     /// Arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_2() {
         let qubit_array_type = Array(Box::new(Q_Bool));
-        assert!(qubit_array_type.is_linear());
+        assert!(qubit_array_type.is_affine());
     }
 
     /// Arrays of arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_3() {
         let qubit_array_type = Array(Box::new(Array(Box::new(Q_Bool))));
-        assert!(qubit_array_type.is_linear());
+        assert!(qubit_array_type.is_affine());
     }
 
     /// Structs with no linear fields should be nonlinear
@@ -608,7 +608,7 @@ mod tests {
         let mut fields = HashMap::new();
         fields.insert(String::from("foo"), U8);
         fields.insert(String::from("bar"), U16);
-        assert!(!Struct(fields).is_linear());
+        assert!(!Struct(fields).is_affine());
     }
 
     /// Structs with some linear field are linear
@@ -617,6 +617,6 @@ mod tests {
         let mut fields = HashMap::new();
         fields.insert(String::from("foo"), U8);
         fields.insert(String::from("bar"), Q_U8);
-        assert!(Struct(fields).is_linear());
+        assert!(Struct(fields).is_affine());
     }
 }

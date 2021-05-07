@@ -32,6 +32,8 @@ pub fn check(context: DataflowCtx, errs: &mut ErrorBuf) {
     let scopes = loan_scope::loan_scopes(&regions, &context);
     println!("LOAN SCOPES");
     println!("{}\n\n", scopes.fmt_with(&context));
+
+    borrow_check::borrow_check(&regions, &scopes, &context, errs);
 }
 
 // Put me somewhere else; probably in `regions.rs`

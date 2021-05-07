@@ -572,7 +572,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // FIXME This is doing extra work to rediscover the type of this local.
         // Take a look at its call sites. I don't like it.
         let ty = &self.gr.type_of(&place, self.ctx);
-        if ty.is_linear(self.ctx) {
+        if ty.is_affine(self.ctx) {
             Operand::Move(place)
         } else {
             Operand::Copy(place)
