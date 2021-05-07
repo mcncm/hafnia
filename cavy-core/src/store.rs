@@ -18,6 +18,8 @@ use std::{
     iter::FromIterator,
 };
 
+use crate::util::FmtWith;
+
 /// An index counter, which you might want to make independently of a store or
 /// interner.
 #[derive(Default, Debug)]
@@ -88,6 +90,10 @@ impl<I: Index> BitSet<I> {
         self.data.get_mut(idx.into() as usize)
     }
 
+    pub fn as_mut_bitslice(&mut self) -> &mut BitSlice {
+        self.data.as_mut_bitslice()
+    }
+
     /// FIXME: should really have "insert, remove"
     pub fn set(&mut self, idx: I, val: bool) {
         *self.get_mut(idx).unwrap() = val;
@@ -114,6 +120,23 @@ where
             write!(f, "{}", head)?;
             for elem in elems {
                 write!(f, ", {}", elem)?;
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+impl<I: Index, F> FmtWith<F> for BitSet<I>
+where
+    I: FmtWith<F>,
+{
+    fn fmt(&self, data: &F, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut elems = self.iter();
+        f.write_str("{")?;
+        if let Some(head) = elems.next() {
+            write!(f, "{}", head.fmt_with(data))?;
+            for elem in elems {
+                write!(f, ", {}", elem.fmt_with(data))?;
             }
         }
         f.write_str("}")

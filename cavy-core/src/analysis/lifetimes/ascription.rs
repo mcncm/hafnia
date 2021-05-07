@@ -34,6 +34,7 @@ use crate::{
     store::Store,
     store_type,
     types::{CachedTypeInterner, RefKind, TyId, Type},
+    util::FmtWith,
 };
 
 use super::{util::enumerate_stmts, LifetimeStore, LtId};
@@ -45,10 +46,12 @@ pub fn ascribe<'l, 'a>(
     context: &'a DataflowCtx,
 ) -> AscriptionStore<'a> {
     let mut ascriber = Ascriber::new(lifetimes, context);
+    // Variables may have lifetimes, depending on their type
     for local in context.gr.locals.iter() {
         ascriber.ascribe_local(local);
     }
-
+    // Loans also have lifetimes. They may coincide with the lifetime of the
+    // borrower, but they don't need to!
     ascriber.ascribe_loans(&context.gr);
 
     ascriber.ascriptions
@@ -56,8 +59,15 @@ pub fn ascribe<'l, 'a>(
 
 /// all the ascriptions for this graph: we hang lifetimes on the branches of
 /// each `Place` tree, and associate one with each reference we take.
+///
+/// NOTE: we could use better data structures here. For one thing, `Loan`s
+/// could(/should?) live in a prefix tree, which could simply be fused with the
+/// ascriptions tree, and collected with the `ascribe_loans` method.
+///
+/// But we're absolutely, unequivocally not going to waste a single hour on
+/// making anything clever or correct or even asymptotically optimal.
 pub struct AscriptionStore<'g> {
-    /// Lifetime ascriptions of locals types
+    /// For each local, what lifetimes is it ascribed, and where is it borrowed?
     pub locals: Store<LocalId, Option<AscrNode>>,
     /// Every loan (`Ascr` * `Place`) in the CFG
     pub loans: Store<LoanId, Loan>,
@@ -122,6 +132,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                     },
                 ) => {
                     let lt = self.new_lifetime(false);
+
                     let ascr = Ascr { kind: *kind, lt };
                     let loan = Loan {
                         ascr,
@@ -261,5 +272,11 @@ impl AscrNode {
 impl std::fmt::Display for Ascr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.kind, self.lt)
+    }
+}
+
+impl std::fmt::Display for LoanId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "l{}", self.0)
     }
 }

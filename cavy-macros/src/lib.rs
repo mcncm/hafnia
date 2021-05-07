@@ -211,11 +211,11 @@ impl<'ast> DiagnosticData<'ast> {
             .map(|field| field.ident.as_ref().unwrap())
             .collect();
 
-        assert!(spans.len() >= 1, "Must report at least one span");
+        assert!(!spans.is_empty(), "Must report at least one span");
 
         Self {
-            spans,
             msg,
+            spans,
             ctx_fields,
             dis_fields,
         }

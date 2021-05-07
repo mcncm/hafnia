@@ -27,6 +27,8 @@ mod util;
 pub fn borrow_check(context: DataflowCtx) {
     let regions = regions::infer_regions(&context);
     println!("{:?}", regions);
+    let loan_ana = loan_scope::LiveLoanAnalysis::new(&regions);
+    let loan_scopes = DataflowRunner::new(loan_ana, &context).run().stmt_states;
 }
 
 // A map from lightweight lifetime variables to the regions they represent

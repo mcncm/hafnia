@@ -36,9 +36,9 @@ pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
 
 /// This struct does region inference to compute lifetimes.
 pub struct RegionInf<'a> {
-    lifetimes: LifetimeStore,
-    ascriptions: AscriptionStore<'a>,
-    liveness: Store<BlockId, Vec<LiveVars>>,
+    pub lifetimes: LifetimeStore,
+    pub ascriptions: AscriptionStore<'a>,
+    pub liveness: Store<BlockId, Vec<LiveVars>>,
     context: &'a DataflowCtx<'a>,
     constraints: Constraints,
 }

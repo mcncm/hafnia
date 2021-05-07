@@ -201,14 +201,17 @@ where
     /// Produce the bottom element of the domain.
     fn bottom(&self) -> Self::Domain;
 
-    /// Apply the transfer function for a single statement. Empty default implementation
-    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _loc: GraphPt) {}
+    /// Apply the transfer function for a single statement. Empty default
+    /// implementation for `Blockwise`
+    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _pt: GraphPt) {}
 
     /// Apply the transfer function for the end of a basic block
-    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, loc: BlockId);
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: BlockId);
 
     /// Compute state for the entry block
-    fn initial_state(&self, blk: BlockId) -> Self::Domain;
+    fn initial_state(&self, _blk: BlockId) -> Self::Domain {
+        self.bottom()
+    }
 
     /// Transform predecessor blocks for joining
     fn propagate_predecessor(&self, _blk: BlockId, pred: &Self::Domain) -> Self::Domain {
