@@ -370,7 +370,9 @@ impl Lifetime {
         while let Some(blk) = blocks.pop() {
             let this = &mut self[blk][stmt..];
             let other = &other[blk][stmt..];
-            let mask = other.leading_ones();
+            // NOTE: should be `other.leading_ones()`, but there seems to be a
+            // bug in the `bitvec` crate.
+            let mask = other.first_zero().unwrap_or(this.len());
 
             let ones = this.count_ones();
             // Add the other lifetime's points
@@ -380,6 +382,7 @@ impl Lifetime {
 
             // End when we go out of the other lifetime
             if other.first_zero().is_some() {
+                stmt = 0;
                 continue;
             }
 
@@ -564,7 +567,7 @@ mod dbg {
                 });
 
                 table!([width = 10] f <<
-                       linum[6], stmt[20], vars[16], regions[18], constrs[12], refs
+                       linum[6], stmt[20], vars[16], constrs[12], refs, regions[18]
                 );
 
                 f.write_str("\n")?;
