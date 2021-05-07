@@ -31,15 +31,13 @@
 mod call_graph;
 mod dataflow;
 // mod conditional;
+mod borrows;
 mod feedback;
-mod lifetimes;
+mod fmt;
+mod graph;
 mod linearity;
 mod subconditional;
 mod unsafety;
-// mod wires;
-mod fmt;
-/// Graph properties
-mod graph;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
@@ -89,7 +87,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
         let _controls = graph::dominators::controls(&dominators, &postdominators);
 
-        lifetimes::borrow_check(context);
+        borrows::check(context, &mut errs);
 
         // == Summary analyses ==
 

@@ -1,14 +1,17 @@
 use std::fmt;
 
-use crate::{mir::*, store::Store, types::RefKind, util::FmtWith};
+use crate::{mir::*, store::Store, store_type, types::RefKind, util::FmtWith};
+
+use bitvec::prelude::*;
 
 use super::{
     super::{graph, DataflowCtx, DataflowRunner},
     ascription::{self, Ascr, AscrNode, AscriptionStore},
     liveness::{self, LiveVars},
-    util, Lifetime, LifetimeStore, LtId,
+    util,
 };
 
+/// Main entry point for region inference
 pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
     let mut lifetimes = LifetimeStore::new();
     let ascriptions = ascription::ascribe(&mut lifetimes, &context);
@@ -32,6 +35,69 @@ pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
     // finally, return the data computed in this phase, to use it for borrow
     // checking and error reporting.
     reginf
+}
+
+// A map from lightweight lifetime variables to the regions they represent
+store_type! { LifetimeStore : LtId -> Lifetime }
+
+/// See [Named
+/// lifetimes](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#layer-4-named-lifetimes):
+/// this is exactly the data structure j
+pub struct Lifetime {
+    /// The "finite" points within the graph
+    pts: Store<BlockId, BitVec>,
+    /// The "points at infinity" in the caller. For now, we're making the
+    /// simplifying assumption that there is a single such point; that is, that
+    /// all function arguments and return values have the *same* lifetime. This
+    /// bit is set if this lifetime extends to infinity.
+    end: bool,
+}
+
+impl Lifetime {
+    /// Add a single point to the lifetime
+    pub fn insert(&mut self, pt: GraphPt) {
+        let block = &mut self.pts[pt.blk];
+        block.set(pt.stmt, true);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = GraphPt> + '_ {
+        self.pts
+            .idx_enumerate()
+            .map(move |(blk, stmts)| {
+                stmts.iter().enumerate().filter_map(move |(stmt, bit)| {
+                    if *bit {
+                        Some(GraphPt { blk, stmt })
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten()
+    }
+
+    pub fn contains(&self, pt: &GraphPt) -> bool {
+        self.pts[pt.blk][pt.stmt]
+    }
+}
+
+impl LifetimeStore {
+    /// Construct an empty lifetime
+    pub fn new_region(&mut self, block_sizes: &[usize]) -> LtId {
+        let lifetime = Lifetime {
+            pts: block_sizes.iter().map(|sz| bitvec![0; *sz]).collect(),
+            end: false,
+        };
+        self.insert(lifetime)
+    }
+
+    /// Construct a lifetime that extends into the caller
+    pub fn end_region(&mut self, block_sizes: &[usize]) -> LtId {
+        let lifetime = Lifetime {
+            pts: block_sizes.iter().map(|sz| bitvec![1; *sz]).collect(),
+            end: true,
+        };
+        self.insert(lifetime)
+    }
 }
 
 /// This struct does region inference to compute lifetimes.
@@ -372,7 +438,7 @@ impl Lifetime {
             let other = &other[blk][stmt..];
             // NOTE: should be `other.leading_ones()`, but there seems to be a
             // bug in the `bitvec` crate.
-            let mask = other.first_zero().unwrap_or(this.len());
+            let mask = other.first_zero().unwrap_or_else(|| this.len());
 
             let ones = this.count_ones();
             // Add the other lifetime's points
@@ -456,6 +522,26 @@ impl FmtWith<LifetimeStore> for LtId {
             writeln!(f, "{}", constr)?;
         }
         Ok(())
+    }
+}
+
+impl std::ops::Index<BlockId> for Lifetime {
+    type Output = BitVec;
+
+    fn index(&self, index: BlockId) -> &Self::Output {
+        &self.pts[index]
+    }
+}
+
+impl std::ops::IndexMut<BlockId> for Lifetime {
+    fn index_mut(&mut self, index: BlockId) -> &mut Self::Output {
+        &mut self.pts[index]
+    }
+}
+
+impl fmt::Display for LtId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "'{}", self.0)
     }
 }
 

@@ -253,10 +253,10 @@ where
 }
 
 /// Dataflow states for a block-granularity analysis
-type BlockStates<L> = Store<mir::BlockId, L>;
+pub type BlockStates<L> = Store<mir::BlockId, L>;
 
 /// Dataflow states for a statement-granularity analysis
-type StmtStates<L> = Store<mir::BlockId, Vec<L>>;
+pub type StmtStates<L> = Store<mir::BlockId, Vec<L>>;
 
 /// An execution environment for a dataflow analysis, using the Killdall method.
 

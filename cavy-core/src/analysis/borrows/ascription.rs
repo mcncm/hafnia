@@ -37,7 +37,10 @@ use crate::{
     util::FmtWith,
 };
 
-use super::{util::enumerate_stmts, LifetimeStore, LtId};
+use super::{
+    regions::{LifetimeStore, LtId},
+    util::enumerate_stmts,
+};
 
 store_type! { LoanStore: LoanId -> Loan }
 

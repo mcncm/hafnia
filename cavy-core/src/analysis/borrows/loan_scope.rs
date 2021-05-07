@@ -5,13 +5,18 @@
 use crate::{bitset, store::BitSet};
 
 use super::{
-    super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise},
+    super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise, StmtStates},
     ascription::{AscriptionStore, LoanId},
-    regions::RegionInf,
+    regions::{LifetimeStore, RegionInf},
     *,
 };
 
 bitset! { LocalLoans(LoanId) }
+
+pub fn loan_scopes(regions: &RegionInf, context: &DataflowCtx) -> StmtStates<LocalLoans> {
+    let loan_ana = LiveLoanAnalysis::new(&regions);
+    DataflowRunner::new(loan_ana, &context).run().stmt_states
+}
 
 impl Lattice for LocalLoans {
     fn join(self, other: Self) -> Self {
