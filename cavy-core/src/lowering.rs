@@ -1352,7 +1352,23 @@ mod typing {
             let right = self.type_inner(right)?;
             match &op.data {
                 UnOpKind::Minus => todo!(),
-                UnOpKind::Not => Ok(right),
+                UnOpKind::Not => {
+                    if [
+                        self.ctx.common.bool,
+                        self.ctx.common.q_bool,
+                        self.ctx.common.shrd_q_bool,
+                    ]
+                    .contains(&right)
+                    {
+                        Ok(right)
+                    } else {
+                        Err(self.errors.push(errors::UnOpOutTypeError {
+                            span: op.span,
+                            kind: op.data,
+                            ty: right,
+                        }))
+                    }
+                }
                 UnOpKind::Split => {
                     if right.is_primitive(self.ctx) & right.is_coherent(self.ctx) {
                         Ok(right)

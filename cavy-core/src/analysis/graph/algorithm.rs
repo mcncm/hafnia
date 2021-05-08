@@ -105,7 +105,7 @@ where
                     // There's an unvisited successor element
                     Some(succ) => {
                         // push a stack frame
-                        let new_succs = self.successors(&node).iter();
+                        let new_succs = self.successors(&succ).iter();
                         let old_succs = std::mem::replace(&mut successors, new_succs);
                         stack.push((node.clone(), old_succs));
                         node = succ.clone();
