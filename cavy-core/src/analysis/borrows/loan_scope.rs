@@ -125,7 +125,7 @@ impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
         }
     }
 
-    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt) {
+    fn transfer_block(&self, state: &mut Self::Domain, _block: &BlockKind, pt: GraphPt) {
         self.foreach_loan(state, |loan, mut bit| {
             // Kill loans whose regions are not in the point.
             if !self.lifetimes[loan.ascr.lt].contains(&pt) {
@@ -133,10 +133,15 @@ impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
                 return;
             }
 
-            // Kill loans that have the lhs as a prefix.
-            if let BlockKind::Call(call) = block {
-                self.kill_lhs_prefix(&call.ret, loan, bit);
-            }
+            // FIXME this is causing incorrect behavior on function calls that
+            // return borrowed values. Why is it different from the
+            // transfer_stmt case? Maybe calls should be considered to generate
+            // a new borrow?
+            //
+            // // Kill loans that have the lhs as a prefix.
+            // if let BlockKind::Call(call) = block {
+            //     self.kill_lhs_prefix(&call.ret, loan, bit);
+            // }
         });
     }
 }

@@ -452,7 +452,7 @@ where
         }
         let blk_pt = GraphPt {
             blk,
-            stmt: block.len(),
+            stmt: block.stmts.len(),
         };
         self.analysis.transfer_block(state, &block.kind, blk_pt);
         // Update the *block tail* state
@@ -483,7 +483,7 @@ where
         let block = &self.gr[blk];
         let blk_pt = GraphPt {
             blk,
-            stmt: block.len(),
+            stmt: block.stmts.len(),
         };
         self.analysis.transfer_block(state, &block.kind, blk_pt);
         // Update the *block tail* state

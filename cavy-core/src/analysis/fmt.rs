@@ -20,7 +20,13 @@ where
 
             let elems: Vec<_> = data.iter().map(|elem| format!("{}", elem)).collect();
             let len = elems.iter().map(|elem| elem.len()).max().unwrap_or(0);
-            for (elem, stmt) in elems.iter().zip(block.stmts.iter()) {
+            for (elem, stmt) in elems.iter().zip(
+                block
+                    .stmts
+                    .iter()
+                    .map(|stmt| stmt as &dyn Display)
+                    .chain(std::iter::once(&"term" as &dyn Display)),
+            ) {
                 writeln!(f, "\t{:<width$}{}", elem, stmt, width = len + 4)?;
             }
 

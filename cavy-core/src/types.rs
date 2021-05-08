@@ -392,7 +392,7 @@ impl Type {
             Type::Q_Bool => vec![],
             Type::Q_Uint(_) => vec![],
             Type::Tuple(elems) => {
-                let mut offsets: Vec<Offset> = elems
+                let offsets: Vec<Offset> = elems
                     .iter()
                     .map(|ty| ty.size_inner(interner))
                     .scan(Offset::zero(), |offset, sz| {
@@ -401,9 +401,6 @@ impl Type {
                         Some(prev_offset)
                     })
                     .collect();
-                // The last offset is the size of the tuple, which is what makes
-                // it so appealing to try combining this wtih `Type::size`.
-                offsets.pop();
                 offsets
             }
             Type::Array(_) => todo!(),

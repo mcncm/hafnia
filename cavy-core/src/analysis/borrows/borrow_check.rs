@@ -76,6 +76,7 @@ impl<'a> BorrowChecker<'a> {
 }
 
 /// The image of the 'action' abstraction function described in the RFC.
+#[derive(Debug)]
 struct Action<'p> {
     kind: ActionKind,
     place: &'p Place,
@@ -107,6 +108,7 @@ impl<'p> Action<'p> {
 }
 
 // probably not worth refactoring as `ActionKind(Depth, Direction)`
+#[derive(Debug)]
 enum ActionKind {
     DeepWrite,
     DeepRead,
@@ -275,7 +277,7 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
-    #[msg = "tried to do something illegal with a unique borrow"]
+    #[msg = "tried to do something illegal with a unique reference"]
     pub struct UniqBorrow {
         #[span(msg = "data was borrowed here...")]
         pub loan: Span,

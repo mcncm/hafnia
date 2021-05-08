@@ -131,7 +131,7 @@ impl<'a> Environment<'a> {
     pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<usize>, ops::Range<usize>) {
         // start with the root type
         let ty = self.locals[place.root].ty;
-        use crate::util::FmtWith;
+
         // traverse the allocation
         let (ty, start) = place
             .path
