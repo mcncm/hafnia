@@ -11,6 +11,7 @@ use crate::{
     cavy_errors::ErrorBuf,
     context::Context,
     mir::*,
+    source::Span,
     types::{CachedTypeInterner, RefKind},
 };
 
@@ -48,30 +49,29 @@ impl<'a> BorrowChecker<'a> {
     fn check(&mut self, action: Action<'a>) {
         // NOTE: why are they called 'borrows' here in the RFC, rather than
         // 'loans'? Aren't they talking about loans?
-        let relevant_borrows = self.scopes[action.pt]
-            .iter()
-            .map(|ln| &self.regions.ascriptions.loans[ln])
-            .filter(|loan| self.is_relevant(&action, loan));
-
-        for borrow in relevant_borrows {
-            if !(action.is_read() && borrow.is_shrd()) {
-                panic!("BORROW CHECK VIOLATION");
+        for ln in self.scopes[action.pt].iter() {
+            let loan = &self.regions.ascriptions.loans[ln];
+            if action.is_relevant(loan, self.context) {
+                self.validate(&action, loan)
             }
         }
     }
 
-    /// Check is a loan is "relevant" to a given action
-    fn is_relevant(&self, action: &Action, loan: &Loan) -> bool {
-        // it's a loan against the lvalue or a (strict) prefix of it
-        loan.place.is_prefix(action.place)
-            || if action.is_shallow() {
-                // the lvalue is a so-called "shallow prefix" of the loan place
-                action.place.is_shallow_prefix(&loan.place)
-            } else {
-                action
-                    .place
-                    .is_supporting_prefix(&loan.place, self.context.gr, self.context.ctx)
-            }
+    /// Check and report errors
+    fn validate<'b>(&mut self, action: &'b Action<'a>, loan: &'b Loan) {
+        if !action.is_read() {
+            self.errs.push(errors::WriteAction {
+                loan: loan.span,
+                action: action.span,
+            });
+        }
+
+        if !loan.is_shrd() {
+            self.errs.push(errors::UniqBorrow {
+                loan: loan.span,
+                action: action.span,
+            });
+        }
     }
 }
 
@@ -80,7 +80,7 @@ struct Action<'p> {
     kind: ActionKind,
     place: &'p Place,
     pt: GraphPt,
-    span: (),
+    span: Span,
 }
 
 impl<'p> Action<'p> {
@@ -90,6 +90,19 @@ impl<'p> Action<'p> {
 
     fn is_shallow(&self) -> bool {
         matches!(&self.kind, ActionKind::ShallowWrite)
+    }
+
+    /// Check if a loan is "relevant" to this action
+    fn is_relevant(&self, loan: &Loan, context: &DataflowCtx) -> bool {
+        // it's a loan against the lvalue or a (strict) prefix of it
+        loan.place.is_prefix(self.place)
+            || if self.is_shallow() {
+                // the lvalue is a so-called "shallow prefix" of the loan place
+                self.place.is_shallow_prefix(&loan.place)
+            } else {
+                self.place
+                    .is_supporting_prefix(&loan.place, context.gr, context.ctx)
+            }
     }
 }
 
@@ -145,43 +158,44 @@ impl<'a> ActionStream<'a> {
     fn consume_stmt(&mut self, stmt: &'a Stmt) {
         match &stmt.kind {
             StmtKind::Assn(lhs, rhs) => {
-                self.action(lhs, ShallowWrite);
-                self.consume_rvalue(&rhs.data);
+                self.action(lhs, ShallowWrite, stmt.span);
+                self.consume_rvalue(&rhs.data, rhs.span);
             }
             StmtKind::Assert(_) => {}
             StmtKind::Drop(place) => {
                 // NOTE: as per RFC comment, this might be more conservative
                 // than necessary.
-                self.action(place, DeepWrite);
+                self.action(place, DeepWrite, stmt.span);
             }
             StmtKind::Io(_) => {}
             StmtKind::Nop => {}
         }
     }
 
-    fn consume_rvalue(&mut self, rvalue: &'a RvalueKind) {
+    fn consume_rvalue(&mut self, rvalue: &'a RvalueKind, span: Span) {
+        // Some of these spans are... not good.
         match rvalue {
             RvalueKind::BinOp(_, lop, rop) => {
-                self.consume_operand(lop);
-                self.consume_operand(rop);
+                self.consume_operand(lop, span);
+                self.consume_operand(rop, span);
             }
             RvalueKind::UnOp(_, op) => {
-                self.consume_operand(op);
+                self.consume_operand(op, span);
             }
             RvalueKind::Ref(kind, place) => {
                 let kind = match kind {
                     RefKind::Shrd => DeepRead,
                     RefKind::Uniq => DeepWrite,
                 };
-                self.action(place, kind);
+                self.action(place, kind, span);
             }
             RvalueKind::Use(op) => {
-                self.consume_operand(op);
+                self.consume_operand(op, span);
             }
         }
     }
 
-    fn consume_operand(&mut self, op: &'a Operand) {
+    fn consume_operand(&mut self, op: &'a Operand, span: Span) {
         let place = match op.place() {
             Some(place) => place,
             None => return,
@@ -194,24 +208,27 @@ impl<'a> ActionStream<'a> {
             DeepRead
         };
 
-        self.action(place, kind);
+        self.action(place, kind, span);
     }
 
     fn consume_tail(&mut self, tail: &BlockKind) {
         match tail {
             BlockKind::Goto(_) => {}
-            BlockKind::Switch { cond, blks } => {}
+            BlockKind::Switch { cond, .. } => {
+                // Nothing in a condition must be linear, so we can use
+                // `DeepRead` unconditionally
+            }
             BlockKind::Call(_) => {}
             BlockKind::Ret => {}
         }
     }
 
-    fn action(&mut self, place: &'a Place, kind: ActionKind) {
+    fn action(&mut self, place: &'a Place, kind: ActionKind, span: Span) {
         self.actionbuf.push(Action {
             kind,
             place,
             pt: self.pt,
-            span: (),
+            span,
         })
     }
 }
@@ -241,5 +258,28 @@ impl<'a> Iterator for ActionStream<'a> {
         }
 
         self.actionbuf.pop()
+    }
+}
+
+mod errors {
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+
+    #[derive(Diagnostic)]
+    #[msg = "tried to do something illegal with a unique borrow"]
+    pub struct UniqBorrow {
+        #[span(msg = "data was borrowed here...")]
+        pub loan: Span,
+        #[span(msg = "...and something illegal happened with it here.")]
+        pub action: Span,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "tried to write to borrowed data"]
+    pub struct WriteAction {
+        #[span(msg = "the data was borrowed here...")]
+        pub loan: Span,
+        #[span(msg = "...and later written to here.")]
+        pub action: Span,
     }
 }

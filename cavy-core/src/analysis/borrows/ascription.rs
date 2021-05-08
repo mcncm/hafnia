@@ -31,6 +31,7 @@ use std::{
 use crate::{
     analysis::dataflow::{DataflowCtx, Forward, OrderProvider},
     mir::*,
+    source::Span,
     store::Store,
     store_type,
     types::{CachedTypeInterner, RefKind, TyId, Type},
@@ -131,7 +132,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                     _,
                     Rvalue {
                         data: RvalueKind::Ref(kind, rhs),
-                        span: _,
+                        span,
                     },
                 ) => {
                     let lt = self.new_lifetime(false);
@@ -139,6 +140,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                     let ascr = Ascr { kind: *kind, lt };
                     let loan = Loan {
                         ascr,
+                        span: *span,
                         place: rhs.clone(),
                     };
                     let id = self.ascriptions.loans.insert(loan);
@@ -257,6 +259,7 @@ impl Ascr {
 pub struct Loan {
     pub ascr: Ascr,
     pub place: Place,
+    pub span: Span,
 }
 
 impl Loan {
