@@ -98,7 +98,7 @@ impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     }
 
     // TODO
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, pt: GraphPt) {}
+    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
 
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
         Self::Domain::default()

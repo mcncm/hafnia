@@ -337,7 +337,7 @@ pub enum BlockKind {
     /// NOTE: this vec will *almost always* have only two elements. Is there a
     /// lighter-weight alternative that could be used here? `smallvec` might be
     /// a good option.
-    Switch { cond: Place, blks: Vec<BlockId> },
+    Switch(Box<Switch>),
     /// A block ending in a function call
     Call(Box<FnCall>),
     /// A return
@@ -348,11 +348,21 @@ impl BlockKind {
     pub fn successors(&self) -> &[BlockId] {
         match &self {
             BlockKind::Goto(blk) => std::slice::from_ref(blk),
-            BlockKind::Switch { blks, .. } => &blks,
+            BlockKind::Switch(switch) => &switch.blks,
             BlockKind::Call(call) => std::slice::from_ref(&call.blk),
             BlockKind::Ret => &[],
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Switch {
+    /// The guard expression
+    pub cond: Place,
+    /// The span thereof
+    pub span: Span,
+    /// The subsequent blocks; that is, the branches of the switch.
+    pub blks: Vec<BlockId>,
 }
 
 /// A CFG-level representation of a function call, which lives in a block tail
@@ -416,7 +426,7 @@ impl Place {
 
     /// Check if this is a prefix of another `Place`
     pub fn is_prefix(&self, other: &Place) -> bool {
-        self.is_prefix_with(|proj, in_self| true, other)
+        self.is_prefix_with(|_, _| true, other)
     }
 
     /// Check if this is a 'shallow prefix' of another `Place`; that is, it can
@@ -662,7 +672,9 @@ impl fmt::Display for BlockKind {
         // to abstract this pattern.
         match self {
             BlockKind::Goto(block) => write!(f, "goto [() => {}];", block),
-            BlockKind::Switch { cond, blks } => {
+            BlockKind::Switch(switch) => {
+                let cond = &switch.cond;
+                let blks = &switch.blks;
                 write!(f, "switch({}) [", cond)?;
                 blks.iter().enumerate().fold(true, |first, (n, blk)| {
                     if !first {

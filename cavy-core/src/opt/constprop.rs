@@ -53,11 +53,14 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
 
     match &mut blk.kind {
         BlockKind::Goto(_) => {}
-        BlockKind::Switch { cond, ref mut blks } => match interp.env.get(cond) {
-            Some(&Value::Bool(false)) => blk.kind = BlockKind::Goto(blks[0]),
-            Some(&Value::Bool(true)) => blk.kind = BlockKind::Goto(blks[1]),
-            _ => {}
-        },
+        BlockKind::Switch(switch) => {
+            let blks = &switch.blks;
+            match interp.env.get(&switch.cond) {
+                Some(&Value::Bool(false)) => blk.kind = BlockKind::Goto(blks[0]),
+                Some(&Value::Bool(true)) => blk.kind = BlockKind::Goto(blks[1]),
+                _ => {}
+            }
+        }
         BlockKind::Call(call) => {
             // Replace args with compile-time evaluated ones
             for arg in call.args.iter_mut() {

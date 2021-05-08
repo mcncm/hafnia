@@ -211,14 +211,23 @@ impl<'a> ActionStream<'a> {
         self.action(place, kind, span);
     }
 
-    fn consume_tail(&mut self, tail: &BlockKind) {
+    fn consume_tail(&mut self, tail: &'a BlockKind) {
+        // These spans are *really* not very precise.
         match tail {
             BlockKind::Goto(_) => {}
-            BlockKind::Switch { cond, .. } => {
+            BlockKind::Switch(switch) => {
                 // Nothing in a condition must be linear, so we can use
                 // `DeepRead` unconditionally
+                self.action(&switch.cond, DeepRead, switch.span);
             }
-            BlockKind::Call(_) => {}
+            BlockKind::Call(call) => {
+                // The lhs of a call should be treated just like the lhs of an
+                // `Assn`.
+                self.action(&call.ret, ShallowWrite, call.span);
+                for arg in &call.args {
+                    self.consume_operand(arg, call.span);
+                }
+            }
             BlockKind::Ret => {}
         }
     }

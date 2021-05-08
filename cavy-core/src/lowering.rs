@@ -888,6 +888,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // TODO: Again, I'm cheating by trying to fit this into a
         // `bool`, when it could also be a `?bool`.
         let cond_ty = self.type_expr(cond)?;
+        let span = cond.span;
         self.expect_type(
             &[self.ctx.common.bool, self.ctx.common.shrd_q_bool],
             cond_ty,
@@ -927,11 +928,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(err),
         }?;
 
-        let switch = BlockKind::Switch {
+        let switch = Switch {
             cond: cond_place,
+            span,
             blks: vec![fls, tru],
         };
-        self.set_terminator(switch);
+        let kind = BlockKind::Switch(Box::new(switch));
+        self.set_terminator(kind);
         self.cursor = tail_block;
         Ok(())
     }

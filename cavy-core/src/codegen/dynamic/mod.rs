@@ -216,8 +216,8 @@ impl<'a> Interpreter<'a> {
         // TODO: procedure calls: figure out calling convention
         match kind {
             BlockKind::Goto(_) => {}
-            BlockKind::Switch { cond, blks } => {
-                self.switch(cond, blks);
+            BlockKind::Switch(switch) => {
+                self.switch(&switch.cond, &switch.blks);
                 return;
             }
             BlockKind::Call(call) => {

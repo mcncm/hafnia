@@ -241,7 +241,7 @@ impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
         state.move_into(&place);
     }
 
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, pt: GraphPt) {
+    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {
         // TODO
     }
 
