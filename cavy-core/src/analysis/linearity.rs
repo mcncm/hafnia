@@ -216,7 +216,7 @@ impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
         }
     }
 
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, _pt: GraphPt) {
+    fn transfer_stmt_post(&self, state: &mut Self::Domain, stmt: &Stmt, _pt: GraphPt) {
         // NOTE this pattern is repeated in a lot of these analyses. Consider an
         // abstraction.
         let (place, rhs) = match &stmt.kind {
@@ -241,7 +241,7 @@ impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
         state.move_into(&place);
     }
 
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {
+    fn transfer_block_post(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {
         // TODO
     }
 

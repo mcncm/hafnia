@@ -62,7 +62,7 @@ impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
         Self::Domain::default()
     }
 
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphPt) {
+    fn transfer_stmt_post(&self, state: &mut Self::Domain, stmt: &mir::Stmt, _loc: GraphPt) {
         use RvalueKind::*;
         let (place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
@@ -98,7 +98,7 @@ impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
     }
 
     // TODO
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
+    fn transfer_block_post(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
 
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
         Self::Domain::default()

@@ -195,18 +195,51 @@ where
 {
     type Domain: Lattice;
 
-    // NOTE: This shouldn't be a method of `Lattice` because it it might have a
-    // size that depends on some arbitrary type. We could pile on still more
-    // generic bounds, but it will get ugly, quickly.
+    /*
+    NOTE: This shouldn't be a method of `Lattice` because it it might have a
+    size that depends on some arbitrary type. We could pile on still more
+    generic bounds, but it will get ugly, quickly.
+    */
+
     /// Produce the bottom element of the domain.
     fn bottom(&self) -> Self::Domain;
 
+    /**
+    NOTE: This method is kind of an ugly hack, and I don't really like it and
+    I'm not sure it should exist. Until now, there was no `_pre` or `_post`.
+
+    So, why is it here? I follow the NLL RFC to the letter, `loan_scopes`
+    doesn't work correctly. If I take a shared borrow in the statement
+    immediately *after* a statement taking a unique borrow, the second borrow
+    checks as conflicting. The problem is that, even though the first borrow's
+    region is not live at the second borrow, its loan scope is generated there,
+    but not killed until the statement *after* the second borrow. In the
+    checking phase, there's no way to tell that it kills the first borrow.
+
+    So. I think the RFC might actually be *incorrect*.
+
+    We could deal with this by having two kinds of analyses: one for which the
+    state at a point represents the pre-transfer state, and one for which it
+    represents the post-transfer state. But I think this is the wrong solution,
+    and likely to lead to many more bugs. Instead, we'll have two kinds of
+    transfer functions. There will be a *single* state at a *single* time, and
+    transfer functions from `pred` to `self`, and from `self` to `succ`.
+    **/
+
+    /// Apply the part of the transfer function for a single statement that
+    /// comes "between" `pt` and the predecessor.
+    fn transfer_stmt_pre(&self, _state: &mut Self::Domain, _stmt: &Stmt, _pt: GraphPt) {}
+
     /// Apply the transfer function for a single statement. Empty default
     /// implementation for `Blockwise`
-    fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _pt: GraphPt) {}
+    fn transfer_stmt_post(&self, _state: &mut Self::Domain, _stmt: &Stmt, _pt: GraphPt) {}
+
+    /// NOTE: Same the above as above regarding `pre_` transfer functions
+    /// applies here, as well.
+    fn transfer_block_pre(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
 
     /// Apply the transfer function for the end of a basic block
-    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt);
+    fn transfer_block_post(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt);
 
     /// Compute state for the entry block
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
@@ -446,18 +479,23 @@ where
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
         for (loc, stmt) in block.stmts.iter().enumerate() {
-            let gl = GraphPt { blk, stmt: loc };
+            let pt = GraphPt { blk, stmt: loc };
+            self.analysis.transfer_stmt_pre(state, stmt, pt);
             self.update_stmt_state(blk, loc, state);
-            self.analysis.transfer_stmt(state, stmt, gl);
+            self.analysis.transfer_stmt_post(state, stmt, pt);
         }
         let blk_pt = GraphPt {
             blk,
             stmt: block.stmts.len(),
         };
-        self.analysis.transfer_block(state, &block.kind, blk_pt);
+        self.analysis.transfer_block_pre(state, &block.kind, blk_pt);
+
         // Update the *block tail* state
         self.update_stmt_state(blk, block.stmts.len(), state);
         self.update_block_state(blk, state);
+
+        self.analysis
+            .transfer_block_post(state, &block.kind, blk_pt);
     }
 }
 
@@ -485,18 +523,25 @@ where
             blk,
             stmt: block.stmts.len(),
         };
-        self.analysis.transfer_block(state, &block.kind, blk_pt);
+
+        self.analysis
+            .transfer_block_post(state, &block.kind, blk_pt);
         // Update the *block tail* state
         self.update_stmt_state(blk, block.stmts.len(), state);
+        self.analysis.transfer_block_pre(state, &block.kind, blk_pt);
+
         for (loc, stmt) in block.stmts.iter().enumerate().rev() {
             let gl = GraphPt { blk, stmt: loc };
-            self.analysis.transfer_stmt(state, stmt, gl);
+            self.analysis.transfer_stmt_post(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
+            if loc == 0 {
+                // NOTE: keep this at the end! The `block_state` should be the
+                // *last* state updated, whether at the top or bottom
+                // (`Backward` or `Forward` case, resp.) of the block.
+                self.update_block_state(blk, state);
+            }
+            self.analysis.transfer_stmt_pre(state, stmt, gl);
         }
-        // NOTE: keep this at the end! The `block_state` should be the *last*
-        // state computed, whether at the top or bottom (`Backward` or `Forward`
-        // case, resp.) of the block.
-        self.update_block_state(blk, state);
     }
 }
 

@@ -140,7 +140,6 @@ type LiveAt = LocalP<LiveP>;
 impl<'a> RegionInf<'a> {
     fn collect_constraints(&mut self) {
         self.collect_liveness_constraints();
-        println!("{:?}", &self);
         self.collect_subtyping_constraints();
         self.collect_reborrow_constraints();
     }

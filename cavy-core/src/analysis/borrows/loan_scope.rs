@@ -30,6 +30,25 @@ impl Lattice for LocalLoans {
 
 type BitR<'b> = BitRef<'b, bitvec::ptr::Mut, Lsb0, BitSafeUsize>;
 
+/// Per the RFC, we apply the rules:
+///
+/// + Kill loans that don't have the point in their region. We've stored an
+///   `LtId` in each loan, so that's no problem.
+///
+/// + Generate the loan at the borrow statement it came from. We've stored
+///   our `LtId`s in a point-indexed map. No problem.
+///
+/// + Kill loans that have the lhs as a prefix. This is a *slight* problem.
+///   Our loans should probably be in some kind of prefix tree of pseudotype
+///   `Tree<Vec<Loan>>`. That would be really "correct." In fact, we could
+///   fuse the ascription tree with the loan tree (the tree builder is
+///   *already* collecting that data), and search over *that* starting from
+///   the lhs.
+///
+///   I'm not going to do that, though. I'm cloning `Place`s into every
+///   `Loan` and checking if the lhs is a prefix of the `Place` in every
+///   live `Loan.` This isn't "right," but I can get it done much faster and
+///   have this working.
 pub struct LiveLoanAnalysis<'a> {
     /// The number of loans in the program
     size: usize,
@@ -65,17 +84,26 @@ impl<'a> LiveLoanAnalysis<'a> {
         }
     }
 
-    fn kill_region_not_in_scope(&self, loan: &Loan, mut bit: BitR, pt: &GraphPt) {
-        if !self.lifetimes[loan.ascr.lt].contains(&pt) {
-            *bit = false;
-            return;
-        }
+    /// Kill loans that don't have the point in their lifetime.
+    fn kill_lifetimes_not_in_point(&self, state: &mut LocalLoans, pt: GraphPt) {
+        self.foreach_loan(state, |loan, mut bit| {
+            // Kill loans whose regions are not in the point.
+            if !self.lifetimes[loan.ascr.lt].contains(&pt) {
+                *bit = false;
+                return;
+            }
+        });
     }
 
-    fn kill_lhs_prefix(&self, lhs: &Place, loan: &Loan, mut bit: BitR) {
-        if lhs.is_prefix(&loan.place) {
-            *bit = false;
-        }
+    /// Kill loans that have the lhs as a prefix.
+    fn kill_lhs_prefix(&self, state: &mut LocalLoans, stmt: &Stmt, _pt: GraphPt) {
+        self.foreach_loan(state, |loan, mut bit| {
+            if let StmtKind::Assn(lhs, _) = &stmt.kind {
+                if lhs.is_prefix(&loan.place) {
+                    *bit = false;
+                }
+            }
+        });
     }
 }
 
@@ -86,62 +114,32 @@ impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
         Self::Domain::empty(self.size)
     }
 
-    /// Per the RFC, we apply the rules:
-    ///
-    /// + Kill loans that don't have the point in their region. We've stored an
-    ///   `LtId` in each loan, so that's no problem.
-    ///
-    /// + Generate the loan at the borrow statement it came from. We've stored
-    ///   our `LtId`s in a point-indexed map. No problem.
-    ///
-    /// + Kill loans that have the lhs as a prefix. This is a *slight* problem.
-    ///   Our loans should probably be in some kind of prefix tree of pseudotype
-    ///   `Tree<Vec<Loan>>`. That would be really "correct." In fact, we could
-    ///   fuse the ascription tree with the loan tree (the tree builder is
-    ///   *already* collecting that data), and search over *that* starting from
-    ///   the lhs.
-    ///
-    ///   I'm not going to do that, though. I'm cloning `Place`s into every
-    ///   `Loan` and checking if the lhs is a prefix of the `Place` in every
-    ///   live `Loan.` This isn't "right," but I can get it done much faster and
-    ///   have this working.
-    fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, pt: GraphPt) {
-        self.foreach_loan(state, |loan, mut bit| {
-            // Kill loans whose regions are not in the point.
-            if !self.lifetimes[loan.ascr.lt].contains(&pt) {
-                *bit = false;
-                return;
-            }
+    // NOTE: this analysis alone is the reason these `_pre` transfer statements
+    // need to exist.
+    fn transfer_stmt_pre(&self, state: &mut Self::Domain, _stmt: &Stmt, pt: GraphPt) {
+        self.kill_lifetimes_not_in_point(state, pt);
+    }
 
-            // Kill loans that have the lhs as a prefix.
-            if let StmtKind::Assn(lhs, _) = &stmt.kind {
-                self.kill_lhs_prefix(lhs, loan, bit);
-            }
-        });
-
+    fn transfer_stmt_post(&self, state: &mut Self::Domain, _stmt: &Stmt, pt: GraphPt) {
         // Generate the loan at the borrow statement it came from.
         if let Some(ln) = self.ascriptions.refs.get(&pt) {
             state.set(*ln, true);
         }
     }
 
-    fn transfer_block(&self, state: &mut Self::Domain, _block: &BlockKind, pt: GraphPt) {
-        self.foreach_loan(state, |loan, mut bit| {
-            // Kill loans whose regions are not in the point.
-            if !self.lifetimes[loan.ascr.lt].contains(&pt) {
-                *bit = false;
-                return;
-            }
+    fn transfer_block_pre(&self, state: &mut Self::Domain, _block: &BlockKind, pt: GraphPt) {
+        self.kill_lifetimes_not_in_point(state, pt);
+    }
 
-            // FIXME this is causing incorrect behavior on function calls that
-            // return borrowed values. Why is it different from the
-            // transfer_stmt case? Maybe calls should be considered to generate
-            // a new borrow?
-            //
-            // // Kill loans that have the lhs as a prefix.
-            // if let BlockKind::Call(call) = block {
-            //     self.kill_lhs_prefix(&call.ret, loan, bit);
-            // }
-        });
+    fn transfer_block_post(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {
+        // FIXME this is causing incorrect behavior on function calls that
+        // return borrowed values. Why is it different from the
+        // transfer_stmt case? Maybe calls should be considered to generate
+        // a new borrow?
+        //
+        // // Kill loans that have the lhs as a prefix.
+        // if let BlockKind::Call(call) = block {
+        //     self.kill_lhs_prefix(&call.ret, loan, bit);
+        // }
     }
 }

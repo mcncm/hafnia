@@ -205,7 +205,7 @@ test_compiles! {
     linear_conditional {
         fn main() {
             let x: u32;
-            if ?true { x = 3; } else { x = 4; }
+            if &?true { x = 3; } else { x = 4; }
         }
     }
 
@@ -220,7 +220,7 @@ test_compiles! {
         fn main() {
             let x = ?false;
             let y = ?true;
-            if y {
+            if &y {
                 let c = !x;
             }
         }
@@ -401,7 +401,7 @@ test_compiles! {
         }
     }
 
-    // // Operators on borrowed types
+    // Operators on borrowed types
 
     or_takes_shrd [Typecheck] {
         fn main() {
@@ -425,6 +425,32 @@ test_compiles! {
             let x = ?true;
             let y = ?true;
             x |= &y;
+        }
+    }
+
+    double_borrow [Analysis] {
+        fn main() {
+            let w = ?true;
+            let x = &w;
+            let y = &w;
+            let z = x;
+        }
+    }
+
+    shrd_borrow_after_uniq_borrow [Analysis] {
+        fn main() {
+            let w = ?false;
+            let x = &mut w;
+            let y = &w;
+        }
+    }
+
+    shrd_borrow_during_uniq_borrow fail [Analysis] {
+        fn main() {
+            let w = ?false;
+            let x = &mut x;
+            let y = &w;
+            let z = x;
         }
     }
 }

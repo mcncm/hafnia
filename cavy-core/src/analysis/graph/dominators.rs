@@ -35,7 +35,7 @@ impl<D: Direction> DataflowAnalysis<D, Blockwise> for DominatorAnalysis<D> {
         Self::Domain::full(self.blocks)
     }
 
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
+    fn transfer_block_post(&self, _state: &mut Self::Domain, _block: &BlockKind, _pt: GraphPt) {}
 
     fn initial_state(&self, blk: BlockId) -> Self::Domain {
         let mut bits = bitvec![0; self.blocks];
