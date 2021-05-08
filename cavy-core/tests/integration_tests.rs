@@ -453,4 +453,12 @@ test_compiles! {
             let z = x;
         }
     }
+
+    return_local_borrow fail [Analysis] {
+        fn main() {}
+
+        fn g() -> &?bool {
+            &?false
+        }
+    }
 }

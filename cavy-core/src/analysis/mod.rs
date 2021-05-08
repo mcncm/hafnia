@@ -54,30 +54,39 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut sub_cond_data: Store<FnId, subconditional::SubCondData> = Store::new();
 
     for (fn_id, gr) in mir.graphs.idx_enumerate() {
-        // let linearity_res = DataflowRunner::new(linearity::LinearityAnalysis {}, gr, ctx).run();
-        // for (_local, (fst, snd)) in linearity_res.exit_state.double_moves.iter() {
-        //     // TODO different messages for partial moves
-        //     errs.push(errors::DoubleMove {
-        //         span: fst.site,
-        //         snd_move: snd.site,
-        //     });
-        // }
-
-        // if !ctx.conf.arch.feedback {
-        //     let feedback_res = DataflowRunner::new(feedback::FeedbackAnalysis {}, gr, ctx).run();
-        //     for (local, lin_site) in feedback_res.exit_state.lin.into_iter() {
-        //         if let Some(&delin_site) = feedback_res.exit_state.delin.get(&local) {
-        //             errs.push(errors::ClassicalFeedback {
-        //                 delin_site,
-        //                 lin_site,
-        //             });
-        //         }
-        //     }
-        // }
-
         // == Dataflow analyses ==
 
         let context = DataflowCtx::new(gr, ctx);
+
+        let linearity_ana = linearity::LinearityAnalysis {};
+        let moves = &DataflowRunner::new(linearity_ana, &context)
+            .run()
+            // This is sort of, but not *quite* correct. I can't fix it right
+            // now, but it is a little troubling.
+            .block_states[gr.exit_block];
+        for (_local, (fst, snd)) in moves.double_moves.iter() {
+            // TODO different messages for partial moves
+            errs.push(errors::DoubleMove {
+                span: fst.site,
+                snd_move: snd.site,
+            });
+        }
+
+        if !ctx.conf.arch.feedback {
+            let feedback_res = DataflowRunner::new(feedback::FeedbackAnalysis {}, &context)
+                .run()
+                // ibid
+                .block_states[gr.exit_block]
+                .clone();
+            for (local, lin_site) in feedback_res.lin.into_iter() {
+                if let Some(&delin_site) = feedback_res.delin.get(&local) {
+                    errs.push(errors::ClassicalFeedback {
+                        delin_site,
+                        lin_site,
+                    });
+                }
+            }
+        }
 
         let dom = graph::DominatorAnalysis::<Forward>::new(gr);
         let dominators = DataflowRunner::new(dom, &context).run().block_states;

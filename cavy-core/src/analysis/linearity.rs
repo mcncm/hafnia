@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise};
+use super::dataflow::{Blockwise, DataflowAnalysis, Forward, Lattice};
 use crate::{mir::*, source::Span};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -206,7 +206,7 @@ impl Lattice for MoveState {
 /// two bits for each local, for a whole procedure.
 pub struct LinearityAnalysis {}
 
-impl DataflowAnalysis<Forward, Statementwise> for LinearityAnalysis {
+impl DataflowAnalysis<Forward, Blockwise> for LinearityAnalysis {
     type Domain = MoveState;
 
     fn bottom(&self) -> Self::Domain {
