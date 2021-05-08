@@ -374,7 +374,7 @@ impl Type {
         match (self, proj) {
             (Type::Tuple(tys), Proj::Field(elem)) => tys[*elem],
             (Type::UserType(udt), Proj::Field(elem)) => udt.fields[*elem].1,
-            (Type::Ref(RefKind::Uniq, ty), Proj::Deref) => *ty,
+            (Type::Ref(_, ty), Proj::Deref) => *ty,
             _ => unreachable!(),
         }
     }

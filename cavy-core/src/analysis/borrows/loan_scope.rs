@@ -2,11 +2,13 @@
 //! in [Borrow checker phase
 //! 1](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#borrow-checker-phase-1-computing-loans-in-scope)
 
+use bitvec::access::BitSafeUsize;
+
 use crate::{bitset, store::BitSet};
 
 use super::{
     super::dataflow::{DataflowAnalysis, Forward, Lattice, Statementwise, StmtStates},
-    ascription::AscriptionStore,
+    ascription::{AscriptionStore, Loan},
     regions::{LifetimeStore, RegionInf},
     *,
 };
@@ -26,6 +28,8 @@ impl Lattice for LocalLoans {
     }
 }
 
+type BitR<'b> = BitRef<'b, bitvec::ptr::Mut, Lsb0, BitSafeUsize>;
+
 pub struct LiveLoanAnalysis<'a> {
     /// The number of loans in the program
     size: usize,
@@ -42,6 +46,37 @@ impl<'a> LiveLoanAnalysis<'a> {
             lifetimes: &regions.lifetimes,
         }
     }
+
+    fn foreach_loan<F>(&self, state: &mut LocalLoans, mut f: F)
+    where
+        F: FnMut(&Loan, BitR),
+    {
+        // Ach, let's just use the richer API from `bitvec`
+        for (ln, bit) in state
+            .0
+            .as_mut_bitslice()
+            .iter_mut()
+            .enumerate()
+            // look at the memembers of the set
+            .filter(|(_, bit)| **bit)
+        {
+            let loan = &self.ascriptions.loans[LoanId::from(ln as u32)];
+            f(loan, bit);
+        }
+    }
+
+    fn kill_region_not_in_scope(&self, loan: &Loan, mut bit: BitR, pt: &GraphPt) {
+        if !self.lifetimes[loan.ascr.lt].contains(&pt) {
+            *bit = false;
+            return;
+        }
+    }
+
+    fn kill_lhs_prefix(&self, lhs: &Place, loan: &Loan, mut bit: BitR) {
+        if lhs.is_prefix(&loan.place) {
+            *bit = false;
+        }
+    }
 }
 
 impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
@@ -49,10 +84,6 @@ impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
 
     fn bottom(&self) -> Self::Domain {
         Self::Domain::empty(self.size)
-    }
-
-    fn transfer_block(&self, _state: &mut Self::Domain, _block: &BlockKind, _blk: BlockId) {
-        // does nothing
     }
 
     /// Per the RFC, we apply the rules:
@@ -75,34 +106,37 @@ impl<'a> DataflowAnalysis<Forward, Statementwise> for LiveLoanAnalysis<'a> {
     ///   live `Loan.` This isn't "right," but I can get it done much faster and
     ///   have this working.
     fn transfer_stmt(&self, state: &mut Self::Domain, stmt: &Stmt, pt: GraphPt) {
-        // Ach, let's just use the richer API from `bitvec`
-        for (ln, mut bit) in state
-            .0
-            .as_mut_bitslice()
-            .iter_mut()
-            .enumerate()
-            // look at the memembers of the set
-            .filter(|(_, bit)| **bit)
-        {
-            let loan = &self.ascriptions.loans[LoanId::from(ln as u32)];
-
+        self.foreach_loan(state, |loan, mut bit| {
             // Kill loans whose regions are not in the point.
             if !self.lifetimes[loan.ascr.lt].contains(&pt) {
                 *bit = false;
-                continue;
+                return;
             }
 
             // Kill loans that have the lhs as a prefix.
             if let StmtKind::Assn(lhs, _) = &stmt.kind {
-                if lhs.is_prefix(&loan.place) {
-                    *bit = false;
-                }
+                self.kill_lhs_prefix(lhs, loan, bit);
             }
-        }
+        });
 
         // Generate the loan at the borrow statement it came from.
         if let Some(ln) = self.ascriptions.refs.get(&pt) {
             state.set(*ln, true);
         }
+    }
+
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt) {
+        self.foreach_loan(state, |loan, mut bit| {
+            // Kill loans whose regions are not in the point.
+            if !self.lifetimes[loan.ascr.lt].contains(&pt) {
+                *bit = false;
+                return;
+            }
+
+            // Kill loans that have the lhs as a prefix.
+            if let BlockKind::Call(call) = block {
+                self.kill_lhs_prefix(&call.ret, loan, bit);
+            }
+        });
     }
 }

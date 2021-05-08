@@ -206,7 +206,7 @@ where
     fn transfer_stmt(&self, _state: &mut Self::Domain, _stmt: &Stmt, _pt: GraphPt) {}
 
     /// Apply the transfer function for the end of a basic block
-    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: BlockId);
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt);
 
     /// Compute state for the entry block
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
@@ -450,7 +450,11 @@ where
             self.update_stmt_state(blk, loc, state);
             self.analysis.transfer_stmt(state, stmt, gl);
         }
-        self.analysis.transfer_block(state, &block.kind, blk);
+        let blk_pt = GraphPt {
+            blk,
+            stmt: block.len(),
+        };
+        self.analysis.transfer_block(state, &block.kind, blk_pt);
         // Update the *block tail* state
         self.update_stmt_state(blk, block.stmts.len(), state);
         self.update_block_state(blk, state);
@@ -477,7 +481,11 @@ where
     /// set the result value to this state, and mutate the state through the block.
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId) {
         let block = &self.gr[blk];
-        self.analysis.transfer_block(state, &block.kind, blk);
+        let blk_pt = GraphPt {
+            blk,
+            stmt: block.len(),
+        };
+        self.analysis.transfer_block(state, &block.kind, blk_pt);
         // Update the *block tail* state
         self.update_stmt_state(blk, block.stmts.len(), state);
         for (loc, stmt) in block.stmts.iter().enumerate().rev() {

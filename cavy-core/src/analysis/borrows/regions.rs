@@ -140,6 +140,7 @@ type LiveAt = LocalP<LiveP>;
 impl<'a> RegionInf<'a> {
     fn collect_constraints(&mut self) {
         self.collect_liveness_constraints();
+        println!("{:?}", &self);
         self.collect_subtyping_constraints();
         self.collect_reborrow_constraints();
     }
@@ -256,7 +257,13 @@ impl<'a> RegionInf<'a> {
                 self.constraints.insert_sub_constr(pt, rtree, ltree);
             }
             (None, None) => {}
-            _ => unreachable!("inconsistent ascriptions"),
+            _ => {
+                dbg!(
+                    &self.ascriptions.locals[lhs.root],
+                    &self.ascriptions.locals[rhs.root],
+                );
+                unreachable!("inconsistent ascriptions")
+            }
         }
     }
 

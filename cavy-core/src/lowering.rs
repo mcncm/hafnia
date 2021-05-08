@@ -543,7 +543,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Deref(inner) => {
                 let rplace = self.resolve_deref(inner)?;
                 let rvalue = Rvalue {
-                    data: RvalueKind::Use(Operand::Move(rplace)),
+                    data: RvalueKind::Use(self.operand_of(rplace)),
                     span: expr.span,
                 };
                 self.assn_stmt(place, rvalue);
@@ -1010,24 +1010,6 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         self.assn_stmt(place, rvalue);
         Ok(())
     }
-
-    // // NOTE: In `rustc`, a dereferences lower to part of the path in a `Place`.
-    // // Although I'm using a data structure of the same name to represent field
-    // // access paths like `x.a.0.b`, I don't think I can or should regard
-    // // dereferences as the part of an "address" in the same way. Here, a
-    // // "reference" is not a reference at all: it's not really a variable whose
-    // // value is the *address* of some other value, but is the referenced value
-    // // itself--merely subject to some contract.
-    // fn lower_into_deref(&mut self, place: Place, expr: &Expr, span: Span) -> Maybe<()> {
-    //     let r_place = self.lower_expr(expr)?;
-    //     // Finally, put it there
-    //     let rvalue = Rvalue {
-    //         data: RvalueKind::Deref(r_place),
-    //         span,
-    //     };
-    //     self.assn_stmt(place, rvalue);
-    //     Ok(())
-    // }
 
     fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Maybe<()> {
         match &stmt.data {

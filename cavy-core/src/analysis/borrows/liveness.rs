@@ -89,7 +89,7 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
         LiveVars::empty(self.vars)
     }
 
-    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, _loc: BlockId) {
+    fn transfer_block(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt) {
         match block {
             BlockKind::Goto(_) => {}
             BlockKind::Switch { cond, .. } => self.gen(state, cond),

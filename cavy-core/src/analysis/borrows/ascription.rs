@@ -271,6 +271,7 @@ impl Loan {
 
 /// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
 /// practice, noting that few variables will have wide-branching `Place` trees.
+#[derive(Debug)]
 pub struct AscrNode {
     /// Ascription at this `Place`
     pub this: Option<Ascr>,
