@@ -59,15 +59,11 @@ impl<'a> BorrowChecker<'a> {
 
     /// Check and report errors
     fn validate<'b>(&mut self, action: &'b Action<'a>, loan: &'b Loan) {
-        if !action.is_read() {
-            self.errs.push(errors::WriteAction {
-                loan: loan.span,
-                action: action.span,
-            });
-        }
-
-        if !loan.is_shrd() {
-            self.errs.push(errors::UniqBorrow {
+        if !(action.is_read() && loan.is_shrd()) {
+            self.errs.push(errors::BorrowCheckError {
+                verb: action.kind.verb(),
+                verb_participle: action.kind.verb_participle(),
+                borrow_participle: borrow_participle(loan),
                 loan: loan.span,
                 action: action.span,
             });
@@ -339,20 +335,59 @@ mod errors {
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
-    #[msg = "tried to do something illegal with a unique reference"]
-    pub struct UniqBorrow {
-        #[span(msg = "data was borrowed here...")]
+    #[msg = "tried to {verb} borrowed data"]
+    pub struct BorrowCheckError {
+        pub verb: &'static str,
+        pub verb_participle: &'static str,
+        pub borrow_participle: &'static str,
+        #[span(msg = "the data was {borrow_participle} here...")]
         pub loan: Span,
-        #[span(msg = "...and something illegal happened with it here.")]
+        #[span(msg = "...and later {verb_participle} here.")]
         pub action: Span,
     }
+}
 
-    #[derive(Diagnostic)]
-    #[msg = "tried to write to borrowed data"]
-    pub struct WriteAction {
-        #[span(msg = "the data was borrowed here...")]
-        pub loan: Span,
-        #[span(msg = "...and later written to here.")]
-        pub action: Span,
+/*
+Some text representations of the actions
+*/
+
+impl ActionKind {
+    /// A helpful string to use in the error message
+    fn verb(&self) -> &'static str {
+        use ActionKind::*;
+        use RefKind::*;
+        match self {
+            Move => "move",
+            Copy => "copy",
+            Assn => "assign to",
+            GuardImmut => "control on",
+            GuardMut => "control on",
+            Borrow(Uniq) => "uniquely borrow",
+            Borrow(Shrd) => "borrow",
+            Drop => "drop",
+        }
+    }
+
+    /// Another helpful string to use in the error message
+    fn verb_participle(&self) -> &'static str {
+        use ActionKind::*;
+        use RefKind::*;
+        match self {
+            Move => "moved",
+            Copy => "copied",
+            Assn => "assigned to",
+            GuardImmut => "controlled on",
+            GuardMut => "controlled on",
+            Borrow(Uniq) => "uniquely borrowed",
+            Borrow(Shrd) => "borrowed",
+            Drop => "dropped",
+        }
+    }
+}
+
+fn borrow_participle(loan: &Loan) -> &'static str {
+    match &loan.ascr.kind {
+        RefKind::Shrd => "borrowed",
+        RefKind::Uniq => "uniquely borrowed",
     }
 }

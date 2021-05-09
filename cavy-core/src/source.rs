@@ -189,6 +189,22 @@ impl Span {
             })
         }
     }
+
+    pub fn first_point(&self) -> Span {
+        Span {
+            start: self.start,
+            end: self.start,
+            src_id: self.src_id,
+        }
+    }
+
+    pub fn last_point(&self) -> Span {
+        Span {
+            start: self.end,
+            end: self.end,
+            src_id: self.src_id,
+        }
+    }
 }
 
 impl fmt::Display for SrcObject {

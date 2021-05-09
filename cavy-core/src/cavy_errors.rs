@@ -169,9 +169,10 @@ impl<'c> FmtWith<Context<'c>> for ErrorBuf {
 
 impl<'c> FmtWith<Context<'c>> for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.error_code())?; //   \
-        self.message(ctx, f)?; //    | clean up
-        writeln!(f, "")?; //   /
+        // FIXME clean up
+        write!(f, "{} ", self.error_code())?;
+        self.message(ctx, f)?;
+        writeln!(f, "")?;
 
         for span_report in self.spans() {
             let span = span_report.span;

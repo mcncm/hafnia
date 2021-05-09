@@ -483,7 +483,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// The partner of Parser::with_table at the next stage of the compilation
     /// pipeline.
-    fn with_scope<T, F>(&mut self, new: TableId, is_unsafe: bool, f: F) -> Maybe<T>
+    fn with_scope<T, F>(&mut self, new: TableId, is_unsafe: bool, span: Span, f: F) -> Maybe<T>
     where
         F: FnOnce(&mut Self) -> Maybe<T>,
     {
@@ -495,7 +495,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             // NOTE: unnecessary allocation
             let drops: Vec<_> = this.st.pop_table().collect();
             for local in drops.into_iter() {
-                this.push_stmt(Span::default(), mir::StmtKind::Drop(Place::from(local)));
+                this.push_stmt(span.last_point(), mir::StmtKind::Drop(Place::from(local)));
             }
             this.in_unsafe = old_unsafe;
             this.table = old_table;
@@ -887,7 +887,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// Lower an AST block and store its value in the given location.
     fn lower_into_block(&mut self, place: Place, block: &Block) -> Maybe<()> {
-        self.with_scope(block.table, block.is_unsafe, |this| {
+        self.with_scope(block.table, block.is_unsafe, block.span, |this| {
             Self::lower_into_block_inner(this, place, block)
         })
     }
