@@ -251,8 +251,7 @@ impl<'a> RegionInf<'a> {
             &self.ascriptions.locals[rhs.root],
         ) {
             (Some(ltree), Some(rtree)) => {
-                // Recursively apply the subtyping rule, with `rtree <: ltree`,
-                // from the *next* point, which is where the constraint takes effect.
+                // Recursively apply the subtyping rule, with `rtree <: ltree`.
                 self.constraints.insert_sub_constr(pt, rtree, ltree);
             }
             (None, None) => {}
@@ -355,28 +354,28 @@ impl Constraints {
         }
     }
 
-    /// Apply the subtyping rule for `shrt <: long`
-    fn insert_sub_constr(&mut self, pt: GraphPt, shrt: &AscrNode, long: &AscrNode) {
-        match (&shrt.this, &long.this) {
+    /// Apply the subtyping rule for `long <: shrt`
+    fn insert_sub_constr(&mut self, pt: GraphPt, long: &AscrNode, shrt: &AscrNode) {
+        match (&long.this, &shrt.this) {
             (
-                Some(Ascr {
-                    kind: shrt_kind,
-                    lt: shrt_lt,
-                }),
                 Some(Ascr {
                     kind: long_kind,
                     lt: long_lt,
                 }),
+                Some(Ascr {
+                    kind: shrt_kind,
+                    lt: shrt_lt,
+                }),
                 // NOTE: it is *not* the case that `&mut T <: &T`. The former is
                 // *coercible* to the latter, but it is not a subtype; if it
                 // were, you could break all the rules.
-            ) if shrt_kind == long_kind => {
+            ) if long_kind == shrt_kind => {
                 // insert the constraints at this level
                 self.outlives_from(*long_lt, *shrt_lt, pt);
 
                 // finally, recurse on any inner types that have lifetime
                 // ascriptions
-                self.insert_sub_constr_inner(Some(*shrt_kind), pt, shrt, long);
+                self.insert_sub_constr_inner(Some(*shrt_kind), pt, long, shrt);
             }
             (None, None) => {
                 /*
@@ -387,7 +386,7 @@ impl Constraints {
                 terminates at types containing no lifetimes.
                 */
 
-                self.insert_sub_constr_inner(None, pt, shrt, long);
+                self.insert_sub_constr_inner(None, pt, long, shrt);
             }
             _ => unreachable!("ascription or typechecker bug"),
         }
@@ -398,28 +397,28 @@ impl Constraints {
         &mut self,
         ref_kind: Option<RefKind>,
         pt: GraphPt,
-        shrt: &AscrNode,
         long: &AscrNode,
+        shrt: &AscrNode,
     ) {
-        let children = shrt
+        let children = long
             .slots
             .iter()
-            .zip(long.slots.iter())
-            .filter_map(|(shrt, long)| match (shrt, long) {
-                (Some(shrt), Some(long)) => Some((shrt, long)),
+            .zip(shrt.slots.iter())
+            .filter_map(|(long, shrt)| match (long, shrt) {
+                (Some(long), Some(shrt)) => Some((long, shrt)),
                 (None, None) => None,
                 _ => unreachable!("ascription or typechecker bug"),
             });
-        for (short_chld, long_chld) in children {
+        for (long_chld, shrt_chld) in children {
             /*
             NOTE: this is the only place where variance rules are applied.
             */
 
             // unconditionally recurse *covariantly*:
-            self.insert_sub_constr(pt, short_chld, long_chld);
+            self.insert_sub_constr(pt, long_chld, shrt_chld);
             // recurse *contravariantly* if uniq ref
             if let Some(RefKind::Uniq) = ref_kind {
-                self.insert_sub_constr(pt, long_chld, short_chld);
+                self.insert_sub_constr(pt, shrt_chld, long_chld);
             }
         }
     }

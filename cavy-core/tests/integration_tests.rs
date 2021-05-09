@@ -428,6 +428,8 @@ test_compiles! {
         }
     }
 
+    // Borrow checking
+
     double_borrow [Analysis] {
         fn main() {
             let w = ?true;
@@ -458,7 +460,9 @@ test_compiles! {
         fn main() {}
 
         fn g() -> &?bool {
-            &?false
+            let x = ?false;
+            let y = &x;
+            y
         }
     }
 
@@ -467,6 +471,15 @@ test_compiles! {
             let x = ?false;
             let y = x;
             let r = &x;
+        }
+    }
+
+    move_from_borrow fail [Analysis] {
+        fn main() {
+            let x = ?false;
+            let y = &x;
+            z = x;
+            snd = y;
         }
     }
 }

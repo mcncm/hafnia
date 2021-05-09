@@ -128,7 +128,7 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
                 self.kill(state, lhs);
             }
             StmtKind::Assert(place) => self.gen(state, place),
-            StmtKind::Drop(place) => {
+            StmtKind::Drop(_place) => {
                 // TODO: add `may_dangle` check to lifetimes?
                 // For now, assume that all references can dangle.
             }
