@@ -4,10 +4,10 @@
 
 use lazy_static::lazy_static;
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use regex::Regex;
 use std::collections::HashSet;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, DeriveInput, Field, Ident};
 
 /// Builds a Cavy error struct implementing Diagnostic. This is supposed to
 /// resemble rustc's `SessionDiagnostic` in both form and function.
@@ -19,12 +19,7 @@ pub fn diagnostic(input: TokenStream) -> TokenStream {
 
 fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     let name = &ast.ident;
-    let DiagnosticData {
-        spans,
-        msg,
-        ctx_fields,
-        dis_fields,
-    } = DiagnosticData::new(&ast);
+    let DiagnosticData { msg, spans } = DiagnosticData::new(&ast);
 
     // A list of code snippets for inserting the secondary spans. If they are
     // simple spans, they’re just pushed into the waiting vector of secondaries;
@@ -36,7 +31,13 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     let spans_flat = spans.iter().map(|(field, msg)| {
         let ident = field.ident.as_ref().unwrap();
         let msg = match msg {
-            Some(msg) => quote! { Some(#msg) },
+            Some(msg) => {
+                quote! { Some(Box::new(
+                    move |f, ctx| {
+                        #msg
+                    }))
+                }
+            }
             None => quote! { None },
         };
 
@@ -73,15 +74,11 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
 
         impl crate::cavy_errors::Diagnostic for #name {
             // Can I do this without making an owned string?
-            fn message(&self, ctx: &crate::context::Context) -> String {
-                format!(
-                    #msg,
-                    #(#dis_fields = self.#dis_fields,)*
-                    #(#ctx_fields = crate::util::FmtWith::fmt_with(&self.#ctx_fields, &ctx),)*
-                )
+            fn message(&self, ctx: &crate::context::Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                #msg
             }
 
-            fn spans(&self) -> Vec<crate::cavy_errors::SpanReport> {
+            fn spans<'a>(&'a self) -> Vec<crate::cavy_errors::SpanReport<'a>> {
                 // Here we've been given a bunch of fields, each of which might
                 // be a single `Span` or a `Vec` of them. We'll have to look at
                 // the type of the field to decide how to flatten the regions
@@ -102,17 +99,40 @@ fn impl_cavy_error_macro(ast: DeriveInput) -> TokenStream {
     expanded.into()
 }
 
-/// A data structure representing the analyzed struct, whose members are used to
-/// build up the ultimate Diagnostic struct.
-struct DiagnosticData<'ast> {
-    /// The message reported by the error, which should refer to the main span
+/// A literal message with some struct fields interpolated into it
+struct InterpolatedMessage<'ast> {
+    /// The mssage itself
     msg: syn::Lit,
-    /// Source spans that should be reported with the error
-    spans: Vec<(&'ast syn::Field, Option<syn::Lit>)>,
     /// Fields that are referenced in the format string and must be formatted with a context
     ctx_fields: Vec<&'ast syn::Ident>,
     /// Fields that are referenced in the format string and can be formatted with `fmt::Display`
     dis_fields: Vec<&'ast syn::Ident>,
+}
+
+impl<'ast> ToTokens for InterpolatedMessage<'ast> {
+    fn to_tokens(&self, tokens: &mut quote::__private::TokenStream) {
+        let dis_fields = &self.dis_fields;
+        let ctx_fields = &self.ctx_fields;
+        let msg = &self.msg;
+        let new_tokens = quote! {
+                write!(
+                    f,
+                    #msg,
+                #(#dis_fields = self.#dis_fields,)*
+                #(#ctx_fields = crate::util::FmtWith::fmt_with(&self.#ctx_fields, &ctx),)*
+            )
+        };
+        new_tokens.to_tokens(tokens);
+    }
+}
+
+/// A data structure representing the analyzed struct, whose members are used to
+/// build up the ultimate Diagnostic struct.
+struct DiagnosticData<'ast> {
+    /// The message reported by the error, which should refer to the main span
+    msg: InterpolatedMessage<'ast>,
+    /// Source spans that should be reported with the error
+    spans: Vec<(&'ast syn::Field, Option<InterpolatedMessage<'ast>>)>,
 }
 
 /// Check if a given field has a helper attribute.
@@ -184,6 +204,40 @@ impl<'ast> DiagnosticData<'ast> {
         }
 
         let msg = Self::get_msg(&ast);
+        let (ctx_fields, dis_fields) = Self::fmt_fields(msg.clone(), fields);
+
+        let msg = InterpolatedMessage {
+            msg,
+            ctx_fields,
+            dis_fields,
+        };
+
+        let spans: Vec<_> = spans
+            .into_iter()
+            .map(|(span, msg)| {
+                let msg = msg.map(|msg| {
+                    let (ctx_fields, dis_fields) = Self::fmt_fields(msg.clone(), fields);
+                    InterpolatedMessage {
+                        msg,
+                        ctx_fields,
+                        dis_fields,
+                    }
+                });
+                (span, msg)
+            })
+            .collect();
+
+        assert!(!spans.is_empty(), "Must report at least one span");
+
+        Self { msg, spans }
+    }
+
+    /// Get the names of fields that should be interpolated into a given message.
+    fn fmt_fields<'a>(
+        msg: syn::Lit,
+        fields: &'a Punctuated<Field, Comma>,
+    ) -> (Vec<&'a Ident>, Vec<&'a Ident>) {
+        // Identify which fields are interpolated into this message
         let fmt_fields = Self::find_fmt_fields(&msg);
         // Now we iterate through the fields again, this time in order to split
         // up the `HashSet<&str>` to a pair of `Vec<syn::Ident>` of the actual
@@ -211,14 +265,7 @@ impl<'ast> DiagnosticData<'ast> {
             .map(|field| field.ident.as_ref().unwrap())
             .collect();
 
-        assert!(!spans.is_empty(), "Must report at least one span");
-
-        Self {
-            msg,
-            spans,
-            ctx_fields,
-            dis_fields,
-        }
+        (ctx_fields, dis_fields)
     }
 
     /// Parses the message for set of all the fields that are to be formatted

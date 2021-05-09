@@ -14,11 +14,11 @@ pub trait Diagnostic: std::fmt::Debug {
     }
 
     /// Formats the leading line of the error, warning, or lint message.
-    fn message(&self, ctx: &Context) -> String;
+    fn message(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
     /// Retrieves messages referencing spans of source code, of which there must
     /// be at least one.
-    fn spans(&self) -> Vec<SpanReport> {
+    fn spans<'a>(&'a self) -> Vec<SpanReport<'a>> {
         Vec::new()
     }
 
@@ -43,12 +43,12 @@ pub enum DiagnosticLevel {
 }
 
 /// A message about a region of code. This can be used to present the results of
-pub struct SpanReport {
+pub struct SpanReport<'a> {
     pub span: Span,
-    pub msg: Option<&'static str>,
+    pub msg: Option<Box<dyn Fn(&mut fmt::Formatter<'_>, &Context) -> fmt::Result + 'a>>,
 }
 
-impl<'c> FmtWith<Context<'c>> for SpanReport {
+impl<'c, 'a> FmtWith<Context<'c>> for SpanReport<'a> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let src = &ctx.srcs[self.span.src_id];
         let line = src.get_line(self.span.start);
@@ -66,11 +66,7 @@ impl<'c> FmtWith<Context<'c>> for SpanReport {
             .filter(|&c| c == '\t')
             .count();
         // Carets
-        let mut annot = "^".repeat(end - start + 1);
-        if let Some(msg) = &self.msg {
-            annot.push(' ');
-            annot.push_str(&msg);
-        }
+        let annot = "^".repeat(end - start + 1);
         // How long should line numbers be?
         let digits = util::count_digits(line.linum.into());
         // Reported code with annotations. This is a little ad-hoc, and should
@@ -80,8 +76,7 @@ impl<'c> FmtWith<Context<'c>> for SpanReport {
             "\
 {s:digits$} |
 {linum:digits$} | {}
-{s:digits$} | {s:\t<tabs$}{s:start$}{}\
-",
+{s:digits$} | {s:\t<tabs$}{s:start$}{} ",
             line,
             annot,
             linum = line.linum,
@@ -90,7 +85,13 @@ impl<'c> FmtWith<Context<'c>> for SpanReport {
             digits = digits,
             // start of annotation
             start = start - tabs
-        )
+        )?;
+
+        if let Some(msg) = &self.msg {
+            msg(f, ctx)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -168,7 +169,10 @@ impl<'c> FmtWith<Context<'c>> for ErrorBuf {
 
 impl<'c> FmtWith<Context<'c>> for Box<dyn Diagnostic> {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}: {}", self.error_code(), self.message(ctx))?;
+        write!(f, "{}", self.error_code())?; //   \
+        self.message(ctx, f)?; //    | clean up
+        writeln!(f, "")?; //   /
+
         for span_report in self.spans() {
             let span = span_report.span;
             let origin = &ctx.srcs[span.src_id];
