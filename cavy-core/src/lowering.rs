@@ -233,6 +233,42 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
 // ====== Graph building ======
 
+/// A set of visible locals
+struct LocalScope {
+    /// Locals named by a variable
+    named: HashMap<SymbolId, LocalId>,
+    /// All locals in the current scope, including shadowed and anonyous locals.
+    /// We should keep everything in here, whether named or anonymous, to
+    /// preserve insertion order.
+    all: Vec<LocalId>,
+}
+
+impl LocalScope {
+    fn new() -> Self {
+        Self {
+            named: HashMap::new(),
+            all: vec![],
+        }
+    }
+
+    fn get(&self, symb: &SymbolId) -> Option<&LocalId> {
+        self.named.get(symb)
+    }
+
+    /// (Re)bind a name to a local
+    fn bind(&mut self, symb: Option<SymbolId>, local: LocalId) {
+        self.all.push(local);
+        if let Some(symb) = symb {
+            self.named.insert(symb, local);
+        }
+    }
+
+    fn drain(&mut self) -> impl Iterator<Item = LocalId> + '_ {
+        self.named.clear();
+        self.all.drain(..).rev()
+    }
+}
+
 /// A helper struct for tracking the reified referents (as `LocalId`s) of
 /// symbols. It's just a vector of maps, with a pointer to the currently active
 /// one. This should be a little less expensive than a linked list, since we
@@ -241,30 +277,31 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 /// Note: nobody is stopping you from trying to pop beyond the first table. Such
 /// underflow would be a bug; therefore you must be careful always to call
 /// `push_table` and `pop_table` in pairs.
-struct SymbolTable {
-    tables: Vec<HashMap<SymbolId, LocalId>>,
+struct ScopeStack {
+    scopes: Vec<LocalScope>,
     current: usize,
 }
 
-impl SymbolTable {
+impl ScopeStack {
     fn new() -> Self {
         Self {
-            tables: vec![HashMap::new()],
+            scopes: vec![LocalScope::new()],
             current: 0,
         }
     }
 
     fn push_table(&mut self) {
-        if self.current == self.tables.len() - 1 {
-            self.tables.push(HashMap::new());
+        if self.current == self.scopes.len() - 1 {
+            self.scopes.push(LocalScope::new());
         }
         self.current += 1;
     }
 
-    fn pop_table(&mut self) {
+    fn pop_table(&mut self) -> impl Iterator<Item = LocalId> + '_ {
         // NOTE: if you're clever, you won't even have to clear this.
-        self.tables[self.current].clear();
+        let prev = self.current;
         self.current -= 1;
+        self.scopes[prev].drain()
     }
 
     /// NOTE: this is actually incorrect, because of how it should interact with
@@ -274,7 +311,7 @@ impl SymbolTable {
     fn get(&self, item: &SymbolId) -> Option<&LocalId> {
         let mut cursor = self.current;
         loop {
-            if let local @ Some(_) = self.tables[cursor].get(&item) {
+            if let local @ Some(_) = self.scopes[cursor].get(&item) {
                 return local;
             } else if cursor > 0 {
                 cursor -= 1;
@@ -285,8 +322,8 @@ impl SymbolTable {
     }
 
     /// Always insert in the top table
-    fn insert(&mut self, k: SymbolId, v: LocalId) -> Option<LocalId> {
-        self.tables[self.current].insert(k, v)
+    fn bind(&mut self, k: Option<SymbolId>, v: LocalId) {
+        self.scopes[self.current].bind(k, v)
     }
 }
 
@@ -302,8 +339,8 @@ pub struct GraphBuilder<'mir, 'ctx> {
     gr: Graph,
     /// User-defined type translation table
     udt_tys: &'mir HashMap<UdtId, TyId>,
-    /// A stack of locals tables
-    st: SymbolTable,
+    /// A stack of local scopes
+    st: ScopeStack,
     /// The currently active items table
     table: TableId,
     /// The AST items tables
@@ -335,20 +372,23 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let body = &ast.bodies[func.body];
 
         let mut gr = Graph::new(id, &sigs[id]);
-        let mut st = SymbolTable::new();
+        let mut st = ScopeStack::new();
         let cursor = gr.entry_block;
 
-        gr.locals.insert(Local {
+        // TODO: move these to some kind of `GraphBuilder::bind_params` method
+        // calling `GraphBuilder::bind_local`.
+        let local = gr.locals.insert(Local {
             ty: *output,
             kind: LocalKind::Param,
         });
+        st.bind(None, local);
 
         for (param, ty) in params {
             let local = gr.locals.insert(Local {
                 ty: *ty,
                 kind: LocalKind::Param,
             });
-            st.insert(*param, local);
+            st.bind(Some(*param), local);
         }
 
         Self {
@@ -384,6 +424,21 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             })?
         }
         Ok(())
+    }
+
+    // === Constructing local variables ===
+
+    /// Inserts a local in the graph's locals list and the current local scope,
+    /// binding it to a name if it has one.
+    fn bind_local(&mut self, symb: Option<SymbolId>, ty: TyId, kind: LocalKind) -> LocalId {
+        let local = self.gr.new_local(ty, kind);
+        self.st.bind(symb, local);
+        local
+    }
+
+    fn auto_place(&mut self, ty: TyId) -> Place {
+        let local = self.bind_local(None, ty, LocalKind::Auto);
+        local.into()
     }
 
     // === Block-manipulating methods ===
@@ -437,9 +492,13 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let old_unsafe = self.in_unsafe;
         self.in_unsafe = is_unsafe;
         let restore = |this: &mut Self| {
+            // NOTE: unnecessary allocation
+            let drops: Vec<_> = this.st.pop_table().collect();
+            for local in drops.into_iter() {
+                this.push_stmt(Span::default(), mir::StmtKind::Drop(Place::from(local)));
+            }
             this.in_unsafe = old_unsafe;
             this.table = old_table;
-            this.st.pop_table();
         };
         self.st.push_table();
         let t = match f(self) {
@@ -561,7 +620,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             return self.resolve_ident(ident);
         }
         let ty = self.type_expr(expr)?;
-        let place = self.gr.auto_place(ty);
+        let place = self.auto_place(ty);
         self.lower_into(&place, expr)?;
         Ok(place)
     }
@@ -755,7 +814,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             }
             ExprKind::Field(head, field) => self.resolve_fields(head, &field)?,
             _ => {
-                let head_place = self.gr.auto_place(head_ty);
+                let head_place = self.auto_place(head_ty);
                 self.lower_into(&head_place, head)?;
                 head_place
             }
@@ -894,7 +953,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             cond_ty,
             cond.span,
         )?;
-        let cond_place = self.gr.auto_place(cond_ty);
+        let cond_place = self.auto_place(cond_ty);
         let cond = self.lower_into(&cond_place, cond);
 
         // The tail should be a new block that's going wherever the current
@@ -961,7 +1020,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             .iter()
             .zip(args)
             .map(|((_symb, ty), arg)| {
-                let place = self.gr.auto_place(*ty);
+                let place = self.auto_place(*ty);
                 self.lower_into(&place, arg)?;
                 // Call by value!
                 Ok(self.operand_of(place))
@@ -1023,7 +1082,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
                 let ty = self.type_expr(expr)?;
-                let place = self.gr.auto_place(ty);
+                let place = self.auto_place(ty);
                 self.lower_into(&place, expr)
             }
             StmtKind::Decl { lhs, ty, rhs } => self.lower_decl(lhs, ty, rhs),
@@ -1043,7 +1102,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                         name: name.data,
                     }))?,
                 };
-                let place = self.gr.auto_place(ty);
+                let place = self.auto_place(ty);
                 self.lower_into(&place, lhs)?;
                 let stmt = mir::IoStmtKind::Out {
                     place,
@@ -1095,7 +1154,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             (Some(ty), _) => self.resolve_annot(ty)?,
             (_, Some(rhs)) => self.type_inner(rhs)?,
         };
-        let place = self.gr.user_place(ty);
+        // NOTE: we can't bind the lhs *until* lowering the rhs, and therefore
+        // can't use the `Self::bind_local` method.
+        let place = self.gr.new_local(ty, LocalKind::User).into();
         if let Some(rhs) = rhs {
             self.lower_into(&place, rhs)?;
         }
@@ -1103,7 +1164,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // *before* types are resolved. This can create a spurioius "unbound
         // name" error for each reference to a variable whose declaration is
         // broken.
-        self.st.insert(lhs_data, place.root);
+        self.st.bind(Some(lhs_data), place.root);
         Ok(())
     }
 

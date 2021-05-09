@@ -244,25 +244,9 @@ impl Graph {
         self.blocks.insert(BasicBlock::goto(block))
     }
 
-    fn alloc_new_local(&mut self, ty: TyId, kind: LocalKind) -> LocalId {
+    pub fn new_local(&mut self, ty: TyId, kind: LocalKind) -> LocalId {
         let local = Local { ty, kind };
         self.locals.insert(local)
-    }
-
-    pub fn auto_local(&mut self, ty: TyId) -> LocalId {
-        self.alloc_new_local(ty, LocalKind::Auto)
-    }
-
-    pub fn user_local(&mut self, ty: TyId) -> LocalId {
-        self.alloc_new_local(ty, LocalKind::User)
-    }
-
-    pub fn auto_place(&mut self, ty: TyId) -> Place {
-        self.auto_local(ty).into()
-    }
-
-    pub fn user_place(&mut self, ty: TyId) -> Place {
-        self.user_local(ty).into()
     }
 
     pub fn push_stmt(&mut self, block: BlockId, stmt: Stmt) {
