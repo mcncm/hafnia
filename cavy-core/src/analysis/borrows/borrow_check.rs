@@ -85,12 +85,20 @@ struct Action<'p> {
 }
 
 impl<'p> Action<'p> {
+    fn depth(&self) -> ActionDepth {
+        self.kind.attributes().0
+    }
+
+    fn direction(&self) -> ActionDirection {
+        self.kind.attributes().1
+    }
+
     fn is_read(&self) -> bool {
-        matches!(self.kind, ActionKind::DeepRead)
+        matches!(self.direction(), ActionDirection::Read)
     }
 
     fn is_shallow(&self) -> bool {
-        matches!(&self.kind, ActionKind::ShallowWrite)
+        matches!(&self.depth(), ActionDepth::Shallow)
     }
 
     /// Check if a loan is "relevant" to this action
@@ -107,16 +115,66 @@ impl<'p> Action<'p> {
     }
 }
 
-// probably not worth refactoring as `ActionKind(Depth, Direction)`
-#[derive(Debug)]
-enum ActionKind {
-    DeepWrite,
-    DeepRead,
-    ShallowWrite,
-    // No such thing as a shallow read!
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActionDepth {
+    Shallow,
+    Deep,
 }
 
-use ActionKind::*;
+// A funny name for this enum, but it's what I've got for the moment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActionDirection {
+    Read,
+    Write,
+}
+
+/// Rather than an enum `DeepWrite | DeepRead | ShallowWrite`, as suggested in
+/// the RFC, we'll use an abstraction function with a whole host of
+/// `ActionKind`s, each of which has a depth (`Shallow`, `Deep`) and a direction
+/// (`Read`, `Write`) as an attribute.
+#[derive(Debug)]
+enum ActionKind {
+    /// Move from
+    Move,
+    /// Copy from
+    Copy,
+    /// Assign to
+    Assn,
+    /// Condition on, immutably: this is a guard that should satisfy the
+    /// "observational immutability criterion".
+    GuardImmut,
+    /// condition on, mutably: this is a guard that could change after exiting
+    /// the guarded block(s).
+    GuardMut,
+    /// Take a referenceto
+    Borrow(RefKind),
+    /// Drop the `Place` (combining what rustc calls dropping and
+    /// `StorageDead`).
+    Drop,
+}
+
+impl ActionKind {
+    fn attributes(&self) -> (ActionDepth, ActionDirection) {
+        use ActionDepth::*;
+        use ActionDirection::*;
+        use ActionKind::*;
+        match self {
+            Move => (Deep, Write),
+            Copy => (Deep, Read),
+            Assn => (Shallow, Write),
+            GuardImmut => (Deep, Read),
+            GuardMut => (Deep, Write),
+            Borrow(kind) => {
+                let direction = match kind {
+                    RefKind::Shrd => Read,
+                    RefKind::Uniq => Write,
+                };
+                (Deep, direction)
+            }
+            Drop => (Deep, Write),
+        }
+    }
+}
 
 // NOTE: this is really just a lazy version of the `Summaryrunner`. I should
 // really just use that/unify the data structures. But, today, resist the siren
@@ -160,14 +218,14 @@ impl<'a> ActionStream<'a> {
     fn consume_stmt(&mut self, stmt: &'a Stmt) {
         match &stmt.kind {
             StmtKind::Assn(lhs, rhs) => {
-                self.action(lhs, ShallowWrite, stmt.span);
+                self.action(lhs, ActionKind::Assn, stmt.span);
                 self.consume_rvalue(&rhs.data, rhs.span);
             }
             StmtKind::Assert(_) => {}
             StmtKind::Drop(place) => {
                 // NOTE: as per RFC comment, this might be more conservative
                 // than necessary.
-                self.action(place, DeepWrite, stmt.span);
+                self.action(place, ActionKind::Drop, stmt.span);
             }
             StmtKind::Io(_) => {}
             StmtKind::Nop => {}
@@ -185,11 +243,7 @@ impl<'a> ActionStream<'a> {
                 self.consume_operand(op, span);
             }
             RvalueKind::Ref(kind, place) => {
-                let kind = match kind {
-                    RefKind::Shrd => DeepRead,
-                    RefKind::Uniq => DeepWrite,
-                };
-                self.action(place, kind, span);
+                self.action(place, ActionKind::Borrow(*kind), span);
             }
             RvalueKind::Use(op) => {
                 self.consume_operand(op, span);
@@ -205,11 +259,10 @@ impl<'a> ActionStream<'a> {
 
         let ty = self.locals.type_of(place, &self.ctx);
         let kind = if ty.is_affine(&self.ctx) {
-            DeepWrite
+            ActionKind::Move
         } else {
-            DeepRead
+            ActionKind::Copy
         };
-
         self.action(place, kind, span);
     }
 
@@ -219,13 +272,22 @@ impl<'a> ActionStream<'a> {
             BlockKind::Goto(_) => {}
             BlockKind::Switch(switch) => {
                 // Nothing in a condition must be linear, so we can use
-                // `DeepRead` unconditionally
-                self.action(&switch.cond, DeepRead, switch.span);
+                // `DeepRead` unconditionally.
+                //
+                // No, that's not true; it could be classical, and we could
+                // overwrite it.
+                let ty = self.locals.type_of(&switch.cond, &self.ctx);
+                let kind = if ty.is_coherent(&self.ctx) {
+                    ActionKind::GuardImmut
+                } else {
+                    ActionKind::GuardMut
+                };
+                self.action(&switch.cond, kind, switch.span);
             }
             BlockKind::Call(call) => {
                 // The lhs of a call should be treated just like the lhs of an
                 // `Assn`.
-                self.action(&call.ret, ShallowWrite, call.span);
+                self.action(&call.ret, ActionKind::Assn, call.span);
                 for arg in &call.args {
                     self.consume_operand(arg, call.span);
                 }
