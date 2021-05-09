@@ -1,7 +1,33 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use super::dataflow::{Blockwise, DataflowAnalysis, Forward, Lattice};
-use crate::{mir::*, source::Span};
+use super::dataflow::{Blockwise, DataflowAnalysis, DataflowCtx, DataflowRunner, Forward, Lattice};
+use crate::{cavy_errors::ErrorBuf, mir::*, source::Span, types::RefKind};
+
+pub fn check_linearity(context: &DataflowCtx, errs: &mut ErrorBuf) {
+    let linearity_ana = LinearityAnalysis {};
+    let moves = &DataflowRunner::new(linearity_ana, &context)
+        .run()
+        // This is sort of, but not *quite* correct. I can't fix it right
+        // now, but it is a little troubling.
+        .block_states[context.gr.exit_block];
+    for (_local, (fst, snd)) in moves.double_moves.iter() {
+        // TODO different messages for partial moves
+        match snd {
+            SecondUse::Move(mov) => {
+                errs.push(errors::DoubleMove {
+                    fst: fst.site,
+                    snd: mov.site,
+                });
+            }
+            SecondUse::Borrow(bor) => {
+                errs.push(errors::BorrowAfterMove {
+                    fst: fst.site,
+                    snd: bor.site,
+                });
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MoveKind {
@@ -11,10 +37,36 @@ pub enum MoveKind {
     Full,
 }
 
-/// A case of a variable being moved
+/// An illegal second use of an already-moved `Place`
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SecondUse {
+    Move(Move),
+    Borrow(Borrow),
+}
+
+impl From<Move> for SecondUse {
+    fn from(mov: Move) -> Self {
+        Self::Move(mov)
+    }
+}
+
+impl From<Borrow> for SecondUse {
+    fn from(borrow: Borrow) -> Self {
+        Self::Borrow(borrow)
+    }
+}
+
+/// A case of a `Place` being moved
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Move {
     pub kind: MoveKind,
+    pub site: Span,
+}
+
+/// A case of a `Place` being borrowed
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Borrow {
+    pub kind: RefKind,
     pub site: Span,
 }
 
@@ -68,8 +120,7 @@ impl MoveTree {
     }
 
     /// Do a mutating tree merge between this and another `MoveTree`, with
-    /// left-precedence. This is called `extend` to match the api of
-    /// `std::collections::HashMap`.
+    /// left-precedence.
     ///
     /// Invariant: `self` and `other` refer to the same path
     fn extend(&mut self, other: MoveTree) {
@@ -87,25 +138,20 @@ impl MoveTree {
 
     /// Add a move at this point, and return a pair of moves if this is a new
     /// double-move.
-    fn update(&mut self, mov: Move) -> Option<(Move, Move)> {
+    fn update(&mut self, mov: Move) -> Option<(Move, SecondUse)> {
         use MoveKind::*;
         match (&self.mov, &mov.kind) {
             (None, Full) => {
                 if let Some(m) = self.moved_child() {
-                    return Some((m.clone(), mov));
+                    return Some((m.clone(), mov.into()));
                 }
                 self.mov = Some(mov);
             }
-            (Some(m), _) => return Some((m.clone(), mov)),
+            (Some(m), _) => return Some((m.clone(), mov.into())),
             _ => {}
         }
         None
     }
-}
-
-struct DoubleMove {
-    fst: Span,
-    snd: Span,
 }
 
 /// Counts how many times a local has been moved.
@@ -114,7 +160,7 @@ pub struct MoveState {
     /// This map points to the location of the first move of each local that is
     /// not currently live.
     pub moves: HashMap<LocalId, MoveTree>,
-    pub double_moves: HashMap<Place, (Move, Move)>,
+    pub double_moves: HashMap<Place, (Move, SecondUse)>,
 }
 
 impl MoveState {
@@ -126,6 +172,22 @@ impl MoveState {
                 node = &mut node.fields[field];
             }
             node
+        })
+    }
+
+    fn get_move(&self, place: &Place) -> Option<&Move> {
+        self.moves.get(&place.root).and_then(|mut node| {
+            for field in place.iter_fields() {
+                if node.mov.is_some() {
+                    return node.mov.as_ref();
+                }
+
+                node = match node.fields.get(*field) {
+                    Some(node) => node,
+                    None => return None,
+                };
+            }
+            node.mov.as_ref()
         })
     }
 
@@ -165,6 +227,15 @@ impl MoveState {
     /// moved list.
     fn move_into(&mut self, place: &Place) {
         self.get_mut(place).map(|node| node.mov = None);
+    }
+
+    fn borrow_from(&mut self, kind: RefKind, place: &Place, span: Span) {
+        let mov = match self.get_move(place) {
+            Some(mov) => mov.clone(),
+            None => return,
+        };
+        let snd = Borrow { kind, site: span }.into();
+        self.double_moves.insert(place.clone(), (mov, snd));
     }
 }
 
@@ -232,10 +303,11 @@ impl DataflowAnalysis<Forward, Blockwise> for LinearityAnalysis {
             }
             RvalueKind::UnOp(_, right) => state.move_from(right, rhs.span),
             RvalueKind::Use(arg) => state.move_from(arg, rhs.span),
-            RvalueKind::Ref(_, _) => {
+            RvalueKind::Ref(kind, place) => {
                 // TODO Well, this really is what it's all about, isn't it? For
                 // now, I suppose, we'll not do anything here at all, and let
                 // references move around freely.
+                state.borrow_from(*kind, place, rhs.span);
             }
         }
         state.move_into(&place);
@@ -247,5 +319,32 @@ impl DataflowAnalysis<Forward, Blockwise> for LinearityAnalysis {
 
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {
         Self::Domain::default()
+    }
+}
+
+mod errors {
+    use crate::source::Span;
+    use cavy_macros::Diagnostic;
+
+    #[derive(Diagnostic)]
+    #[msg = "moved affine data twice"]
+    pub struct DoubleMove {
+        #[span(msg = "this data was first moved here...")]
+        /// The first use site
+        pub fst: Span,
+        #[span(msg = "...and then moved again here")]
+        /// The second use site
+        pub snd: Span,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "borrowed previously-moved data"]
+    pub struct BorrowAfterMove {
+        #[span(msg = "the data was first moved here...")]
+        /// The first use site
+        pub fst: Span,
+        #[span(msg = "...and then borrowed here")]
+        /// The second use site
+        pub snd: Span,
     }
 }

@@ -202,7 +202,7 @@ test_compiles! {
         }
     }
 
-    linear_conditional {
+    linear_conditional [Analysis] {
         fn main() {
             let x: u32;
             if &?true { x = 3; } else { x = 4; }
@@ -244,10 +244,10 @@ test_compiles! {
         }
     }
 
-    assn_from_cond {
+    assn_from_cond [Analysis] {
         fn main() {
             let x = ?true;
-            let y = if x {
+            let y = if &x {
                 ?true
             } else {
                 ?false
@@ -459,6 +459,14 @@ test_compiles! {
 
         fn g() -> &?bool {
             &?false
+        }
+    }
+
+    borrow_from_moved fail [Analysis] {
+        fn main() {
+            let x = ?false;
+            let y = x;
+            let r = &x;
         }
     }
 }

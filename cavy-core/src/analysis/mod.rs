@@ -58,19 +58,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
 
         let context = DataflowCtx::new(gr, ctx);
 
-        let linearity_ana = linearity::LinearityAnalysis {};
-        let moves = &DataflowRunner::new(linearity_ana, &context)
-            .run()
-            // This is sort of, but not *quite* correct. I can't fix it right
-            // now, but it is a little troubling.
-            .block_states[gr.exit_block];
-        for (_local, (fst, snd)) in moves.double_moves.iter() {
-            // TODO different messages for partial moves
-            errs.push(errors::DoubleMove {
-                span: fst.site,
-                snd_move: snd.site,
-            });
-        }
+        linearity::check_linearity(&context, &mut errs);
 
         if !ctx.conf.arch.feedback {
             let feedback_res = DataflowRunner::new(feedback::FeedbackAnalysis {}, &context)
@@ -127,17 +115,7 @@ mod errors {
     use crate::source::Span;
     use cavy_macros::Diagnostic;
 
-    #[derive(Diagnostic)]
-    #[msg = "linear variable moved twice"]
-    pub struct DoubleMove {
-        #[span(msg = "the variable was first used here...")]
-        /// The first use site
-        pub span: Span,
-        #[span(msg = "...and then used again here")]
-        /// The second use site
-        pub snd_move: Span,
-    }
-
+    // FIXME: put me in feedback module
     #[derive(Diagnostic)]
     #[msg = "detected classical feedback"]
     pub struct ClassicalFeedback {
