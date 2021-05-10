@@ -83,8 +83,43 @@ pub struct AscriptionStore<'g> {
 }
 
 impl<'g> AscriptionStore<'g> {
+    fn new() -> Self {
+        Self {
+            locals: Store::new(),
+            loans: Store::new(),
+            refs: BTreeMap::new(),
+            _d: PhantomData,
+        }
+    }
+
     pub fn get_ref(&self, pt: &GraphPt) -> Option<&Loan> {
         self.refs.get(pt).and_then(|id| Some(&self.loans[*id]))
+    }
+
+    /// Get all the livetime ascriptions to the type of `local`.
+    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = Ascr> + 'a {
+        self.place_ascriptions(&<Place>::from(local))
+    }
+
+    pub fn place_node(&self, place: &Place) -> Option<&AscrNode> {
+        let mut node = self.locals[place.root].as_ref();
+        let mut projections = place.path.iter();
+        while let Some(ascrs) = node {
+            node = match projections.next() {
+                Some(Proj::Field(n)) => ascrs.slots[*n].as_ref(),
+                Some(Proj::Deref) => ascrs.slots[0].as_ref(),
+                None => break,
+            };
+        }
+        node
+    }
+
+    /// Get all the lifetime ascriptions to the type of `place`.
+    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = Ascr> + 'a {
+        self.place_node(place)
+            .map(|node| node.iter())
+            .into_iter()
+            .flatten()
     }
 }
 
@@ -197,41 +232,6 @@ impl<'l, 'a> Ascriber<'l, 'a> {
             slots: inners,
         };
         Some(node)
-    }
-}
-
-impl<'g> AscriptionStore<'g> {
-    fn new() -> Self {
-        Self {
-            locals: Store::new(),
-            loans: Store::new(),
-            refs: BTreeMap::new(),
-            _d: PhantomData,
-        }
-    }
-
-    /// Get all the livetime ascriptions to the type of `local`.
-    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = Ascr> + 'a {
-        self.place_ascriptions(&<Place>::from(local))
-    }
-
-    /// Get all the lifetime ascriptions to the type of `place`.
-    pub fn place_ascriptions<'a>(&'a self, place: &Place) -> impl Iterator<Item = Ascr> + 'a {
-        let err = "Attempted to read missing lifetime ascriptions";
-
-        self.locals[place.root]
-            .as_ref()
-            .and_then(|mut node| {
-                for proj in &place.path {
-                    node = match proj {
-                        Proj::Field(n) => node.slots[*n].as_ref().expect(err),
-                        Proj::Deref => node.slots[0].as_ref().expect(err),
-                    };
-                }
-                Some(node.iter())
-            })
-            .into_iter()
-            .flatten()
     }
 }
 

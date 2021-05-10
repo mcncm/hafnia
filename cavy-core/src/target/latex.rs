@@ -32,6 +32,8 @@ impl Default for Package {
 /// This backend emits a circuit in quantikz format
 #[derive(Debug)]
 pub struct LaTeX {
+    /// Use `\nwtarg` macros?
+    pub nwtarg: bool,
     /// Include preamble and `\begin{document}...\end{document}`?
     pub standalone: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
@@ -194,7 +196,7 @@ impl FmtWith<LaTeX> for Elem {
             Ctrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
             Targ => f.write_str(r"\targ{}"),
             CTarg(dist) => {
-                if latex.standalone {
+                if latex.nwtarg || latex.standalone {
                     f.write_str(r"\nwtarg{}")?;
                 } else {
                     f.write_str(r"\cw")?;
@@ -467,18 +469,20 @@ impl<'l> LayoutArray<'l> {
 
     fn push_qfree(&mut self, qbit: Qbit, s: FreeState) {
         let wire = self.qwire(qbit);
-        match s {
-            FreeState::Clean => {}
-            FreeState::Dirty => {
-                // NOTE: the quantikz `\trash{}` command seems not to work.
-                // I cannot get it to compile. Not sure if this is a problem
-                // with my installation or the package, but even the
-                // examples don't work.
+        if self.wires[wire].liveness == LiveQ {
+            match s {
+                FreeState::Clean => {}
+                FreeState::Dirty => {
+                    // NOTE: the quantikz `\trash{}` command seems not to work.
+                    // I cannot get it to compile. Not sure if this is a problem
+                    // with my installation or the package, but even the
+                    // examples don't work.
 
-                self.insert_single(wire, Elem::Trash);
+                    self.insert_single(wire, Elem::Trash);
+                }
             }
+            self.wires[wire].liveness = Dead;
         }
-        self.wires[wire].liveness = Dead;
     }
 
     fn push_qgate(&mut self, gate: GateQ) {
@@ -542,6 +546,9 @@ impl<'l> LayoutArray<'l> {
         let tgt = (tgt_wire, Elem::CTarg(None));
         self.insert_multiple(vec![src, tgt]);
         self.wires[tgt_wire].liveness = LiveC;
+
+        // FIXME shouldn't actually be unconditional: depends on whether
+        // measurements are demolition or nondemolition.
         self.wires[src_wire].liveness = Dead;
     }
 

@@ -19,7 +19,7 @@ pub enum Lexeme {
 
     // keywords
     If, Else, Match, For, Let, Mut, In, Fn, FFn, Type, Struct,
-    Enum, Impl, Io, True, False, Bool, U4, U8, U16, U32, Ord,
+    Enum, Impl, Io, True, False, Bool, U2, U4, U8, U16, U32, Ord,
     Unsafe, Assert, Drop,
 
     // literals
@@ -70,6 +70,8 @@ impl fmt::Display for Lexeme {
             Mut => "mut",
             In => "in",
             Bool => "bool",
+            U2 => "u2",
+            U4 => "u4",
             U8 => "u8",
             U16 => "u16",
             U32 => "u32",
@@ -124,7 +126,6 @@ impl fmt::Display for Lexeme {
             Io => "io",
             True => "true",
             False => "false",
-            U4 => "u4",
             Question => "?",
             Ord => "ord",
             Unsafe => "unsafe",

@@ -25,8 +25,8 @@ macro_rules! common_types {
 }
 
 common_types! {
-    unit, bool, u4, u8, u16, u32,
-    q_bool, q_u4, q_u8, q_u16, q_u32,
+    unit, bool, u2, u4, u8, u16, u32,
+    q_bool, q_u2, q_u4, q_u8, q_u16, q_u32,
     shrd_q_bool,
     // This is a provisional type not intended to stay in the compiler forever
     ord
@@ -58,11 +58,13 @@ impl<'ctx> Context<'ctx> {
         let common = CommonTypes {
             unit: types.intern(Type::unit()),
             bool: types.intern(Type::Bool),
+            u2: types.intern(Type::Uint(Uint::U2)),
             u4: types.intern(Type::Uint(Uint::U4)),
             u8: types.intern(Type::Uint(Uint::U8)),
             u16: types.intern(Type::Uint(Uint::U16)),
             u32: types.intern(Type::Uint(Uint::U32)),
             q_bool,
+            q_u2: types.intern(Type::Q_Uint(Uint::U2)),
             q_u4: types.intern(Type::Q_Uint(Uint::U4)),
             q_u8: types.intern(Type::Q_Uint(Uint::U8)),
             q_u16: types.intern(Type::Q_Uint(Uint::U16)),

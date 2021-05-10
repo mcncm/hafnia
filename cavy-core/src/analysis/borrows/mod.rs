@@ -27,11 +27,17 @@ mod util;
 /// Main entry point for region inference and borrow checking
 pub fn check(context: DataflowCtx, errs: &mut ErrorBuf) {
     let regions = regions::infer_regions(&context);
-    println!("{:?}", regions);
+
+    if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
+        println!("{:?}", regions);
+    }
 
     let scopes = loan_scope::loan_scopes(&regions, &context);
-    println!("LOAN SCOPES");
-    println!("{}\n\n", scopes.fmt_with(&context));
+
+    if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
+        println!("LOAN SCOPES");
+        println!("{}\n\n", scopes.fmt_with(&context));
+    }
 
     borrow_check::borrow_check(&regions, &scopes, &context, errs);
 }

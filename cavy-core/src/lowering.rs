@@ -8,7 +8,7 @@ use crate::{
     cavy_errors::{CavyError, Diagnostic, ErrorBuf, Maybe},
     context::{Context, SymbolId},
     mir::{self, FnCall, *},
-    num::Uint,
+    num::{USmall, Uint},
     source::Span,
     store::Index,
     store::Store,
@@ -739,8 +739,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 // FIXME These downcasts are definitely not correct! Overflowing
                 // literals should be an error, or at least a lint.
                 let (lit_ty, val) = match sz {
-                    Some(Uint::U2) => todo!(),
-                    Some(Uint::U4) => todo!(),
+                    Some(Uint::U2) => (self.ctx.common.u2, Value::U2(USmall::<2>::from(*n as u8))),
+                    Some(Uint::U4) => (self.ctx.common.u4, Value::U4(USmall::<4>::from(*n as u8))),
                     Some(Uint::U8) => (self.ctx.common.u8, Value::U8(*n as u8)),
                     Some(Uint::U16) => (self.ctx.common.u16, Value::U16(*n as u16)),
                     Some(Uint::U32) => (self.ctx.common.u32, Value::U32(*n as u32)),
@@ -1399,13 +1399,7 @@ mod typing {
             match &op.data {
                 UnOpKind::Minus => todo!(),
                 UnOpKind::Not => {
-                    if [
-                        self.ctx.common.bool,
-                        self.ctx.common.q_bool,
-                        self.ctx.common.shrd_q_bool,
-                    ]
-                    .contains(&right)
-                    {
+                    if right.is_primitive(self.ctx) || right == self.ctx.common.shrd_q_bool {
                         Ok(right)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
@@ -1429,6 +1423,8 @@ mod typing {
                 UnOpKind::Linear => {
                     if right == self.ctx.common.bool {
                         Ok(self.ctx.common.q_bool)
+                    } else if right == self.ctx.common.u2 {
+                        Ok(self.ctx.common.q_u2)
                     } else if right == self.ctx.common.u4 {
                         Ok(self.ctx.common.q_u4)
                     } else if right == self.ctx.common.u8 {
@@ -1448,6 +1444,8 @@ mod typing {
                 UnOpKind::Delin => {
                     if right == self.ctx.common.q_bool {
                         Ok(self.ctx.common.bool)
+                    } else if right == self.ctx.common.q_u2 {
+                        Ok(self.ctx.common.u2)
                     } else if right == self.ctx.common.q_u4 {
                         Ok(self.ctx.common.u4)
                     } else if right == self.ctx.common.q_u8 {
@@ -1506,7 +1504,7 @@ mod typing {
             match &lit.data {
                 LiteralKind::True => self.ctx.common.bool,
                 LiteralKind::False => self.ctx.common.bool,
-                LiteralKind::Nat(_, Some(Uint::U2)) => todo!(),
+                LiteralKind::Nat(_, Some(Uint::U2)) => self.ctx.common.u2,
                 LiteralKind::Nat(_, Some(Uint::U4)) => self.ctx.common.u4,
                 LiteralKind::Nat(_, Some(Uint::U8)) => self.ctx.common.u8,
                 LiteralKind::Nat(_, Some(Uint::U16)) => self.ctx.common.u16,
@@ -1843,13 +1841,13 @@ mod errors {
     }
 
     #[derive(Diagnostic)]
-    #[msg = "operator `{kind}` doesn't support output type `{ty}`"]
+    #[msg = "operator `{kind}` doesn't support argument type `{ty}`"]
     pub struct UnOpOutTypeError {
         #[span]
         pub span: Span,
         /// The operator
         pub kind: UnOpKind,
-        /// The actual output type
+        /// The actual input type
         #[ctx]
         pub ty: TyId,
     }

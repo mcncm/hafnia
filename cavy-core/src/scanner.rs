@@ -43,6 +43,7 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "true" => Lexeme::True,
         "false" => Lexeme::False,
         "bool" => Lexeme::Bool,
+        "u2" => Lexeme::U2,
         "u4" => Lexeme::U4,
         "u8" => Lexeme::U8,
         "u16" => Lexeme::U16,
@@ -399,6 +400,7 @@ impl<'s, 'c> Scanner<'s> {
                 let spec = self.tokens.pop().unwrap().lexeme;
                 std::mem::swap(&mut self.token_buf, &mut buf);
                 sz = match spec {
+                    Lexeme::U2 => Some(Uint::U2),
                     Lexeme::U4 => Some(Uint::U4),
                     Lexeme::U8 => Some(Uint::U8),
                     Lexeme::U16 => Some(Uint::U16),

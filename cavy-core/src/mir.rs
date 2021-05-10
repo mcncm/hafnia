@@ -82,7 +82,7 @@ pub type Predecessors = Store<BlockId, Vec<BlockId>>;
 
 /// A lazily-computed CFG predecessor graph. Like many other parts of the Mir,
 /// this is basically the same as the data structure used by `rustc`. The
-/// rational for using an outside store, rather than maintaining predecessors in
+/// rationale for using an outside store, rather than maintaining predecessors in
 /// the blocks themselves, is that the effects of changing the out-pointers of a
 /// block are essentially as nonlocal as possible. Any other blocks could have
 /// their predecessors invalidated, but recomputing them from purely local data

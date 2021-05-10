@@ -1,6 +1,6 @@
 //! This file contains, unsurprisingly, integration tests for the Cavy compiler.
 //! Currently, all of these simply check whether correct (resp. incorrect) code
-//! compiles (resp. fails to compile).
+//! compiles (resp. FAILs to compile).
 
 use cavy_core::{compile, context, session, util::FmtWith};
 
@@ -33,7 +33,7 @@ macro_rules! test_compiles {
 }
 
 macro_rules! is_fail {
-    (fail) => {};
+    (FAIL) => {};
 }
 
 test_compiles! {
@@ -49,16 +49,16 @@ test_compiles! {
 
     // this one is a little dubious! It's here to test the behavior of the
     // compiler; it's not necessarily expressing the behavior we *want*.
-    no_main fail {
+    no_main FAIL {
         fn f() {}
     }
 
-    two_mains fail {
+    two_mains FAIL {
         fn main() {}
         fn main() {}
     }
 
-    main_returns fail [Typecheck] {
+    main_returns FAIL [Typecheck] {
         fn main() { true }
     }
 
@@ -72,7 +72,7 @@ test_compiles! {
         fn main() { let x = f(); }
     }
 
-    return_wrong_type fail {
+    return_wrong_type FAIL {
         fn main() { }
         fn f() -> u32 { true }
     }
@@ -85,12 +85,12 @@ test_compiles! {
         }
     }
 
-    return_empty_wrong_type fail [Typecheck] {
+    return_empty_wrong_type FAIL [Typecheck] {
         fn main() { }
         fn f() -> bool { }
     }
 
-    double_move fail [Analysis] {
+    double_move FAIL [Analysis] {
         fn main() {
             let x = ?false;
             let y = x;
@@ -121,7 +121,7 @@ test_compiles! {
         }
     }
 
-    prev_partial_move_tuple fail [Analysis] {
+    prev_partial_move_tuple FAIL [Analysis] {
         fn main() {
             let pair = (?true, ?true);
             let x = pair.0;
@@ -137,7 +137,7 @@ test_compiles! {
         }
     }
 
-    later_partial_move_tuple fail [Analysis] {
+    later_partial_move_tuple FAIL [Analysis] {
         fn main() {
             let pair = (?true, ?true);
             let y = pair;
@@ -145,7 +145,7 @@ test_compiles! {
         }
     }
 
-    partial_move_tuple_nested fail [Analysis] {
+    partial_move_tuple_nested FAIL [Analysis] {
         fn main() {
             let pair = (?true, (?true, ?false));
             let x = pair.1;
@@ -153,7 +153,7 @@ test_compiles! {
         }
     }
 
-    partial_move_tuple_nested_2 fail [Analysis] {
+    partial_move_tuple_nested_2 FAIL [Analysis] {
         fn main() {
             let pair = (?true, (?true, ?false));
             let x = pair.1.1;
@@ -177,17 +177,17 @@ test_compiles! {
         }
     }
 
-    recursion fail [Analysis] {
+    recursion FAIL [Analysis] {
         fn main() { main() }
     }
 
-    mutual_recursion fail [Analysis] {
+    mutual_recursion FAIL [Analysis] {
         fn main() {}
         fn f() { g() }
         fn g() { f() }
     }
 
-    classical_feedback fail [Analysis] {
+    classical_feedback FAIL [Analysis] {
         fn main() {
             let q = ?true;
             let c = !q;
@@ -209,14 +209,14 @@ test_compiles! {
         }
     }
 
-    conditional_wrong_type fail {
+    conditional_wrong_type FAIL {
         fn main() {
             let x: u32;
             if 56 { x = 3; } else { x = 4; }
         }
     }
 
-    sub_lin_cond_meas fail {
+    sub_lin_cond_meas FAIL {
         fn main() {
             let x = ?false;
             let y = ?true;
@@ -226,7 +226,7 @@ test_compiles! {
         }
     }
 
-    sub_lin_cond_meas_call fail {
+    sub_lin_cond_meas_call FAIL {
         fn main() {
             let x = ?false;
             let y = ?true;
@@ -255,7 +255,7 @@ test_compiles! {
         }
     }
 
-    if_incompatible_types fail {
+    if_incompatible_types FAIL {
         fn main() {
             let x = if true {
                 true
@@ -292,7 +292,7 @@ test_compiles! {
         }
     }
 
-    no_bare_struct_in_cond fail [Typecheck] {
+    no_bare_struct_in_cond FAIL [Typecheck] {
         struct A {}
 
         fn main() {
@@ -342,17 +342,17 @@ test_compiles! {
         unsafe fn f() {}
     }
 
-    unsafe_non_block fail [Parse] {
+    unsafe_non_block FAIL [Parse] {
         fn main() {
             let y = unsafe 2;
         }
     }
 
-    unsafe_fn_block fail [Parse] {
+    unsafe_fn_block FAIL [Parse] {
         fn f() unsafe {}
     }
 
-    unsafe_bare_assert fail [Analysis] {
+    unsafe_bare_assert FAIL [Analysis] {
         fn main() {
             assert 0;
         }
@@ -364,7 +364,7 @@ test_compiles! {
         }
     }
 
-    unsafe_bare_fn_call fail [Analysis] {
+    unsafe_bare_fn_call FAIL [Analysis] {
         unsafe fn f() {
             assert 3;
         }
@@ -394,7 +394,7 @@ test_compiles! {
         }
     }
 
-    lifetime_in_borrow fail [Typecheck] {
+    lifetime_in_borrow FAIL [Typecheck] {
         fn main() {
             let x = ?true;
             let y = &'a x;
@@ -420,7 +420,7 @@ test_compiles! {
         }
     }
 
-    assn_or_not_quantum fail [Typecheck] {
+    assn_or_not_quantum FAIL [Typecheck] {
         fn main() {
             let x = ?true;
             let y = ?true;
@@ -447,7 +447,7 @@ test_compiles! {
         }
     }
 
-    shrd_borrow_during_uniq_borrow fail [Analysis] {
+    shrd_borrow_during_uniq_borrow FAIL [Analysis] {
         fn main() {
             let w = ?false;
             let x = &mut x;
@@ -456,7 +456,15 @@ test_compiles! {
         }
     }
 
-    return_local_borrow fail [Analysis] {
+    return_param_borrow [Analysis] {
+        fn main() {}
+
+        fn g(x: &?bool) -> &?bool {
+            x
+        }
+    }
+
+    return_local_borrow FAIL [Analysis] {
         fn main() {}
 
         fn g() -> &?bool {
@@ -466,7 +474,7 @@ test_compiles! {
         }
     }
 
-    borrow_from_moved fail [Analysis] {
+    borrow_from_moved FAIL [Analysis] {
         fn main() {
             let x = ?false;
             let y = x;
@@ -474,12 +482,53 @@ test_compiles! {
         }
     }
 
-    move_from_borrow fail [Analysis] {
+    move_from_borrow FAIL [Analysis] {
         fn main() {
             let x = ?false;
             let y = &x;
             z = x;
             snd = y;
+        }
+    }
+
+    deref_once [Analysis] {
+        fn main() {
+            let x = &mut ?false;
+            let a = *x;
+            *x = a;
+        }
+    }
+
+    deref_not_replaced FAIL [Analysis] {
+        fn main() {
+            let x = &mut ?false;
+            let a = *x;
+        }
+    }
+
+    deref_borrow_twice FAIL [Analysis] {
+        fn main() {
+            let x = &mut ?false;
+            let a = *x;
+            let b = *x;
+        }
+    }
+
+    move_borrowed_after_deref FAIL [Analysis] {
+        fn main() {
+            let x = ?false;
+            let r = &mut x;
+            let y = *r;
+            let x = x;
+        }
+    }
+
+    assign_to_shrd_ref FAIL [Analysis] {
+        fn main() {
+            let x = ?false;
+            let y = ?false;
+            let r = &x;
+            r = &y;
         }
     }
 }

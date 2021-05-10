@@ -241,6 +241,8 @@ impl Interpreter {
     fn eval_not(&self, x: Value) -> Value {
         match x {
             Value::Bool(b) => Value::Bool(!b),
+            Value::U2(n) => Value::U2(!n),
+            Value::U4(n) => Value::U4(!n),
             Value::U8(n) => Value::U8(!n),
             Value::U16(n) => Value::U16(!n),
             Value::U32(n) => Value::U32(!n),
@@ -251,9 +253,11 @@ impl Interpreter {
 
     fn eval_plus(&self, n: Value, m: Value) -> Value {
         match (n, m) {
-            (Value::U8(n), Value::U8(m)) => Value::U8(n + m),
-            (Value::U16(n), Value::U16(m)) => Value::U16(n + m),
-            (Value::U32(n), Value::U32(m)) => Value::U32(n + m),
+            (Value::U2(n), Value::U2(m)) => Value::U2(n.wrapping_add(m)),
+            (Value::U4(n), Value::U4(m)) => Value::U4(n.wrapping_add(m)),
+            (Value::U8(n), Value::U8(m)) => Value::U8(n.wrapping_add(m)),
+            (Value::U16(n), Value::U16(m)) => Value::U16(n.wrapping_add(m)),
+            (Value::U32(n), Value::U32(m)) => Value::U32(n.wrapping_add(m)),
             // Forbidden by type checker
             _ => unreachable!(),
         }
@@ -261,9 +265,11 @@ impl Interpreter {
 
     fn eval_times(&self, n: Value, m: Value) -> Value {
         match (n, m) {
-            (Value::U8(n), Value::U8(m)) => Value::U8(n * m),
-            (Value::U16(n), Value::U16(m)) => Value::U16(n * m),
-            (Value::U32(n), Value::U32(m)) => Value::U32(n * m),
+            (Value::U2(n), Value::U2(m)) => Value::U2(n.wrapping_mul(m)),
+            (Value::U4(n), Value::U4(m)) => Value::U4(n.wrapping_mul(m)),
+            (Value::U8(n), Value::U8(m)) => Value::U8(n.wrapping_mul(m)),
+            (Value::U16(n), Value::U16(m)) => Value::U16(n.wrapping_mul(m)),
+            (Value::U32(n), Value::U32(m)) => Value::U32(n.wrapping_mul(m)),
             // Forbidden by type checker
             _ => unreachable!(),
         }

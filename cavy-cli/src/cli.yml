@@ -28,6 +28,9 @@ args:
   - standalone:
       long: standalone
       about: Compiles LaTeX output as a standalone document.
+  - nwtarg:
+      long: nwtarg
+      about: Use nice `\nwtarg` macros in LaTeX output. Always on if `standalone`.
   - initial_kets:
       long: initial-kets
       about: Replace initial `X` gates with ket states.
@@ -42,7 +45,7 @@ args:
         - "qcircuit"
         - "quantikz"
         - "yquant"
-      default_value: "qcircuit"
+      default_value: "quantikz"
       about: <PACKAGE> is the LaTeX package used for circuit output.
       
   # Compile phase options

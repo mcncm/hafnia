@@ -246,9 +246,10 @@ impl<'a> RegionInf<'a> {
     fn sub_constr(&mut self, pt: GraphPt, lhs: &Place, rhs: &Place) {
         // This is the crux of the subtyping constraints. We need to enforce the
         // covariance of shared references and invariance of unique references.
+
         match (
-            &self.ascriptions.locals[lhs.root],
-            &self.ascriptions.locals[rhs.root],
+            self.ascriptions.place_node(lhs),
+            self.ascriptions.place_node(rhs),
         ) {
             (Some(ltree), Some(rtree)) => {
                 // Recursively apply the subtyping rule, with `rtree <: ltree`.
@@ -256,6 +257,7 @@ impl<'a> RegionInf<'a> {
             }
             (None, None) => {}
             _ => {
+                dbg!(lhs.root, rhs.root);
                 dbg!(
                     &self.ascriptions.locals[lhs.root],
                     &self.ascriptions.locals[rhs.root],
@@ -630,7 +632,7 @@ mod dbg {
                 .map(|local| self.ascriptions.local_ascriptions(*local))
                 .map(|ascrs| Seq(ascrs.collect()));
 
-            table!([width = 10] f << local[8], type_[8], regions[16]);
+            table!([width = 10] f << local[8], type_[16], regions[16]);
 
             f.write_str("\n")?;
 
