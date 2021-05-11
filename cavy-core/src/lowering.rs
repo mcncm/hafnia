@@ -1374,7 +1374,7 @@ mod typing {
                 And | Or | Xor => {
                     use RefKind::*;
                     let lty = &self.ctx.types[left];
-                    let rty = &self.ctx.types[left];
+                    let rty = &self.ctx.types[right];
                     match (lty, rty) {
                         (Type::Ref(Shrd, lty), Type::Ref(Shrd, rty)) => {
                             if rty == rty && *lty == self.ctx.common.q_bool {
