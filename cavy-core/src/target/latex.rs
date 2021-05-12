@@ -1,6 +1,5 @@
 //! The LaTeX backend, which currently uses quantikz, and which should not be
-//! too hard to use with qcircuit as well--the layout engine should be the same.
-//! Finally, there's a *brand new* LaTeX quantum circuit package called
+//! too hard to use with qcircuit as well--the layout engine should be the  package called
 //! `yquant`, which should be pretty much trivial to support.
 
 use std::{
@@ -15,8 +14,8 @@ use super::*;
 /// LaTeX quantum circuit packages
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Package {
-    Qcircuit,
-    Quantikz,
+    Quantikz { nwtarg: bool, wave: bool },
+    Qcircuit { nwtarg: bool },
     Yquant,
 }
 
@@ -25,21 +24,32 @@ use Package::*;
 
 impl Default for Package {
     fn default() -> Self {
-        Self::Qcircuit
+        Self::Quantikz {
+            nwtarg: false,
+            wave: false,
+        }
     }
 }
 
 /// This backend emits a circuit in quantikz format
 #[derive(Debug)]
 pub struct LaTeX {
-    /// Use `\nwtarg` macros?
-    pub nwtarg: bool,
     /// Include preamble and `\begin{document}...\end{document}`?
     pub standalone: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
     pub initial_kets: bool,
     /// The quantum circuit package to use for rendering
     pub package: Package,
+}
+
+impl LaTeX {
+    fn uses_nwtarg(&self) -> bool {
+        match self.package {
+            Quantikz { nwtarg: true, .. } | Qcircuit { nwtarg: true } => true,
+            // always use \nwtarg in standalone mode
+            _ => self.standalone,
+        }
+    }
 }
 
 // == Range queries ==
@@ -149,8 +159,8 @@ enum Elem {
     Ket(&'static str),
     // Quantum gates
     X, Z, H, T, TDag,
-    // A control label with a distance to its target
-    Ctrl(isize),
+    // A quantum control label with a distance to its target
+    QCtrl(isize),
     // A swap label with a distance to its target
     Swap(isize),
     // A control target
@@ -158,6 +168,8 @@ enum Elem {
     // A classical control target. With some target options, this uses a custom command
     // in order to have no incoming wires.
     CTarg(Option<isize>),
+    // An classical control label with a distance to its target
+    CCtrl(isize),
     // A swap target
     TargX,
     // Trash a qubit
@@ -166,6 +178,8 @@ enum Elem {
     Meter(Option<isize>),
     // A label for IO data
     IoLabel(Box<IoLabelData>),
+    // The quantikz wave
+    Wave
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +195,7 @@ impl FmtWith<LaTeX> for Elem {
         use Elem::*;
         match self {
             Ket(s) => {
-                if let Qcircuit = latex.package {
+                if let Qcircuit { .. } = latex.package {
                     write!(f, r"\lstick{{\ket{{{}}}}}", s)
                 } else {
                     // Package is Quantikz
@@ -193,27 +207,34 @@ impl FmtWith<LaTeX> for Elem {
             H => f.write_str(r"\gate{H}"),
             T => f.write_str(r"\gate{T}"),
             TDag => f.write_str(r"\gate{T^\dag}"),
-            Ctrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
+            QCtrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
             Targ => f.write_str(r"\targ{}"),
             CTarg(dist) => {
-                if latex.nwtarg || latex.standalone {
+                if latex.uses_nwtarg() {
                     f.write_str(r"\nwtarg{}")?;
                 } else {
                     f.write_str(r"\cw")?;
                 }
 
                 if let Some(dist) = dist {
-                    debug_assert!(latex.package == Qcircuit);
+                    debug_assert!(matches!(latex.package, Qcircuit { .. }));
                     write!(f, r"\cwx[{}]", dist)?;
                 }
                 Ok(())
+            }
+            CCtrl(dist) => {
+                if !matches!(latex.package, Quantikz { .. }) {
+                    todo!();
+                }
+
+                write!(f, r"\cwbend{{{}}}", dist)
             }
             Swap(dist) => write!(f, r"\swap{{{}}}", dist),
             TargX => f.write_str(r"\targX{}"),
             Trash => f.write_str(r"\trash{}"),
             Meter(targ) => match (latex.package, targ) {
-                (Quantikz, Some(dist)) => write!(f, r"\meter{{}} \vcw{{{}}}", dist),
-                (Qcircuit, Some(dist)) => write!(f, r"\meter{{}} \cwx[{}]", dist),
+                (Quantikz { .. }, Some(dist)) => write!(f, r"\meter{{}} \vcw{{{}}}", dist),
+                (Qcircuit { .. }, Some(dist)) => write!(f, r"\meter{{}} \cwx[{}]", dist),
                 (_, None) => f.write_str(r"\meter{}"),
                 _ => unreachable!(),
             },
@@ -222,11 +243,14 @@ impl FmtWith<LaTeX> for Elem {
             IoLabel(io) => {
                 let name = LaTeX::escape(&io.name);
                 match latex.package {
-                    Qcircuit => write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", name, io.elem),
-                    Quantikz => write!(f, r"\rstick{{\tt {}[{}] }} \cw", name, io.elem),
+                    Qcircuit { .. } => {
+                        write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", name, io.elem)
+                    }
+                    Quantikz { .. } => write!(f, r"\rstick{{\tt {}[{}] }} \cw", name, io.elem),
                     _ => unreachable!(),
                 }
             }
+            Wave => f.write_str(r"\wave"),
         }
     }
 }
@@ -338,12 +362,16 @@ impl Wire {
         }
         debug_assert!(self.blocked_valid);
 
+        if Some(self.len()) == self.next_blocked {
+            self.compute_next_free();
+        }
+
         self.extend_to(self.next_free);
         self.cells.push(Occupied(cell));
     }
 
     /// This name is just a warning
-    pub fn unchecked_push(&mut self, cell: Elem) {
+    pub fn push_unchecked(&mut self, cell: Elem) {
         self.cells.push(Occupied(cell));
     }
 }
@@ -386,25 +414,35 @@ impl<'l> LayoutArray<'l> {
     /// It only makes sense to construct a LaTeX circuit from a finite
     /// circuit of known size.
     fn new(latex: &'l LaTeX, qwires: usize, cwires: usize) -> Self {
-        // Start with length at least one. It will be an invariant of this
-        // data structure that there is always an empty final moment. This
-        // final moment will provide the terminal $\qw$ on each wire.
-        //
-        // (In fact, as a convenience we'll include *two* empty moments. The
-        // first of these will be the initial $\qw$ on each wire.)
-        //
-        // It is also an invariant that there's at least one wire, that
-        // should be enforced by `new`, although it isn't yet in a *natural* way.
         debug_assert!(qwires + cwires > 0);
         let wires = iter::repeat_with(|| Wire::new())
-            .take(qwires + cwires)
+            .take(Self::layout_width(latex, qwires, cwires))
             .collect();
         Self {
             latex,
             wires,
             blocked: IntervalMap::new(),
-            fst_cwire: qwires,
+            fst_cwire: Self::first_cwire_index(latex, qwires),
         }
+    }
+
+    // Should maybe just compute some `Sections` struct during `new`
+    fn layout_width(latex: &LaTeX, qwires: usize, cwires: usize) -> usize {
+        let mut width = qwires + cwires;
+        match &latex.package {
+            Quantikz { wave: true, .. } => width += 1,
+            _ => (),
+        }
+        width
+    }
+
+    fn first_cwire_index(latex: &LaTeX, qwires: usize) -> usize {
+        let mut cwire = qwires;
+        match &latex.package {
+            Quantikz { wave: true, .. } => cwire += 1,
+            _ => (),
+        }
+        cwire
     }
 
     fn len(&self) -> usize {
@@ -433,13 +471,6 @@ impl<'l> LayoutArray<'l> {
     #[inline(always)]
     fn dist(&self, src: usize, tgt: usize) -> isize {
         (tgt as isize) - (src as isize)
-    }
-
-    fn block_interval(&mut self, range: RangeInclusive<usize>, moment: usize) {
-        self.blocked.insert(range.clone(), moment);
-        for wire in range {
-            self.wires[wire].invalidate_blocked();
-        }
     }
 
     fn push_inst(&mut self, inst: Inst) {
@@ -473,11 +504,6 @@ impl<'l> LayoutArray<'l> {
             match s {
                 FreeState::Clean => {}
                 FreeState::Dirty => {
-                    // NOTE: the quantikz `\trash{}` command seems not to work.
-                    // I cannot get it to compile. Not sure if this is a problem
-                    // with my installation or the package, but even the
-                    // examples don't work.
-
                     self.insert_single(wire, Elem::Trash);
                 }
             }
@@ -500,7 +526,7 @@ impl<'l> LayoutArray<'l> {
             Cnot { ctrl, tgt } => {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);
-                let ctrl = (ctrl, Elem::Ctrl(dist));
+                let ctrl = (ctrl, Elem::QCtrl(dist));
                 let tgt = (tgt, Elem::Targ);
                 self.insert_multiple(vec![ctrl, tgt]);
                 return;
@@ -531,7 +557,26 @@ impl<'l> LayoutArray<'l> {
 
     fn push_cgate(&mut self, gate: GateC) {
         if gate.ctrls.len() > 0 {
-            todo!();
+            // Let's special-case this like mad
+            if gate.ctrls.len() == 1 {
+                match gate.base {
+                    C(_) => {}
+                    Q(baseq) => match baseq {
+                        BaseGateQ::X(tgt) => {
+                            let src = gate.ctrls[0];
+                            let (src, tgt) = (self.cwire(src), self.qwire(tgt));
+                            let dist = self.dist(src, tgt);
+                            let src = (src, Elem::CCtrl(dist));
+                            let tgt = (tgt, Elem::X);
+                            self.insert_multiple(vec![src, tgt]);
+                        }
+                        _ => todo!(),
+                    },
+                }
+            } else {
+                todo!("I'm sorry, I'm special-casing this path for now.");
+            }
+            return;
         }
 
         use BaseGate::*;
@@ -556,7 +601,7 @@ impl<'l> LayoutArray<'l> {
         self.insert_multiple(vec![src, tgt]);
         self.wires[tgt_wire].liveness = LiveC;
 
-        // FIXME shouldn't actually be unconditional: depends on whether
+        // FIXME shouldn't actually be unconditional: can depend on whether
         // measurements are demolition or nondemolition.
         self.wires[src_wire].liveness = Dead;
     }
@@ -620,14 +665,33 @@ impl<'l> LayoutArray<'l> {
             // The single-wire invariants aren't checked when we push a multiple-wire gate!
             let wire = &mut self.wires[wire];
             wire.extend_to(moment);
-            wire.unchecked_push(elem);
+            wire.push_unchecked(elem);
         }
 
-        for wire in &mut self.wires[min..=max] {
-            wire.invalidate_blocked();
-        }
+        self.block_interval(min..=max, moment);
+    }
 
-        self.blocked.insert(min..=max, moment);
+    fn block_interval(&mut self, range: RangeInclusive<usize>, moment: usize) {
+        self.blocked.insert(range.clone(), moment);
+        for wire in range {
+            self.wires[wire].invalidate_blocked();
+        }
+    }
+
+    /// Final cleanup and prettification
+    fn finish(&mut self) {
+        let longest = self.wires.iter().map(|wire| wire.len()).max().unwrap_or(0);
+        self.finish_wave(longest);
+    }
+
+    fn finish_wave(&mut self, longest: usize) {
+        if let Quantikz { wave: true, .. } = &self.latex.package {
+            // Yeah, not ideal. Should have a layout struct.
+            let wave_index = self.fst_cwire - 1;
+            let wave = &mut self.wires[wave_index];
+            wave.cells[0] = Occupied(Elem::Wave);
+            wave.extend_to(longest);
+        }
     }
 }
 
@@ -680,7 +744,7 @@ impl LaTeX {
     }
 
     fn has_nwtarg(&self) -> bool {
-        if let Package::Qcircuit = self.package {
+        if let Package::Qcircuit { .. } = self.package {
             self.standalone
         } else {
             false
@@ -694,7 +758,7 @@ impl LaTeX {
         }
 
         let class_options = {
-            if let Package::Qcircuit = self.package {
+            if let Package::Qcircuit { .. } = self.package {
                 // `qcircuit` ket labels are off the margins in `standalone`.
                 if self.initial_kets {
                     "[border={25pt 5pt 5pt 5pt}]"
@@ -722,11 +786,11 @@ impl LaTeX {
     /// Package and macro declarations for standalone mode
     fn fmt_tex_packages(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.package {
-            Package::Qcircuit => {
+            Package::Qcircuit { .. } => {
                 let options = if self.initial_kets { "[braket,qm]" } else { "" };
                 writeln!(f, "\\usepackage{}{{qcircuit}}", options)?
             }
-            Package::Quantikz => f.write_str(concat!(
+            Package::Quantikz { .. } => f.write_str(concat!(
                 r"\usepackage{tikz}
 \usetikzlibrary{quantikz}
 ",
@@ -747,9 +811,9 @@ impl LaTeX {
     #[rustfmt::skip]
     fn fmt_circuit_begin(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let circuit_begin = match self.package {
-            Package::Qcircuit => r"\Qcircuit @C=1em @R=0.7em {
+            Package::Qcircuit { .. } => r"\Qcircuit @C=1em @R=0.7em {
 ",
-            Package::Quantikz => r"\begin{quantikz}
+            Package::Quantikz { .. } => r"\begin{quantikz}
 ",
             Package::Yquant =>   r"\begin{tikzpicture}
 \begin{yquant}
@@ -761,9 +825,9 @@ impl LaTeX {
     #[rustfmt::skip]
     fn fmt_circuit_end(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let circuit_end = match self.package {
-            Package::Qcircuit => r"}
+            Package::Qcircuit { .. } => r"}
 ",
-            Package::Quantikz => r"\end{quantikz}
+            Package::Quantikz { .. } => r"\end{quantikz}
 ",
             Package::Yquant =>   r"\end{tikzpicture}
 \end{yquant}
@@ -803,7 +867,33 @@ impl Target for LaTeX {
         for inst in circ.into_iter() {
             layout_array.push_inst(inst);
         }
+        layout_array.finish();
 
         format!("{}", self.fmt_with(&layout_array))
+    }
+}
+
+// == boilerplate impls ==
+
+impl<K, V> std::fmt::Debug for Interval<K, V>
+where
+    K: std::fmt::Debug + Ord,
+    V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[{:?}, {:?}]: {:?}", self.low, self.high, self.data)
+    }
+}
+
+impl<K, V> std::fmt::Debug for IntervalMap<K, V>
+where
+    K: std::fmt::Debug + Ord + Copy,
+    V: std::fmt::Debug + Ord + Copy,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for interval in &self.intervals {
+            writeln!(f, "{:?}", interval)?;
+        }
+        Ok(())
     }
 }

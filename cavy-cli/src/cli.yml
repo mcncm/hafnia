@@ -31,6 +31,9 @@ args:
   - nwtarg:
       long: nwtarg
       about: Use nice `\nwtarg` macros in LaTeX output. Always on if `standalone`.
+  - wave:
+      long: wave
+      about: Separate classical and quantum bits with the quantikz `\wave`.
   - initial_kets:
       long: initial-kets
       about: Replace initial `X` gates with ket states.

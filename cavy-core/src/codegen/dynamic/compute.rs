@@ -42,7 +42,7 @@ impl<'m> Interpreter<'m> {
         let allocation = self.alloc_for_place(place);
         // NOTE: why is this commented line not needed?
         // self.st.env.write_bits(place, &allocation);
-        self.map_not(&allocation);
+        self.cnot_const(&allocation, value);
         allocation
     }
 
@@ -129,23 +129,48 @@ impl<'m> Interpreter<'m> {
             }
             UnOpKind::Linear => match right {
                 Operand::Const(_) => {
+                    // Something is suspicious about this
                     self.st.env.memcpy(lplace, &bits);
                 }
 
                 /*
-                 Classical feedback
+                 Runtime classical control
                 */
                 Operand::Copy(_) | Operand::Move(_) => {
-                    unimplemented!("Classical feedback not yet implemented")
+                    let allocation = self.alloc_for_place(lplace);
+                    let not = |_, ctrl, _, tgt| [BaseGateQ::X(tgt)];
+                    self.mapgate_class_ctrl(&bits, &allocation, Some(not));
                 }
             },
             UnOpKind::Delin => {
                 let allocation = self.alloc_for_place(lplace);
                 let qbits = bits.as_bits(&self.st.env).qbits;
                 self.circ.meas(qbits, &allocation.cbits, &self.st);
-                self.st.env.memcpy(lplace, &allocation);
             }
         };
+    }
+
+    fn cnot_const<B>(&mut self, obj: &B, value: &Value)
+    where
+        B: AsBits,
+    {
+        let bits = obj.as_bits(&self.st.env);
+        let const_bits = value.bits();
+        if bits.cbits.is_empty() {
+            for (idx, u) in bits.qbits.iter().enumerate() {
+                if const_bits[idx] {
+                    self.circ.push_qgate(BaseGateQ::X(*u), &self.st);
+                }
+            }
+        } else if bits.qbits.is_empty() {
+            for (idx, u) in bits.cbits.iter().enumerate() {
+                if const_bits[idx] {
+                    self.circ.push_cgate(BaseGateC::Not(*u), &self.st);
+                }
+            }
+        } else {
+            panic!("`cnot_const` must be called on all-classical or all-quantum lhs");
+        }
     }
 
     /// Apply a Z gate to all the qubits
@@ -240,13 +265,14 @@ impl<'m> Interpreter<'m> {
     }
 
     /// Map two-bit classical and quantum gates over an allocation
-    fn mapgate_two<'a, B, Q, C, const N: usize, const M: usize>(
+    fn mapgate_two<'a, A, B, Q, C, const N: usize, const M: usize>(
         &'a mut self,
-        fst: &B,
+        fst: &A,
         snd: &B,
         quant: Option<Q>,
         class: Option<C>,
     ) where
+        A: AsBits,
         B: AsBits,
         Q: Fn(usize, Qbit, usize, Qbit) -> [BaseGateQ; N],
         C: Fn(usize, Cbit, usize, Cbit) -> [BaseGateC; M],
@@ -284,8 +310,13 @@ impl<'m> Interpreter<'m> {
     /// Map two-bit classical-quantum gates over a pair of allocations. Unlike
     /// the previous two-allocation mapping function, this one has a definite
     /// direction: `ctrl` controls `snd`.
-    fn mapgate_class_ctrl<'a, B, F, const N: usize>(&'a mut self, ctrl: &B, tgt: &B, f: Option<F>)
-    where
+    fn mapgate_class_ctrl<'a, A, B, F, const N: usize>(
+        &'a mut self,
+        ctrl: &A,
+        tgt: &B,
+        f: Option<F>,
+    ) where
+        A: AsBits,
         B: AsBits,
         F: Fn(usize, Cbit, usize, Qbit) -> [BaseGateQ; N],
     {

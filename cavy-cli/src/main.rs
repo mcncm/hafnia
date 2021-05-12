@@ -124,11 +124,12 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
 
     let perf = argmatches.is_present("perf");
     let nwtarg = argmatches.is_present("nwtarg");
+    let wave = argmatches.is_present("wave");
     let standalone = argmatches.is_present("standalone");
     let initial_kets = argmatches.is_present("initial_kets");
     let package = match argmatches.value_of("package") {
-        Some("qcircuit") => latex::Package::Qcircuit,
-        Some("quantikz") => latex::Package::Quantikz,
+        Some("qcircuit") => latex::Package::Qcircuit { nwtarg },
+        Some("quantikz") => latex::Package::Quantikz { nwtarg, wave },
         Some("yquant") => latex::Package::Yquant,
         _ => unreachable!(),
     };
@@ -137,7 +138,6 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
         Some("qasm") => Box::new(qasm::Qasm {}),
         // Need to start thinking about abstracting all this a little more
         Some("latex") => Box::new(latex::LaTeX {
-            nwtarg,
             standalone,
             initial_kets,
             package,

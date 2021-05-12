@@ -21,7 +21,7 @@ struct ThreeWayAllocator<T, I: Iterator<Item = T>> {
     fresh: I,
     // `Vec` probably better for locality?
     /// A clean free set that can be reallocated immediately
-    clean: Vec<T>,
+    clean: VecDeque<T>,
     /// A dirty free set that can be scheduled for reset
     dirty: VecDeque<T>,
 }
@@ -30,7 +30,7 @@ impl<T, I: Iterator<Item = T>> ThreeWayAllocator<T, I> {
     fn new(items: I) -> Self {
         Self {
             fresh: items,
-            clean: Vec::new(),
+            clean: VecDeque::new(),
             dirty: VecDeque::new(),
         }
     }
@@ -40,7 +40,7 @@ impl<T, I: Iterator<Item = T>> Iterator for ThreeWayAllocator<T, I> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let bit = self.clean.pop().or_else(|| self.fresh.next());
+        let bit = self.clean.pop_front().or_else(|| self.fresh.next());
         bit
     }
 }
@@ -149,7 +149,6 @@ impl<'a> Environment<'a> {
     where
         B: AsBits,
     {
-        // NOTE: ...and we have to go through another
         let value = right.as_bits(self).to_owned();
         let bits = &mut self.bits_at_mut(left);
         bits.copy_from_slice(&value.as_ref());
@@ -200,10 +199,12 @@ impl<'m> Interpreter<'m> {
     // problem here is that `Place` is borrowed (from `self.x`), so how will we
     // take `&mut self`?
     //
-    // NOTE: should this bind the bits to the `Place`?
+    // NOTE: should this return a view of the allocated memory, rather than an
+    // owned address array?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitArray {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
         let bitset = self.circ.alloc_for_ty(ty);
+        self.st.env.memcpy(place, &bitset);
         bitset
     }
 }

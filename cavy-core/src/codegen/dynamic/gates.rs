@@ -84,13 +84,13 @@ impl<'m> CircAssembler<'m> {
     pub fn free_meas(&mut self, addrs: &[Qbit]) {
         use MeasurementMode::*;
         let mode = self.ctx.conf.arch.meas_mode;
-        // Hm, will the branch predictor take care of this for us?
+
         let free_state = match mode {
             Demolition => FreeState::Clean,
-            Nondemolition => FreeState::Dirty,
-            Dirty => FreeState::Dirty,
+            // Maybe nondemolition should actually change the semantics of the
+            // measurement operator?
+            Dirty | Nondemolition => FreeState::Dirty,
         };
-
         self.free(addrs.iter().copied(), free_state);
         for &addr in addrs {
             self.gate_buf.push(Inst::QFree(addr, free_state));
