@@ -29,6 +29,7 @@ pub mod parser;
 // pub mod qram;
 pub mod lowering;
 pub mod num;
+pub(crate) mod place_tree;
 pub mod scanner;
 pub mod source;
 pub mod store;

@@ -340,10 +340,11 @@ impl<'s, 'c> Scanner<'s> {
             // Greedily check for two-character tokens
             if let Some(&following) = self.scan_head.peek() {
                 if let Some(lexeme) = tctokens((ch, following)) {
+                    // Consume the second character *first* to make sure the
+                    // source span is right.
+                    self.next_char();
                     let lexeme = lexeme.clone();
                     push_token!(self, lexeme);
-                    // Consume the second character and loop again.
-                    self.scan_head.next_raw_char();
                     continue;
                 } else if (ch, following) == ('/', '/') {
                     // In a comment: proceed to the next line

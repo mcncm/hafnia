@@ -28,8 +28,11 @@ mod util;
 pub fn check(context: DataflowCtx, errs: &mut ErrorBuf) {
     let regions = regions::infer_regions(&context);
 
-    if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
-        println!("{:?}", regions);
+    #[cfg(debug_assertions)]
+    {
+        if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
+            println!("{:?}", regions);
+        }
     }
 
     let scopes = loan_scope::loan_scopes(&regions, &context);

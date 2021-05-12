@@ -332,6 +332,18 @@ test_compiles! {
         }
     }
 
+    // CLASSICAL CONTROL
+
+    class_under_quant_contr FAIL [Analysis] {
+        fn main() {
+            let b = false;
+            let &q = ?true;
+            if q {
+                b = ~b;
+            }
+        }
+    }
+
     // UNSAFE
 
     unsafe_fn [Parse] {

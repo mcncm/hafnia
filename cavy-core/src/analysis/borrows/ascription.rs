@@ -21,7 +21,9 @@
 //! * It's a bit "hacky"/unprincipled? the lifetimes really *are* conceptually
 //!   part of the types.
 //!
-//! NOTE this does not yet handle function arguments!
+//! NOTE: this does not yet handle function arguments!
+//!
+//! TODO: use the generic `PlaceTree` type instead of the ad hoc one here.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -272,8 +274,6 @@ impl Loan {
     }
 }
 
-/// Ok, this is a bit of an odd tree, but it might actually be the most efficient in
-/// practice, noting that few variables will have wide-branching `Place` trees.
 #[derive(Debug)]
 pub struct AscrNode {
     /// Ascription at this `Place`
