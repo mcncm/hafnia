@@ -203,7 +203,7 @@ impl<'m> Interpreter<'m> {
     // owned address array?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitArray {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
-        let bitset = self.circ.alloc_for_ty(ty);
+        let bitset = self.circ.borrow_mut().alloc_for_ty(ty);
         self.st.env.memcpy(place, &bitset);
         bitset
     }

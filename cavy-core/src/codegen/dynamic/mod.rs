@@ -136,7 +136,7 @@ impl<'a> CircAssembler<'a> {
 pub struct Interpreter<'a> {
     mir: &'a Mir,
     st: InterpreterState<'a>,
-    circ: CircAssembler<'a>,
+    circ: Rc<RefCell<CircAssembler<'a>>>,
     ctx: &'a Context<'a>,
 }
 
@@ -145,7 +145,7 @@ impl<'a> Interpreter<'a> {
         let entry_point = mir.entry_point.unwrap();
         let gr = &mir.graphs[entry_point];
         Self {
-            circ: CircAssembler::new(ctx),
+            circ: Rc::new(RefCell::new(CircAssembler::new(ctx))),
             st: InterpreterState::new(gr, ctx),
             ctx,
             mir,
@@ -155,7 +155,11 @@ impl<'a> Interpreter<'a> {
     /// Run the interpreter, starting from its entry block.
     pub fn exec(mut self) -> CircuitBuf {
         self.run();
-        self.circ.gate_buf
+        let circ = match Rc::try_unwrap(self.circ) {
+            Ok(refcell) => refcell.into_inner(),
+            Err(_) => panic!("leftover pointer to circuit assembler"),
+        };
+        circ.gate_buf
     }
 
     fn funcall(&mut self, call: &FnCall) {
@@ -231,9 +235,9 @@ impl<'a> Interpreter<'a> {
                 // local data alone, if you have any join points.
                 todo!();
             }
-            StmtKind::Drop(place) => self.circ.push_drop(place, &self.st),
+            StmtKind::Drop(place) => self.circ.borrow_mut().push_drop(place, &self.st),
             StmtKind::Io(io) => {
-                self.circ.push_io(io, &self.st);
+                self.circ.borrow_mut().push_io(io, &self.st);
             }
             StmtKind::Nop => {}
         }
