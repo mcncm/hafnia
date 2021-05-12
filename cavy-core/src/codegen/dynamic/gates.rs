@@ -30,7 +30,32 @@ impl<'m> CircAssembler<'m> {
     where
         GateC: From<G>,
     {
-        self.push_cgate_inner(GateC::from(gate));
+        let gate = GateC::from(gate);
+        // I don't want to add a "classical swap" to any of the backends, so
+        // simply expand this gate.
+        if let BaseGate::C(BaseGateC::Swap(fst, snd)) = gate.base {
+            for base in &[
+                BaseGateC::Cnot {
+                    ctrl: fst,
+                    tgt: snd,
+                },
+                BaseGateC::Cnot {
+                    ctrl: snd,
+                    tgt: fst,
+                },
+                BaseGateC::Cnot {
+                    ctrl: fst,
+                    tgt: snd,
+                },
+            ] {
+                self.push_cgate_inner(GateC {
+                    ctrls: gate.ctrls.clone(),
+                    base: base.clone().into(),
+                })
+            }
+        } else {
+            self.push_cgate_inner(gate);
+        }
     }
 
     /// The inner function should *not* use the interpreter state, making it
@@ -59,17 +84,16 @@ impl<'m> CircAssembler<'m> {
         };
     }
 
-    // NOTE: maybe this method shouldn't be in this module, given that it's
-    // translating from a place?
-    pub fn push_drop(&mut self, place: &Place, st: &InterpreterState) {
-        let bits = st.env.bits_at(place);
-        for qbit in bits.qbits {
-            self.gate_buf.push(Inst::QFree(*qbit, FreeState::Dirty));
-        }
-        for cbit in bits.cbits {
-            self.gate_buf.push(Inst::CFree(*cbit, FreeState::Dirty));
-        }
+    pub fn free_qbit(&mut self, addr: Qbit, free_state: FreeState) {
+        self.gate_buf.push(Inst::QFree(addr, free_state));
     }
+
+    pub fn free_cbit(&mut self, addr: Cbit, free_state: FreeState) {
+        self.gate_buf.push(Inst::CFree(addr, free_state));
+    }
+
+    // These measurement functions are iterating over bits, but that should not
+    // be the job of this module.
 
     /// Measure some qubits and store them in classical bits
     pub fn meas(&mut self, srcs: &[Qbit], tgts: &[Cbit], _st: &InterpreterState) {

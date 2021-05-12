@@ -1399,7 +1399,7 @@ mod typing {
             match &op.data {
                 UnOpKind::Minus => todo!(),
                 UnOpKind::Not => {
-                    if right.is_primitive(self.ctx) || right == self.ctx.common.shrd_q_bool {
+                    if right.is_bitlike(self.ctx) {
                         Ok(right)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
@@ -1410,7 +1410,7 @@ mod typing {
                     }
                 }
                 UnOpKind::Split => {
-                    if right.is_primitive(self.ctx) & right.is_coherent(self.ctx) {
+                    if right.is_primitive(self.ctx) && right.is_coherent(self.ctx) {
                         Ok(right)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {

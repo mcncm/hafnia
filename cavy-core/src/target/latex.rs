@@ -583,6 +583,7 @@ impl<'l> LayoutArray<'l> {
         use BaseGateC::*;
         let (wire, elem) = match gate.base {
             C(Not(u)) => (u, Elem::CTarg(None)),
+            C(Swap(_, _)) => unimplemented!(),
             C(Copy(_, _)) => todo!(),
             C(Cnot { .. }) => todo!(),
             Q(_) => todo!(),

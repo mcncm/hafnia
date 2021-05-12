@@ -61,6 +61,7 @@ pub enum BaseGateC {
         ctrl: Cbit,
         tgt: Cbit,
     },
+    Swap(Cbit, Cbit),
     /// The first address is the source bit; the second is the target bit
     Copy(Cbit, Cbit),
 }
@@ -71,6 +72,18 @@ pub enum BaseGateC {
 pub enum BaseGate {
     C(BaseGateC),
     Q(BaseGateQ),
+}
+
+impl From<BaseGateQ> for BaseGate {
+    fn from(g: BaseGateQ) -> Self {
+        Self::Q(g)
+    }
+}
+
+impl From<BaseGateC> for BaseGate {
+    fn from(g: BaseGateC) -> Self {
+        Self::C(g)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,6 +275,7 @@ impl MaxBits for BaseGateC {
         let max = *match self {
             BaseGateC::Not(u) => u,
             BaseGateC::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
+            BaseGateC::Swap(fst, snd) => std::cmp::max(fst, snd),
             BaseGateC::Copy(u, v) => std::cmp::max(u, v),
         };
         Some(max)

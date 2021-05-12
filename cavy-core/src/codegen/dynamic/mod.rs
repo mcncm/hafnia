@@ -4,6 +4,8 @@ mod mem;
 
 use mem::BitArray;
 
+use smallvec::{smallvec, SmallVec};
+
 use std::{
     cell::{Ref, RefCell},
     collections::{HashMap, HashSet, VecDeque},
@@ -18,6 +20,7 @@ use crate::{
     mir::*,
     session::Config,
     store::Store,
+    types::TyId,
 };
 
 use self::mem::{AsBits, BitAllocators};
@@ -49,6 +52,10 @@ impl<'a> Environment<'a> {
             ctx,
         }
     }
+
+    fn type_of(&self, place: &Place) -> TyId {
+        self.locals.type_of(place, self.ctx)
+    }
 }
 
 /// Data tracked at a `LocalId`: the bits it points to, as well as any satellite
@@ -70,7 +77,7 @@ struct EnvEntry<'a> {
 /// NOTE: This works because of the order in which Rust runs `drop`s: first the
 /// type's destructor, then those of its fields.
 pub struct Destructor<'a> {
-    parents: [Option<Rc<Destructor<'a>>>; 2],
+    parents: SmallVec<[Rc<Destructor<'a>>; 2]>,
     gates: Vec<BaseGateQ>,
     /// This will hold a shared mutable reference to the assembler, so it can
     /// freely unwind on drop.
@@ -80,10 +87,32 @@ pub struct Destructor<'a> {
 impl<'a> Destructor<'a> {
     fn new(circ: &Rc<RefCell<CircAssembler<'a>>>) -> Self {
         Self {
-            parents: [None, None],
+            parents: smallvec![],
             gates: Vec::new(),
             circ: circ.clone(),
         }
+    }
+
+    fn from_parents(parents: &[&Place], interp: &Interpreter<'a>) -> Self {
+        let parents = parents
+            .iter()
+            .map(|parent| {
+                interp.st.env.bindings[parent.root]
+                    .destructor
+                    .as_ref()
+                    .map(|dest| dest.clone())
+            })
+            .flatten()
+            .collect();
+        Self {
+            parents,
+            gates: Vec::new(),
+            circ: interp.circ.clone(),
+        }
+    }
+
+    fn from_parent(parent: &Place, interp: &Interpreter<'a>) -> Self {
+        Self::from_parents(&[parent], interp)
     }
 }
 
@@ -251,10 +280,7 @@ impl<'a> Interpreter<'a> {
     // we don't have to worry about attempting to drop a containee and
     // destroying its container.
     fn exec_drop(&mut self, place: &Place) {
-        // Execute any destructors
-        self.st.env.bindings[place.root].destructor.take();
-        // Then push the appropriate `Free` instruction
-        self.circ.borrow_mut().push_drop(place, &self.st);
+        self.compute_drop(place);
     }
 
     /// Checks if a block is eligible according to the DFS traversal criterion:

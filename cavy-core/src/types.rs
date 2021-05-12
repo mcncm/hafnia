@@ -104,28 +104,46 @@ impl TyId {
         interner.cache[self].ref_kind
     }
 
-    /// A type will be said to be "classical" if none of the data it points to
+    /// A type will be said to be "classical" if none of the data it contains
     /// is quantum.
     pub fn is_classical(&self, ctx: &Context) -> bool {
         let sz = self.size(ctx);
         sz.qsize == 0
     }
 
-    /// A type will be said to be "coherent" if all of its data is quantum; if
-    /// it points to no classical data at all.
+    /// A type will be said to be "coherent" if all of its data is quantum: if
+    /// it contains to no classical data at all.
     pub fn is_coherent(&self, ctx: &Context) -> bool {
         let sz = self.size(ctx);
         sz.csize == 0
     }
 
     pub fn is_primitive(&self, ctx: &Context) -> bool {
+        use Type::*;
         match &ctx.types[*self] {
-            Type::Tuple(_) => false,
-            Type::Array(_) => false,
-            Type::Func(_, _) => false,
-            Type::UserType(_) => false,
-            _ => true,
+            Bool | Q_Bool | Uint(_) | Q_Uint(_) => true,
+            // The unit type should also be considered primitive
+            Tuple(tys) if tys.is_empty() => true,
+            _ => false,
         }
+    }
+
+    pub fn is_zst(&self, ctx: &Context) -> bool {
+        let sz = self.size(ctx);
+        sz.csize == 0 && sz.qsize == 0
+    }
+
+    /// This type that supports classical bitwise logic operations. A funny name
+    /// for this property--should come up with a better one.
+    pub fn is_bitlike(&self, ctx: &Context) -> bool {
+        let ty = &ctx.types[*self];
+        matches!(ty, Type::Bool | Type::Uint(_))
+            || if let Type::Ref(RefKind::Shrd, inner) = ty {
+                let ty = &ctx.types[*inner];
+                matches!(ty, Type::Q_Bool | Type::Q_Uint(_))
+            } else {
+                false
+            }
     }
 
     /// Check the linearity of a type, with the help of the global context

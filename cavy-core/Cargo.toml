@@ -9,6 +9,7 @@ version = "0.1.0"
 serde = { version = "1.0", optional = true }
 serde_json = { version = "1.0", features = ["preserve_order"], optional = true }
 bitvec = "0.22"
+smallvec = "1.6"
 
 [features]
 default = []
