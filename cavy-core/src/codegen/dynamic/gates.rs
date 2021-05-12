@@ -13,7 +13,10 @@ impl<'a> Drop for Destructor<'a> {
 // This impl should deal with received *bits*.
 impl<'m> CircAssembler<'m> {
     // This method needs mutable access to the circuit as well as the allocator.
-    pub fn push_qgate(&mut self, gate: BaseGateQ, _st: &InterpreterState) {
+    pub fn push_qgate<G>(&mut self, gate: G, _st: &InterpreterState)
+    where
+        GateQ: From<G>,
+    {
         self.push_qgate_inner(GateQ::from(gate));
     }
 
@@ -23,7 +26,10 @@ impl<'m> CircAssembler<'m> {
         self.gate_buf.push(gate);
     }
 
-    pub fn push_cgate(&mut self, gate: BaseGateC, _st: &InterpreterState) {
+    pub fn push_cgate<G>(&mut self, gate: G, _st: &InterpreterState)
+    where
+        GateC: From<G>,
+    {
         self.push_cgate_inner(GateC::from(gate));
     }
 

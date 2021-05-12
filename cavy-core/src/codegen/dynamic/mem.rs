@@ -145,25 +145,14 @@ impl<'a> Environment<'a> {
         (start.quant..end.quant, start.class..end.class)
     }
 
-    // TODO: this and `write_bits` can be made more generic.
-    pub fn mem_copy(&mut self, left: &Place, right: &B)
+    pub fn memcpy<B>(&mut self, left: &Place, right: &B)
     where
         B: AsBits,
     {
-        // NOTE: this actually *is* safe, and doesn't require an extra copy,
-        // since we could always exclude the case `lplace == rplace`. But
-        // proving that to the borrow checker sounds pretty daunting.
-        let bits = right.as_bits(self);
-        self.write_bits(left, bits.as_ref());
-    }
-
-    pub fn write_bits<B>(&mut self, left: &Place, right: &B)
-    where
-        B: AsBits,
-    {
-        let value = right.as_bits(self);
+        // NOTE: ...and we have to go through another
+        let value = right.as_bits(self).to_owned();
         let bits = &mut self.bits_at_mut(left);
-        bits.copy_from_slice(&value);
+        bits.copy_from_slice(&value.as_ref());
     }
 
     /// Get a sub-allocation at a place.
@@ -210,6 +199,8 @@ impl<'m> Interpreter<'m> {
     // introducing too much coupling) belong to the global allocator. The
     // problem here is that `Place` is borrowed (from `self.x`), so how will we
     // take `&mut self`?
+    //
+    // NOTE: should this bind the bits to the `Place`?
     pub fn alloc_for_place(&mut self, place: &Place) -> BitArray {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
         let bitset = self.circ.alloc_for_ty(ty);
@@ -340,6 +331,12 @@ impl<'a> AsBits for BitSlice<'a> {
 impl AsBits for Place {
     fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a> {
         env.bits_at(self)
+    }
+}
+
+impl AsBits for LocalId {
+    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a> {
+        env.bits_at(&<Place>::from(*self))
     }
 }
 

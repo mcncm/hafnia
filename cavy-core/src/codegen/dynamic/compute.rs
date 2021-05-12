@@ -23,7 +23,7 @@ impl<'m> Interpreter<'m> {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
             RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
-            RvalueKind::Ref(_, rplace) => self.st.env.mem_copy(place, rplace),
+            RvalueKind::Ref(_, rplace) => self.st.env.memcpy(place, rplace),
             RvalueKind::Use(op) => self.compute_use(place, op),
         };
     }
@@ -36,9 +36,12 @@ impl<'m> Interpreter<'m> {
         }
     }
 
+    /// FIXME should maybe be an environment method in `mem.rs`?
     fn initialize(&mut self, place: &Place, value: &Value) -> BitArray {
         let bits = value.bits();
         let allocation = self.alloc_for_place(place);
+        // NOTE: why is this commented line not needed?
+        // self.st.env.write_bits(place, &allocation);
         self.map_not(&allocation);
         allocation
     }
@@ -48,12 +51,12 @@ impl<'m> Interpreter<'m> {
             Operand::Const(value) => {}
             Operand::Copy(rplace) => {
                 // NOTE not actually correct
-                self.st.env.mem_copy(lplace, rplace);
+                self.st.env.memcpy(lplace, rplace);
             }
             // NOTE: When is this correct/safe? When should we swap? Can we
-            // always memcpy?
+            // always mem_copy?
             Operand::Move(rplace) => {
-                self.st.env.mem_copy(lplace, rplace);
+                self.st.env.memcpy(lplace, rplace);
             }
         }
     }
@@ -87,68 +90,65 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_unop(&mut self, lplace: &Place, op: &UnOpKind, right: &Operand) {
-        match right {
-            Operand::Const(_) => {}
+        let bits = match right {
+            Operand::Const(value) => self.initialize(lplace, value),
 
             /*
             Classical data is an "edge case" here, because the lhs isn't
             guaranteed to be uninitialied. But if this is quantum data, the
             lhs *must* be a fresh qubit, and we can just control on the rhs.
             */
-            Operand::Copy(_) => {}
+            Operand::Copy(rplace) => rplace.as_bits(&self.st.env).to_owned(),
 
             /*
             First, do no optimization. Moves can be eliminated later. So, by
             default, a move will SWAP.
             */
-            Operand::Move(_) => {}
+            Operand::Move(rplace) => rplace.as_bits(&self.st.env).to_owned(),
         };
 
         /*
-         Now we can operate in-place on the left-hand side.
+         Now we should be able to operate in-place on the left-hand side.
+
+         In fact, this *won't* be in-place, because we're not yet computing
+         adresses in advance of gates. But we'll at least only have to edit this
+         from here on to fix that.
         */
 
-        let bitset = match op {
+        match op {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
-                let rplace = self.unwrap_operand(right);
-                let bits = self.st.env.bits_at(rplace).to_owned();
-                self.map_not(&bits.as_ref());
-                bits.to_owned()
+                self.map_not(&bits);
+                // These addresses are being cloned a *lot*. Suggests that this
+                // module isn’t factored right.
+                self.st.env.memcpy(lplace, &bits);
             }
             UnOpKind::Split => {
-                let rplace = self.unwrap_operand(right);
-                let bits = self.st.env.bits_at(rplace);
-                for addr in bits.qbits {
-                    self.circ.push_qgate(BaseGateQ::H(*addr), &self.st);
-                }
-                bits.to_owned()
+                self.map_hadamard(&bits);
+                self.st.env.memcpy(lplace, &bits);
             }
             UnOpKind::Linear => match right {
-                Operand::Const(value) => {
-                    let allocation = self.initialize(lplace, value);
-                    allocation
+                Operand::Const(_) => {
+                    self.st.env.memcpy(lplace, &bits);
                 }
-                Operand::Copy(_) => {
-                    unimplemented!("Classical feedback not yet implemented")
-                }
-                Operand::Move(_) => {
+
+                /*
+                 Classical feedback
+                */
+                Operand::Copy(_) | Operand::Move(_) => {
                     unimplemented!("Classical feedback not yet implemented")
                 }
             },
             UnOpKind::Delin => {
-                let rplace = self.unwrap_operand(right);
                 let allocation = self.alloc_for_place(lplace);
-                let qbits = self.st.env.bits_at(rplace).qbits;
+                let qbits = bits.as_bits(&self.st.env).qbits;
                 self.circ.meas(qbits, &allocation.cbits, &self.st);
-                allocation
+                self.st.env.memcpy(lplace, &allocation);
             }
         };
-        self.st.env.insert(lplace, bitset.as_ref());
     }
 
-    /// Swap all the bits--classical and quantum--in two places, which should be
-    /// of the same size.
+    /// Apply a Z gate to all the qubits
     fn map_phase<B>(&mut self, obj: &B)
     where
         B: AsBits,
@@ -156,6 +156,16 @@ impl<'m> Interpreter<'m> {
         let phase = |_, u| [BaseGateQ::Z(u)];
         // An interesting bit of Rust type noise.
         self.mapgate_single::<_, _, _, 1, 0>(obj, Some(phase), None::<fn(_, _) -> _>);
+    }
+
+    /// Apply an H gate to all the qubits
+    fn map_hadamard<B>(&mut self, obj: &B)
+    where
+        B: AsBits,
+    {
+        let split = |_, u| [BaseGateQ::H(u)];
+        // An interesting bit of Rust type noise.
+        self.mapgate_single::<_, _, _, 1, 0>(obj, Some(split), None::<fn(_, _) -> _>);
     }
 
     /// NOT all the bits--classical and quantum--in one place
@@ -266,6 +276,33 @@ impl<'m> Interpreter<'m> {
             {
                 for gate in f(fst_idx, *fst_cbit, snd_idx, *snd_cbit).iter() {
                     self.circ.push_cgate(*gate, &self.st);
+                }
+            }
+        }
+    }
+
+    /// Map two-bit classical-quantum gates over a pair of allocations. Unlike
+    /// the previous two-allocation mapping function, this one has a definite
+    /// direction: `ctrl` controls `snd`.
+    fn mapgate_class_ctrl<'a, B, F, const N: usize>(&'a mut self, ctrl: &B, tgt: &B, f: Option<F>)
+    where
+        B: AsBits,
+        F: Fn(usize, Cbit, usize, Qbit) -> [BaseGateQ; N],
+    {
+        let ctrl_bits = ctrl.as_bits(&self.st.env);
+        let tgt_bits = tgt.as_bits(&self.st.env);
+
+        if let Some(f) = f {
+            for ((ctrl_idx, ctrl_bit), (tgt_idx, tgt_bit)) in ctrl_bits
+                .cbits
+                .iter()
+                .enumerate()
+                .zip(tgt_bits.qbits.iter().enumerate())
+            {
+                for gate in f(ctrl_idx, *ctrl_bit, tgt_idx, *tgt_bit).iter() {
+                    let mut gate = <GateC>::from(*gate);
+                    gate.ctrls.push(*ctrl_bit);
+                    self.circ.push_cgate(gate, &self.st);
                 }
             }
         }

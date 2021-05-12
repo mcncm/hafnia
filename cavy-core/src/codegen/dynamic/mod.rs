@@ -20,7 +20,7 @@ use crate::{
     store::Store,
 };
 
-use self::mem::BitAllocators;
+use self::mem::{AsBits, BitAllocators};
 
 pub struct Environment<'a> {
     /// The graph locals. We must hold onto these here in order to have access
@@ -164,27 +164,31 @@ impl<'a> Interpreter<'a> {
         } = call;
         let gr = &self.mir.graphs[*callee];
         let mut st = InterpreterState::new(gr, self.ctx);
-        // Copy local state
+
+        // Calling convention:
+
         let mut locals = st.env.locals.idx_enumerate();
         let (ret_local, _) = locals.next().unwrap();
+        // Copy the return location
+        let ret_adrs = ret.as_bits(&self.st.env);
+        st.env.memcpy(&ret_local.into(), &ret_adrs);
         for (arg, (arg_local, _)) in args.iter().zip(locals) {
             let arg = match arg {
                 Operand::Const(_) => unreachable!(),
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
-
-            st.env
-                .write_bits(&arg_local.into(), self.st.env.bits_at(&arg));
+            // Copy the argument locations
+            let arg_adrs = arg.as_bits(&self.st.env);
+            st.env.memcpy(&arg_local.into(), &arg_adrs);
         }
+
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);
         self.run();
         // Restore interpreter state
         std::mem::swap(&mut self.st, &mut st);
-        // Copy return value back
-        self.st
-            .env
-            .write_bits(ret, st.env.bits_at(&ret_local.into()));
+        // // Copy return value back
+        // self.st.env.mem_copy(ret, &ret_local);
     }
 
     fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {
