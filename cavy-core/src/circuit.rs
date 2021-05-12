@@ -33,8 +33,16 @@ pub enum BaseGateQ {
     Z(Qbit),
     T(Qbit),
     TDag(Qbit),
-    // This might "really" belong in `GateQ`, but it makes control unrolling a
-    // bit challenging.
+    /// Ok, this isn't *great* in that there are *two representations* of the
+    /// *same gate*. But it seems to make code generation easier. We could call
+    /// it an optimization: A CX as a `GateQ` with a single control costs a heap
+    /// allocation; a `GateQ` containing a a `Cnot` and no controls does not.
+    Cnot {
+        ctrl: Qbit,
+        tgt: Qbit,
+    },
+    /// This might "really" belong in `GateQ`, but it makes control
+    /// unrolling a bit challenging.
     Swap(Qbit, Qbit),
 }
 
@@ -48,6 +56,11 @@ pub struct GateQ {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseGateC {
     Not(Cbit),
+    /// Ibid the `BaseGateQ` `Cnot` gate
+    Cnot {
+        ctrl: Cbit,
+        tgt: Cbit,
+    },
     /// The first address is the source bit; the second is the target bit
     Copy(Cbit, Cbit),
 }
@@ -143,7 +156,8 @@ impl GateQ {
     }
 
     pub fn is_cx(&self) -> bool {
-        matches!(self.base, BaseGateQ::X(_)) && self.ctrls.len() == 1
+        (matches!(self.base, BaseGateQ::X(_)) && self.ctrls.len() == 1)
+            || (matches!(self.base, BaseGateQ::Cnot { .. }) && self.ctrls.len() == 0)
     }
 
     pub fn is_cz(&self) -> bool {
@@ -218,6 +232,7 @@ impl MaxBits for BaseGateQ {
             BaseGateQ::Z(u) => u,
             BaseGateQ::T(u) => u,
             BaseGateQ::TDag(u) => u,
+            BaseGateQ::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
             BaseGateQ::Swap(u, v) => std::cmp::max(u, v),
         };
         Some(max)
@@ -246,6 +261,7 @@ impl MaxBits for BaseGateC {
     fn max_cbit(&self) -> Option<Cbit> {
         let max = *match self {
             BaseGateC::Not(u) => u,
+            BaseGateC::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
             BaseGateC::Copy(u, v) => std::cmp::max(u, v),
         };
         Some(max)
@@ -378,6 +394,7 @@ impl std::fmt::Display for BaseGateQ {
             Z(q) => write!(f, "Z {}", q),
             T(q) => write!(f, "T {}", q),
             TDag(q) => write!(f, "T* {}", q),
+            Cnot { ctrl, tgt } => write!(f, "CNOT {} {}", ctrl, tgt),
             Swap(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
         }
     }

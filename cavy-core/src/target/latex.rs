@@ -497,6 +497,14 @@ impl<'l> LayoutArray<'l> {
             Z(u) => (self.qwire(u), Elem::Z),
             T(u) => (self.qwire(u), Elem::T),
             TDag(u) => (self.qwire(u), Elem::TDag),
+            Cnot { ctrl, tgt } => {
+                let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
+                let dist = self.dist(ctrl, tgt);
+                let ctrl = (ctrl, Elem::Ctrl(dist));
+                let tgt = (tgt, Elem::Targ);
+                self.insert_multiple(vec![ctrl, tgt]);
+                return;
+            }
             Swap(u, v) => {
                 let (u, v) = (self.qwire(u), self.qwire(v));
                 let dist = self.dist(u, v);
@@ -531,6 +539,7 @@ impl<'l> LayoutArray<'l> {
         let (wire, elem) = match gate.base {
             C(Not(u)) => (u, Elem::CTarg(None)),
             C(Copy(_, _)) => todo!(),
+            C(Cnot { .. }) => todo!(),
             Q(_) => todo!(),
         };
         let wire = self.cwire(wire);

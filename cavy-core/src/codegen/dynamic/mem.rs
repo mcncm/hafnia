@@ -172,19 +172,26 @@ impl<'a> Environment<'a> {
         bits.copy_from_slice(&value);
     }
 
-    fn get_entry(&self, local: LocalId) -> &EnvEntry {
+    fn get_entry<'b>(&'b self, local: LocalId) -> &'b EnvEntry<'a>
+    where
+        'a: 'b,
+    {
         &self.bindings[local]
     }
 
-    fn get_entry_mut(&mut self, local: LocalId) -> &mut EnvEntry {
+    fn get_entry_mut<'b>(&'b mut self, local: LocalId) -> &'b mut EnvEntry<'a>
+    where
+        'a: 'b,
+    {
         &mut self.bindings[local]
     }
 }
 
-impl Default for EnvEntry {
+impl Default for EnvEntry<'_> {
     fn default() -> Self {
         Self {
             bits: BitSet::new(),
+            destructor: None,
         }
     }
 }

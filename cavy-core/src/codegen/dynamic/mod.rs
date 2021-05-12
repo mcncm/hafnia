@@ -5,14 +5,15 @@ mod mem;
 use mem::BitSet;
 
 use std::{
-    cell::Ref,
+    cell::{Ref, RefCell},
     collections::{HashMap, HashSet, VecDeque},
     iter::FromIterator,
     ops::RangeFrom,
+    rc::Rc,
 };
 
 use crate::{
-    circuit::{CircuitBuf, GateQ},
+    circuit::{BaseGateQ, CircuitBuf, GateQ},
     context::Context,
     mir::*,
     session::Config,
@@ -29,7 +30,7 @@ pub struct Environment<'a> {
     // or removing, this data structure.
     /// Mapping of locals to memory locations. Note that they are _not_
     /// write-once, because of the SWAP-elimination optimization.
-    bindings: Store<LocalId, EnvEntry>,
+    bindings: Store<LocalId, EnvEntry<'a>>,
     /// Also needs a local `ctx` copy for type lookup
     ctx: &'a Context<'a>,
 }
@@ -38,6 +39,9 @@ impl<'a> Environment<'a> {
     fn new(locals: &'a LocalStore, ctx: &'a Context<'a>) -> Self {
         let bindings = locals.iter().map(|loc| EnvEntry {
             bits: BitSet::uninit(loc.ty.size(ctx)),
+            // It's *never* the callee's responsibility to destroy its
+            // arguments; they're either owned, or they outlive the function.
+            destructor: None,
         });
         Self {
             locals,
@@ -49,8 +53,38 @@ impl<'a> Environment<'a> {
 
 /// Data tracked at a `LocalId`: the bits it points to, as well as any satellite
 /// data associated with deferred analyses
-struct EnvEntry {
+struct EnvEntry<'a> {
+    /// The memory bits this local points to
     bits: BitSet,
+    destructor: Option<Rc<Destructor<'a>>>,
+}
+
+/// The destructor for a local which, in this first "toy" version, is just a
+/// reference-counted blob in a DAG. The relatively naive--and ridiculously
+/// heavyweight--way this creature works is a large part of what makes this
+/// backend so "dynamic". Using these things is *approximately* writing Python.
+///
+/// NOTE: The assumption that they do form a DAG is not unconditional. We may
+/// have to forbid recursion, for example.
+///
+/// NOTE: This works because of the order in which Rust runs `drop`s: first the
+/// type's destructor, then those of its fields.
+pub struct Destructor<'a> {
+    parents: [Option<Rc<Destructor<'a>>>; 2],
+    gates: Vec<GateQ>,
+    /// This will hold a shared mutable reference to the assembler, so it can
+    /// freely unwind on drop.
+    circ: Rc<RefCell<CircAssembler<'a>>>,
+}
+
+impl<'a> Destructor<'a> {
+    fn new(circ: &Rc<RefCell<CircAssembler<'a>>>) -> Self {
+        Self {
+            parents: [None, None],
+            gates: Vec::new(),
+            circ: circ.clone(),
+        }
+    }
 }
 
 /// This struct essentially represents a stack frame. Everything that is pushed

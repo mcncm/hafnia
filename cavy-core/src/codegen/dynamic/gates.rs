@@ -2,15 +2,35 @@ use crate::{arch::MeasurementMode, circuit::*};
 
 use super::{mem::*, *};
 
+impl<'a> Drop for Destructor<'a> {
+    fn drop(&mut self) {
+        while let Some(gate) = self.gates.pop() {
+            self.circ.borrow_mut().push_qgate_inner(gate);
+        }
+    }
+}
+
 // This impl should deal with received *bits*.
 impl<'m> CircAssembler<'m> {
     // This method needs mutable access to the circuit as well as the allocator.
     pub fn push_qgate(&mut self, gate: BaseGateQ, _st: &InterpreterState) {
-        self.gate_buf.push(GateQ::from(gate));
+        self.push_qgate_inner(GateQ::from(gate));
+    }
+
+    /// The inner function should *not* use the interpreter state, making it
+    /// possible to call this from a reference destructor.
+    fn push_qgate_inner(&mut self, gate: GateQ) {
+        self.gate_buf.push(gate);
     }
 
     pub fn push_cgate(&mut self, gate: BaseGateC, _st: &InterpreterState) {
-        self.gate_buf.push(GateC::from(gate));
+        self.push_cgate_inner(GateC::from(gate));
+    }
+
+    /// The inner function should *not* use the interpreter state, making it
+    /// possible to call this from a reference destructor.
+    fn push_cgate_inner(&mut self, gate: GateC) {
+        self.gate_buf.push(gate);
     }
 
     // NOTE: maybe this method shouldn't be in this module, given that it's

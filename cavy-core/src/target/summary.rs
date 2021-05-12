@@ -68,7 +68,10 @@ impl Target for Summary {
                         Z(_) => zgates += 1,
                         T(_) => tgates += 1,
                         TDag(_) => tgates += 1,
+                        // multiqubit base gates covered by the multiqubit gate
+                        // checks above
                         Swap(_, _) => unreachable!(),
+                        Cnot { .. } => unreachable!(),
                     }
                 }
                 Inst::CGate(_) => {}
