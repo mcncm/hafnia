@@ -71,7 +71,7 @@ struct EnvEntry<'a> {
 /// type's destructor, then those of its fields.
 pub struct Destructor<'a> {
     parents: [Option<Rc<Destructor<'a>>>; 2],
-    gates: Vec<GateQ>,
+    gates: Vec<BaseGateQ>,
     /// This will hold a shared mutable reference to the assembler, so it can
     /// freely unwind on drop.
     circ: Rc<RefCell<CircAssembler<'a>>>,
@@ -235,7 +235,7 @@ impl<'a> Interpreter<'a> {
                 // local data alone, if you have any join points.
                 todo!();
             }
-            StmtKind::Drop(place) => self.circ.borrow_mut().push_drop(place, &self.st),
+            StmtKind::Drop(place) => self.exec_drop(place),
             StmtKind::Io(io) => {
                 self.circ.borrow_mut().push_io(io, &self.st);
             }
@@ -245,6 +245,16 @@ impl<'a> Interpreter<'a> {
 
     fn exec_assn(&mut self, place: &Place, rvalue: &Rvalue) {
         self.compute_assn(place, rvalue);
+    }
+
+    // NOTE: [correctness] currently, only entire variables can drop, so for now
+    // we don't have to worry about attempting to drop a containee and
+    // destroying its container.
+    fn exec_drop(&mut self, place: &Place) {
+        // Execute any destructors
+        self.st.env.bindings[place.root].destructor.take();
+        // Then push the appropriate `Free` instruction
+        self.circ.borrow_mut().push_drop(place, &self.st);
     }
 
     /// Checks if a block is eligible according to the DFS traversal criterion:

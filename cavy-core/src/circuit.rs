@@ -294,13 +294,25 @@ impl MaxBits for GateC {
     }
 }
 
+// NOTE: The `Free` instructions currently evaluate to `None.` This is really a
+// hack to make sure that the bit counts are all correct, even if some variables
+// have been optimized away without removing their `Drop` instructions.
+//
+// Really, this is incorrect. First of all, that shouldn't happen during
+// optimization: the fact that it does is a result of the naive way that I'm
+// approaching constant propagation, which should actually be based on a live
+// variable analysis.
+//
+// Second, I might *actually* want to insert `Drop`s *later*, not during
+// lowering, because we want to free ancillas *as soon as possible*. I belive
+// this is a departure from what Rust does.
 impl MaxBits for Inst {
     fn max_qbit(&self) -> Option<Qbit> {
         match self {
             Inst::CInit(_) => None,
             Inst::CFree(_, _) => None,
             Inst::QInit(u) => Some(*u),
-            Inst::QFree(u, _) => Some(*u),
+            Inst::QFree(_u, _) => None,
             Inst::QGate(g) => g.max_qbit(),
             Inst::CGate(g) => g.max_qbit(),
             Inst::Meas(u, _) => Some(*u),
@@ -311,7 +323,7 @@ impl MaxBits for Inst {
     fn max_cbit(&self) -> Option<Cbit> {
         match self {
             Inst::CInit(u) => Some(*u),
-            Inst::CFree(u, _) => Some(*u),
+            Inst::CFree(_u, _) => None,
             Inst::QInit(_) => None,
             Inst::QFree(_, _) => None,
             Inst::QGate(g) => g.max_cbit(),

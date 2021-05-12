@@ -5,7 +5,7 @@ use super::{mem::*, *};
 impl<'a> Drop for Destructor<'a> {
     fn drop(&mut self) {
         while let Some(gate) = self.gates.pop() {
-            self.circ.borrow_mut().push_qgate_inner(gate);
+            self.circ.borrow_mut().push_qgate_inner(gate.into());
         }
     }
 }

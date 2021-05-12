@@ -19,6 +19,10 @@ enum Data {
 }
 
 impl<'m> Interpreter<'m> {
+    // NOTE: this function is probably just wrong. We probably don't want to
+    // delegate all the `memcpy`ing to these `Rvalue`-specific methods.
+    //
+    // The deputy methods should *probably* just get a pile of bits.
     pub fn compute_assn(&mut self, place: &Place, rvalue: &Rvalue) {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
@@ -91,13 +95,17 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_unop(&mut self, lplace: &Place, op: &UnOpKind, right: &Operand) {
-        let bits = match right {
-            Operand::Const(value) => self.initialize(lplace, value),
+        let (bits, mut destructor) = match right {
+            Operand::Const(value) => (self.initialize(lplace, value), None),
 
             /*
             Classical data is an "edge case" here, because the lhs isn't
             guaranteed to be uninitialized. But if this is quantum data, the
             lhs *must* be a fresh qubit, and we can just control on the rhs.
+
+            Do we want to identify '`Copy` + quantum' with 'shared reference'?
+            Are there cases where `Move` makes more sense, for example after
+            certain optimizations?
             */
             Operand::Copy(rplace) => {
                 let parent = self.st.env.bindings[rplace.root]
@@ -105,17 +113,23 @@ impl<'m> Interpreter<'m> {
                     .as_ref()
                     .map(|dest| dest.clone());
                 // Is always safe to put a new one in here?
-                let dest = Rc::new(Destructor::new(&self.circ));
-                self.st.env.bindings[lplace.root].destructor.replace(dest);
-                rplace.as_bits(&self.st.env).to_owned()
+                let dest = Destructor::new(&self.circ);
+                let bits = rplace.as_bits(&self.st.env).to_owned();
+                (bits, Some(dest))
             }
 
             /*
             First, do no optimization. Moves can be eliminated later. So, by
             default, a move will SWAP.
             */
-            Operand::Move(rplace) => rplace.as_bits(&self.st.env).to_owned(),
+            Operand::Move(rplace) => {
+                let bits = rplace.as_bits(&self.st.env).to_owned();
+                (bits, None)
+            }
         };
+
+        // Take a handle to the gate sink, if there is one.
+        let sink = destructor.as_mut().map(|dest| &mut dest.gates);
 
         /*
          Now we should be able to operate in-place on the left-hand side.
@@ -128,7 +142,14 @@ impl<'m> Interpreter<'m> {
         match op {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
-                self.map_not(&bits);
+                // NOTE: this check defeats the purpose of the abstraction--but
+                // it's convenient for validation!
+                if sink.is_some() {
+                    self.mapgate_sq(&bits, |u| BaseGateQ::X(u), sink);
+                } else {
+                    self.map_not(&bits);
+                }
+
                 // These addresses are being cloned a *lot*. Suggests that this
                 // module isn’t factored right.
                 self.st.env.memcpy(lplace, &bits);
@@ -160,6 +181,16 @@ impl<'m> Interpreter<'m> {
                     .meas(qbits, &allocation.cbits, &self.st);
             }
         };
+
+        /*
+        Finally, insert the destructor, if there is one, and make it immutable
+        for all time.
+        */
+        if let Some(destructor) = destructor {
+            self.st.env.bindings[lplace.root]
+                .destructor
+                .replace(Rc::new(destructor));
+        }
     }
 
     fn cnot_const<B>(&mut self, obj: &B, value: &Value)
@@ -227,7 +258,7 @@ impl<'m> Interpreter<'m> {
     {
         let swapq = |(_, ctrl, _, tgt)| [BaseGateQ::Cnot { ctrl, tgt }];
         let swapc = |(_, ctrl, _, tgt)| [BaseGateC::Cnot { ctrl, tgt }];
-        self.mapgate_two(ctrl, tgt, Some(swapq), Some(swapc));
+        self.mapgate_pair(ctrl, tgt, Some(swapq), Some(swapc));
     }
 
     /// SWAP all the bits--classical and quantum--in two places, which should be
@@ -245,7 +276,50 @@ impl<'m> Interpreter<'m> {
                 BaseGateC::Cnot { ctrl: c1, tgt: c2 },
             ]
         };
-        self.mapgate_two(fst, snd, Some(swapq), Some(swapc));
+        self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
+    }
+
+    // == teed gate mappers
+
+    /// The main optionally-teed mapping function for the common use case of
+    /// single-qubit gates
+    fn mapgate_sq<B, F>(&mut self, obj: &B, f: F, sink: Option<&mut Vec<BaseGateQ>>)
+    where
+        B: AsBits,
+        F: Fn(Qbit) -> BaseGateQ,
+    {
+        let fp = |(_, q)| [f(q)];
+
+        match sink {
+            Some(sink) => {
+                let tee_f = util::tee(fp, sink);
+                self.mapgate_single::<_, _, _, 1, 0>(obj, Some(tee_f), None::<fn(_) -> _>);
+            }
+            None => {
+                self.mapgate_single::<_, _, _, 1, 0>(obj, Some(fp), None::<fn(_) -> _>);
+            }
+        }
+    }
+
+    /// The main optionally-teed mapping function for the common use case of
+    /// two-qubit gates
+    fn mapgate_tq<A, B, F>(&mut self, fst: &A, snd: &B, f: F, sink: Option<&mut Vec<BaseGateQ>>)
+    where
+        A: AsBits,
+        B: AsBits,
+        F: Fn(Qbit, Qbit) -> BaseGateQ,
+    {
+        let fp = |(_, q1, _, q2)| [f(q1, q2)];
+
+        match sink {
+            Some(sink) => {
+                let tee_f = util::tee(fp, sink);
+                self.mapgate_pair::<_, _, _, _, 1, 0>(fst, snd, Some(tee_f), None::<fn(_) -> _>);
+            }
+            None => {
+                self.mapgate_pair::<_, _, _, _, 1, 0>(fst, snd, Some(fp), None::<fn(_) -> _>);
+            }
+        }
     }
 
     /// Map single-bit classical and quantum gates over an allocation
@@ -256,13 +330,13 @@ impl<'m> Interpreter<'m> {
         class: Option<C>,
     ) where
         B: AsBits,
-        Q: Fn((usize, Qbit)) -> [BaseGateQ; N],
-        C: Fn((usize, Cbit)) -> [BaseGateC; M],
+        Q: FnMut((usize, Qbit)) -> [BaseGateQ; N],
+        C: FnMut((usize, Cbit)) -> [BaseGateC; M],
     {
         let mut circ = self.circ.borrow_mut();
         let bits = obj.as_bits(&self.st.env);
 
-        if let Some(f) = quant {
+        if let Some(mut f) = quant {
             for (idx, qbit) in bits.qbits.iter().enumerate() {
                 // NOTE: these copies shouldn't be necessary--this will be fixed
                 // when arrays become iterable in Rust 2021.
@@ -272,7 +346,7 @@ impl<'m> Interpreter<'m> {
             }
         }
 
-        if let Some(g) = class {
+        if let Some(mut g) = class {
             for (idx, cbit) in bits.cbits.iter().enumerate() {
                 for gate in g((idx, *cbit)).iter() {
                     circ.push_cgate(*gate, &self.st);
@@ -282,7 +356,7 @@ impl<'m> Interpreter<'m> {
     }
 
     /// Map two-bit classical and quantum gates over an allocation
-    fn mapgate_two<'a, A, B, Q, C, const N: usize, const M: usize>(
+    fn mapgate_pair<'a, A, B, Q, C, const N: usize, const M: usize>(
         &'a mut self,
         fst: &A,
         snd: &B,
@@ -291,15 +365,15 @@ impl<'m> Interpreter<'m> {
     ) where
         A: AsBits,
         B: AsBits,
-        Q: Fn((usize, Qbit, usize, Qbit)) -> [BaseGateQ; N],
-        C: Fn((usize, Cbit, usize, Cbit)) -> [BaseGateC; M],
+        Q: FnMut((usize, Qbit, usize, Qbit)) -> [BaseGateQ; N],
+        C: FnMut((usize, Cbit, usize, Cbit)) -> [BaseGateC; M],
     {
         let mut circ = self.circ.borrow_mut();
 
         let fst_bits = fst.as_bits(&self.st.env);
         let snd_bits = snd.as_bits(&self.st.env);
 
-        if let Some(f) = quant {
+        if let Some(mut f) = quant {
             for ((fst_idx, fst_qbit), (snd_idx, snd_qbit)) in fst_bits
                 .qbits
                 .iter()
@@ -312,7 +386,7 @@ impl<'m> Interpreter<'m> {
             }
         }
 
-        if let Some(f) = class {
+        if let Some(mut f) = class {
             for ((fst_idx, fst_cbit), (snd_idx, snd_cbit)) in fst_bits
                 .cbits
                 .iter()
@@ -337,14 +411,14 @@ impl<'m> Interpreter<'m> {
     ) where
         A: AsBits,
         B: AsBits,
-        F: Fn((usize, Cbit, usize, Qbit)) -> [BaseGateQ; N],
+        F: FnMut((usize, Cbit, usize, Qbit)) -> [BaseGateQ; N],
     {
         let mut circ = self.circ.borrow_mut();
 
         let ctrl_bits = ctrl.as_bits(&self.st.env);
         let tgt_bits = tgt.as_bits(&self.st.env);
 
-        if let Some(f) = f {
+        if let Some(mut f) = f {
             for ((ctrl_idx, ctrl_bit), (tgt_idx, tgt_bit)) in ctrl_bits
                 .cbits
                 .iter()
