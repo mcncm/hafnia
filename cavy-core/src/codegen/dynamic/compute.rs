@@ -7,7 +7,11 @@ use crate::{
     values::Value,
 };
 
-use super::{gates, mem::BitSetSlice, *};
+use super::{
+    gates,
+    mem::{AsBits, BitSlice},
+    *,
+};
 
 enum Data {
     Place(Place),
@@ -32,15 +36,10 @@ impl<'m> Interpreter<'m> {
         }
     }
 
-    fn initialize(&mut self, place: &Place, value: &Value) -> BitSet {
+    fn initialize(&mut self, place: &Place, value: &Value) -> BitArray {
         let bits = value.bits();
         let allocation = self.alloc_for_place(place);
-        for (i, b) in value.bits().iter().enumerate() {
-            if *b {
-                let addr = allocation.qbits[i];
-                self.circ.push_qgate(BaseGateQ::X(addr), &self.st);
-            }
-        }
+        self.map_not(&allocation);
         allocation
     }
 
@@ -89,9 +88,7 @@ impl<'m> Interpreter<'m> {
 
     fn compute_unop(&mut self, lplace: &Place, op: &UnOpKind, right: &Operand) {
         match right {
-            // FIXME assume const propagation--but this is an incorrect
-            // assumption. Can be disabled.
-            Operand::Const(_) => unreachable!(),
+            Operand::Const(_) => {}
 
             /*
             Classical data is an "edge case" here, because the lhs isn't
@@ -115,13 +112,8 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
             UnOpKind::Not => {
                 let rplace = self.unwrap_operand(right);
-                let bits = self.st.env.bits_at(rplace);
-                for addr in bits.qbits {
-                    self.circ.push_qgate(BaseGateQ::X(*addr), &self.st);
-                }
-                for addr in bits.cbits {
-                    self.circ.push_cgate(BaseGateC::Not(*addr), &self.st);
-                }
+                let bits = self.st.env.bits_at(rplace).to_owned();
+                self.map_not(&bits.as_ref());
                 bits.to_owned()
             }
             UnOpKind::Split => {
@@ -157,30 +149,42 @@ impl<'m> Interpreter<'m> {
 
     /// Swap all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    fn map_phase(&mut self, lplace: &Place, rplace: &Place) {
+    fn map_phase<B>(&mut self, obj: &B)
+    where
+        B: AsBits,
+    {
         let phase = |_, u| [BaseGateQ::Z(u)];
         // An interesting bit of Rust type noise.
-        self.map_gates_single::<_, _, 1, 0>(lplace, Some(phase), None::<fn(_, _) -> _>);
+        self.mapgate_single::<_, _, _, 1, 0>(obj, Some(phase), None::<fn(_, _) -> _>);
     }
 
     /// NOT all the bits--classical and quantum--in one place
-    fn map_not(&mut self, lplace: &Place, rplace: &Place) {
+    fn map_not<B>(&mut self, obj: &B)
+    where
+        B: AsBits,
+    {
         let notq = |_, u| [BaseGateQ::X(u)];
         let notc = |_, u| [BaseGateC::Not(u)];
-        self.map_gates_single(lplace, Some(notq), Some(notc));
+        self.mapgate_single(obj, Some(notq), Some(notc));
     }
 
     /// CNOT all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    fn map_cnot(&mut self, lplace: &Place, rplace: &Place) {
+    fn map_cnot<B>(&mut self, ctrl: &B, tgt: &B)
+    where
+        B: AsBits,
+    {
         let swapq = |_, ctrl, _, tgt| [BaseGateQ::Cnot { ctrl, tgt }];
         let swapc = |_, ctrl, _, tgt| [BaseGateC::Cnot { ctrl, tgt }];
-        self.map_gates_two(lplace, rplace, Some(swapq), Some(swapc));
+        self.mapgate_two(ctrl, tgt, Some(swapq), Some(swapc));
     }
 
     /// SWAP all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    fn map_swap(&mut self, lplace: &Place, rplace: &Place) {
+    fn map_swap<B>(&mut self, fst: &B, snd: &B)
+    where
+        B: AsBits,
+    {
         let swapq = |_, q1, _, q2| [BaseGateQ::Swap(q1, q2)];
         // I don't have a built-in classical swap, so let's just make our own.
         let swapc = |_, c1, _, c2| {
@@ -190,20 +194,21 @@ impl<'m> Interpreter<'m> {
                 BaseGateC::Cnot { ctrl: c1, tgt: c2 },
             ]
         };
-        self.map_gates_two(lplace, rplace, Some(swapq), Some(swapc));
+        self.mapgate_two(fst, snd, Some(swapq), Some(swapc));
     }
 
     /// Map single-bit classical and quantum gates over an allocation
-    fn map_gates_single<'a, Q, C, const N: usize, const M: usize>(
+    fn mapgate_single<'a, B, Q, C, const N: usize, const M: usize>(
         &'a mut self,
-        place: &Place,
+        obj: &B,
         quant: Option<Q>,
         class: Option<C>,
     ) where
+        B: AsBits,
         Q: Fn(usize, Qbit) -> [BaseGateQ; N],
         C: Fn(usize, Cbit) -> [BaseGateC; M],
     {
-        let bits = self.st.env.bits_at(place);
+        let bits = obj.as_bits(&self.st.env);
 
         if let Some(f) = quant {
             for (idx, qbit) in bits.qbits.iter().enumerate() {
@@ -225,18 +230,19 @@ impl<'m> Interpreter<'m> {
     }
 
     /// Map two-bit classical and quantum gates over an allocation
-    fn map_gates_two<'a, Q, C, const N: usize, const M: usize>(
+    fn mapgate_two<'a, B, Q, C, const N: usize, const M: usize>(
         &'a mut self,
-        fst: &Place,
-        snd: &Place,
+        fst: &B,
+        snd: &B,
         quant: Option<Q>,
         class: Option<C>,
     ) where
+        B: AsBits,
         Q: Fn(usize, Qbit, usize, Qbit) -> [BaseGateQ; N],
         C: Fn(usize, Cbit, usize, Cbit) -> [BaseGateC; M],
     {
-        let fst_bits = self.st.env.bits_at(fst);
-        let snd_bits = self.st.env.bits_at(snd);
+        let fst_bits = fst.as_bits(&self.st.env);
+        let snd_bits = snd.as_bits(&self.st.env);
 
         if let Some(f) = quant {
             for ((fst_idx, fst_qbit), (snd_idx, snd_qbit)) in fst_bits

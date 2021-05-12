@@ -2,7 +2,7 @@ mod compute;
 mod gates;
 mod mem;
 
-use mem::BitSet;
+use mem::BitArray;
 
 use std::{
     cell::{Ref, RefCell},
@@ -38,7 +38,7 @@ pub struct Environment<'a> {
 impl<'a> Environment<'a> {
     fn new(locals: &'a LocalStore, ctx: &'a Context<'a>) -> Self {
         let bindings = locals.iter().map(|loc| EnvEntry {
-            bits: BitSet::uninit(loc.ty.size(ctx)),
+            bits: BitArray::uninit(loc.ty.size(ctx)),
             // It's *never* the callee's responsibility to destroy its
             // arguments; they're either owned, or they outlive the function.
             destructor: None,
@@ -55,7 +55,7 @@ impl<'a> Environment<'a> {
 /// data associated with deferred analyses
 struct EnvEntry<'a> {
     /// The memory bits this local points to
-    bits: BitSet,
+    bits: BitArray,
     destructor: Option<Rc<Destructor<'a>>>,
 }
 
@@ -173,7 +173,8 @@ impl<'a> Interpreter<'a> {
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
 
-            st.env.insert(&arg_local.into(), self.st.env.bits_at(&arg));
+            st.env
+                .write_bits(&arg_local.into(), self.st.env.bits_at(&arg));
         }
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);
@@ -181,7 +182,9 @@ impl<'a> Interpreter<'a> {
         // Restore interpreter state
         std::mem::swap(&mut self.st, &mut st);
         // Copy return value back
-        self.st.env.insert(ret, st.env.bits_at(&ret_local.into()));
+        self.st
+            .env
+            .write_bits(ret, st.env.bits_at(&ret_local.into()));
     }
 
     fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {

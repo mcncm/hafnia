@@ -100,9 +100,9 @@ impl<'c> CircAssembler<'c> {
     }
 
     /// Allocate space for a given type
-    pub fn alloc_for_ty(&mut self, ty: TyId) -> BitSet {
+    pub fn alloc_for_ty(&mut self, ty: TyId) -> BitArray {
         let sz = ty.size(self.ctx);
-        BitSet {
+        BitArray {
             cbits: self.alloc_class(sz.csize),
             qbits: self.alloc_quant(sz.qsize),
         }
@@ -145,31 +145,39 @@ impl<'a> Environment<'a> {
         (start.quant..end.quant, start.class..end.class)
     }
 
-    pub fn mem_copy(&mut self, lplace: &Place, rplace: &Place) {
+    // TODO: this and `write_bits` can be made more generic.
+    pub fn mem_copy(&mut self, left: &Place, right: &B)
+    where
+        B: AsBits,
+    {
         // NOTE: this actually *is* safe, and doesn't require an extra copy,
         // since we could always exclude the case `lplace == rplace`. But
         // proving that to the borrow checker sounds pretty daunting.
-        let bits = self.bits_at(rplace).to_owned();
-        self.insert(lplace, bits.as_ref());
+        let bits = right.as_bits(self);
+        self.write_bits(left, bits.as_ref());
+    }
+
+    pub fn write_bits<B>(&mut self, left: &Place, right: &B)
+    where
+        B: AsBits,
+    {
+        let value = right.as_bits(self);
+        let bits = &mut self.bits_at_mut(left);
+        bits.copy_from_slice(&value);
     }
 
     /// Get a sub-allocation at a place.
-    pub fn bits_at(&self, place: &Place) -> BitSetSlice {
+    pub fn bits_at(&self, place: &Place) -> BitSlice {
         let ranges = self.bitset_ranges(place);
         let bitset = &self.get_entry(place.root).bits;
         bitset.index(ranges)
     }
 
     /// Get a sub-allocation at a place, mutably
-    pub fn bits_at_mut(&mut self, place: &Place) -> BitSetSliceMut {
+    pub fn bits_at_mut(&mut self, place: &Place) -> BitSliceMut {
         let ranges = self.bitset_ranges(place);
         let bitset = &mut self.get_entry_mut(place.root).bits;
         bitset.index_mut(ranges)
-    }
-
-    pub fn insert(&mut self, place: &Place, value: BitSetSlice) {
-        let bits = &mut self.bits_at_mut(place);
-        bits.copy_from_slice(&value);
     }
 
     fn get_entry<'b>(&'b self, local: LocalId) -> &'b EnvEntry<'a>
@@ -190,7 +198,7 @@ impl<'a> Environment<'a> {
 impl Default for EnvEntry<'_> {
     fn default() -> Self {
         Self {
-            bits: BitSet::new(),
+            bits: BitArray::new(),
             destructor: None,
         }
     }
@@ -202,21 +210,23 @@ impl<'m> Interpreter<'m> {
     // introducing too much coupling) belong to the global allocator. The
     // problem here is that `Place` is borrowed (from `self.x`), so how will we
     // take `&mut self`?
-    pub fn alloc_for_place(&mut self, place: &Place) -> BitSet {
+    pub fn alloc_for_place(&mut self, place: &Place) -> BitArray {
         let ty = self.st.env.locals.type_of(&place, self.ctx);
         let bitset = self.circ.alloc_for_ty(ty);
         bitset
     }
 }
 
-/// An allocation of locally indexed virtual addresses
+/// An allocation of locally indexed virtual addresses.
+///
+/// NOTE: careful, this name conflicts with one in the `bitvec` crate.
 #[derive(Debug, Clone, Default)]
-pub struct BitSet {
+pub struct BitArray {
     pub qbits: Vec<Qbit>,
     pub cbits: Vec<Cbit>,
 }
 
-impl BitSet {
+impl BitArray {
     pub fn new() -> Self {
         Self {
             qbits: Vec::new(),
@@ -239,24 +249,24 @@ impl BitSet {
         }
     }
 
-    pub fn append(&mut self, other: &mut BitSet) {
+    pub fn append(&mut self, other: &mut BitArray) {
         self.qbits.append(&mut other.qbits);
         self.cbits.append(&mut other.cbits);
     }
 
-    pub fn copy_from_slice(&mut self, slice: &BitSetSlice) {
+    pub fn copy_from_slice(&mut self, slice: &BitSlice) {
         self.as_ref_mut().copy_from_slice(slice);
     }
 
-    pub fn as_ref(&self) -> BitSetSlice {
-        BitSetSlice {
+    pub fn as_ref(&self) -> BitSlice {
+        BitSlice {
             qbits: &self.qbits,
             cbits: &self.cbits,
         }
     }
 
-    pub fn as_ref_mut(&mut self) -> BitSetSliceMut {
-        BitSetSliceMut {
+    pub fn as_ref_mut(&mut self) -> BitSliceMut {
+        BitSliceMut {
             qbits: &mut self.qbits,
             cbits: &mut self.cbits,
         }
@@ -267,8 +277,8 @@ impl BitSet {
     pub fn index<'b: 'a, 'a>(
         &'b self,
         idx: (std::ops::Range<usize>, std::ops::Range<usize>),
-    ) -> BitSetSlice<'a> {
-        BitSetSlice {
+    ) -> BitSlice<'a> {
+        BitSlice {
             qbits: &self.qbits[idx.0],
             cbits: &self.cbits[idx.1],
         }
@@ -277,8 +287,8 @@ impl BitSet {
     pub fn index_mut<'b: 'a, 'a>(
         &'b mut self,
         idx: (std::ops::Range<usize>, std::ops::Range<usize>),
-    ) -> BitSetSliceMut<'a> {
-        BitSetSliceMut {
+    ) -> BitSliceMut<'a> {
+        BitSliceMut {
             qbits: &mut self.qbits[idx.0],
             cbits: &mut self.cbits[idx.1],
         }
@@ -286,29 +296,55 @@ impl BitSet {
 }
 
 #[derive(Debug)]
-pub struct BitSetSlice<'a> {
+pub struct BitSlice<'a> {
     pub qbits: &'a [Qbit],
     pub cbits: &'a [Cbit],
 }
 
-impl BitSetSlice<'_> {
+impl BitSlice<'_> {
     // NOTE should really use the ToOwned trait
-    pub fn to_owned(&self) -> BitSet {
-        BitSet {
+    pub fn to_owned(&self) -> BitArray {
+        BitArray {
             qbits: self.qbits.to_owned(),
             cbits: self.cbits.to_owned(),
         }
     }
 }
 
-pub struct BitSetSliceMut<'a> {
+pub struct BitSliceMut<'a> {
     pub qbits: &'a mut [Qbit],
     pub cbits: &'a mut [Cbit],
 }
 
-impl<'a> BitSetSliceMut<'a> {
-    fn copy_from_slice(&mut self, other: &BitSetSlice) {
+impl<'a> BitSliceMut<'a> {
+    fn copy_from_slice(&mut self, other: &BitSlice) {
         self.qbits.copy_from_slice(other.qbits);
         self.cbits.copy_from_slice(other.cbits);
+    }
+}
+
+/// Something that can be viewed as a `BitSlice` with the help of an environment
+pub trait AsBits {
+    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a>;
+}
+
+impl<'a> AsBits for BitSlice<'a> {
+    fn as_bits<'b>(&'b self, _env: &'b Environment) -> BitSlice<'b> {
+        Self {
+            qbits: &self.qbits,
+            cbits: &self.cbits,
+        }
+    }
+}
+
+impl AsBits for Place {
+    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a> {
+        env.bits_at(self)
+    }
+}
+
+impl AsBits for BitArray {
+    fn as_bits<'a>(&'a self, _env: &'a Environment) -> BitSlice<'a> {
+        self.as_ref()
     }
 }
