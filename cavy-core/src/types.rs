@@ -137,13 +137,15 @@ impl TyId {
     /// for this property--should come up with a better one.
     pub fn is_bitlike(&self, ctx: &Context) -> bool {
         let ty = &ctx.types[*self];
-        matches!(ty, Type::Bool | Type::Uint(_))
-            || if let Type::Ref(RefKind::Shrd, inner) = ty {
-                let ty = &ctx.types[*inner];
-                matches!(ty, Type::Q_Bool | Type::Q_Uint(_))
-            } else {
-                false
-            }
+        matches!(
+            ty,
+            Type::Bool | Type::Uint(_) | Type::Q_Bool | Type::Q_Uint(_)
+        ) || if let Type::Ref(RefKind::Shrd, inner) = ty {
+            let ty = &ctx.types[*inner];
+            matches!(ty, Type::Q_Bool | Type::Q_Uint(_))
+        } else {
+            false
+        }
     }
 
     /// Check the linearity of a type, with the help of the global context

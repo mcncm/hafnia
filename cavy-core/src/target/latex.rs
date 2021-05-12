@@ -512,12 +512,40 @@ impl<'l> LayoutArray<'l> {
     }
 
     fn push_qgate(&mut self, gate: GateQ) {
-        if gate.ctrls.len() > 0 {
-            todo!();
+        let (base, mut ctrls) = self.qgate_elems(gate);
+
+        // Maybe this should done *deeper* than this. Or have nothing to do with
+        // gate-pushing at all, instead triggered by a `Live_` instruction.
+        let &(wire, _) = &base;
+        let wire = &mut self.wires[wire];
+        wire.liveness = LiveQ;
+
+        if ctrls.is_empty() {
+            // We can do this unconditionally instead of inserting: if there’s
+            // already a ket, it’s safe to update it, and this doesn’t change the
+            // actual gates of the circuit.
+            if let (Elem::X, Occupied(ref mut k @ Elem::Ket("0"))) = (&base.1, wire.last_mut()) {
+                *k = Elem::Ket("1");
+                return;
+            }
+            self.insert_single(base.0, base.1);
+            return;
         }
 
+        for (wire, _) in ctrls.iter() {
+            let wire = &mut self.wires[*wire];
+            wire.liveness = LiveQ;
+        }
+
+        ctrls.push(base);
+        self.insert_multiple(ctrls);
+    }
+
+    fn qgate_elems(&mut self, gate: GateQ) -> ((usize, Elem), Vec<(usize, Elem)>) {
         use BaseGateQ::*;
-        let (wire_idx, elem) = match gate.base {
+        let mut ctrls = vec![];
+
+        let mut base = match gate.base {
             X(u) => (self.qwire(u), Elem::X),
             H(u) => (self.qwire(u), Elem::H),
             Z(u) => (self.qwire(u), Elem::Z),
@@ -526,33 +554,31 @@ impl<'l> LayoutArray<'l> {
             Cnot { ctrl, tgt } => {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);
-                let ctrl = (ctrl, Elem::QCtrl(dist));
-                let tgt = (tgt, Elem::Targ);
-                self.insert_multiple(vec![ctrl, tgt]);
-                return;
+                ctrls.push((ctrl, Elem::QCtrl(dist)));
+                (tgt, Elem::Targ)
             }
             Swap(u, v) => {
                 let (u, v) = (self.qwire(u), self.qwire(v));
                 let dist = self.dist(u, v);
-                let fst = (u, Elem::Swap(dist));
-                let snd = (v, Elem::TargX);
-                self.insert_multiple(vec![fst, snd]);
-                return;
+                ctrls.push((u, Elem::Swap(dist)));
+                (v, Elem::TargX)
             }
         };
 
-        let wire = &mut self.wires[wire_idx];
-        wire.liveness = LiveQ;
-
-        // We can do this unconditionally instead of inserting: if there’s
-        // already a ket, it’s safe to update it, and this doesn’t change the
-        // actual gates of the circuit.
-        if let (Elem::X, Occupied(ref mut k @ Elem::Ket("0"))) = (&elem, wire.last_mut()) {
-            *k = Elem::Ket("1");
-            return;
+        for ctrl in gate.ctrls.into_iter() {
+            let ctrl = self.qwire(ctrl);
+            let dist = self.dist(ctrl, base.0);
+            ctrls.push((ctrl, Elem::QCtrl(dist)));
         }
 
-        self.insert_single(wire_idx, elem);
+        if !(ctrls.is_empty()) {
+            let base = &mut base.1;
+            if let Elem::X = base {
+                *base = Elem::Targ;
+            }
+        }
+
+        (base, ctrls)
     }
 
     fn push_cgate(&mut self, gate: GateC) {

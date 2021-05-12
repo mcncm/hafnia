@@ -104,6 +104,16 @@ impl<'m> Interpreter<'m> {
         }
     }
 
+    // TODO: Figure out where to put this and how it affects the factoring of
+    // this module.
+    fn destructor_for(&mut self, place: &Place, parents: &[&Place]) -> Option<Destructor<'m>> {
+        if let Some(RefKind::Uniq) = self.st.env.type_of(place).ref_kind(self.ctx) {
+            Some(Destructor::from_parents(parents, self))
+        } else {
+            None
+        }
+    }
+
     fn compute_copy_copy_binop(
         &mut self,
         place: &Place,
@@ -111,10 +121,12 @@ impl<'m> Interpreter<'m> {
         left: &Place,
         right: &Place,
     ) {
+        use BinOpKind::*;
+
+        let lhs = self.alloc_for_place(place);
         let mut destructor = Destructor::from_parents(&[left, right], self);
         let sink = &mut destructor.gates;
 
-        use BinOpKind::*;
         match op {
             Equal => {}
             Nequal => {}
@@ -126,7 +138,25 @@ impl<'m> Interpreter<'m> {
             Less => {}
             Greater => {}
             Swap => {}
-            And => {}
+            And => {
+                let quant = |(idx, fst, snd)| {
+                    let lhs = lhs.qbits[idx];
+                    GateQ {
+                        ctrls: vec![fst, snd],
+                        base: BaseGateQ::X(lhs),
+                    }
+                };
+                let quant = util::tee(quant, sink);
+
+                let class = |(idx, fst, snd)| {
+                    let lhs = lhs.cbits[idx];
+                    GateC {
+                        ctrls: vec![fst, snd],
+                        base: BaseGateC::Not(lhs).into(),
+                    }
+                };
+                self.mapgate_pair(left, right, Some(quant), Some(class));
+            }
             Or => {}
             Xor => {}
         }
@@ -338,7 +368,7 @@ impl<'m> Interpreter<'m> {
 
     /// The main optionally-teed mapping function for the common use case of
     /// single-qubit gates
-    fn mapgate_sq<B, F>(&mut self, obj: &B, f: F, sink: Option<&mut Vec<BaseGateQ>>)
+    fn mapgate_sq<B, F>(&mut self, obj: &B, f: F, sink: Option<&mut Vec<GateQ>>)
     where
         B: AsBits,
         F: Fn(Qbit) -> BaseGateQ,
@@ -506,14 +536,15 @@ mod util {
     //! Some helper functions
 
     /// Construct a teed-off closure from an ordinary one.
-    pub fn tee<'s, T, F, A>(f: F, sink: &'s mut Vec<T>) -> impl FnMut(A) -> T + 's
+    pub fn tee<'s, IT, T, F, A>(f: F, sink: &'s mut Vec<T>) -> impl FnMut(A) -> IT + 's
     where
-        F: Fn(A) -> T + 's,
-        T: Clone,
+        F: Fn(A) -> IT + 's,
+        T: From<IT>,
+        IT: Clone,
     {
         move |a| {
             let val = f(a);
-            sink.push(val.clone());
+            sink.push(val.clone().into());
             val
         }
     }

@@ -78,7 +78,9 @@ struct EnvEntry<'a> {
 /// type's destructor, then those of its fields.
 pub struct Destructor<'a> {
     parents: SmallVec<[Rc<Destructor<'a>>; 2]>,
-    gates: Vec<BaseGateQ>,
+    /// The gates to unwind on drop. Could (maybe should!) add classical
+    /// gates.
+    gates: Vec<GateQ>,
     /// This will hold a shared mutable reference to the assembler, so it can
     /// freely unwind on drop.
     circ: Rc<RefCell<CircAssembler<'a>>>,
