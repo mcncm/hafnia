@@ -73,13 +73,13 @@ impl<T> PlaceStore<T> {
 
     pub fn get_node(&self, place: &Place) -> Option<&PlaceNode<T>> {
         let mut node = Some(&self.store[place.root]);
-        let mut projections = place.path.iter();
-        while let Some(sub) = node {
-            node = match projections.next() {
-                Some(Proj::Field(n)) => sub.slots.get(*n).map(|x| x.as_ref()).flatten(),
-                Some(Proj::Deref) => sub.slots.get(0).map(|x| x.as_ref()).flatten(),
-                None => None,
-            };
+        for proj in place.path.iter() {
+            if let Some(sub) = node {
+                node = match proj {
+                    Proj::Field(n) => sub.slots.get(*n).map(|x| x.as_ref()).flatten(),
+                    Proj::Deref => sub.slots.get(0).map(|x| x.as_ref()).flatten(),
+                }
+            }
         }
         node
     }
@@ -88,13 +88,13 @@ impl<T> PlaceStore<T> {
 
     pub fn get_node_mut(&mut self, place: &Place) -> Option<&mut PlaceNode<T>> {
         let mut node = Some(&mut self.store[place.root]);
-        let mut projections = place.path.iter();
-        while let Some(sub) = node {
-            node = match projections.next() {
-                Some(Proj::Field(n)) => (&mut sub.slots[*n]).as_mut(),
-                Some(Proj::Deref) => (&mut sub.slots[0]).as_mut(),
-                None => None,
-            };
+        for proj in place.path.iter() {
+            if let Some(sub) = node {
+                node = match proj {
+                    Proj::Field(n) => (&mut sub.slots[*n]).as_mut(),
+                    Proj::Deref => (&mut sub.slots[0]).as_mut(),
+                }
+            }
         }
         node
     }
