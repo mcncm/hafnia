@@ -186,7 +186,7 @@ impl<'m> Interpreter<'m> {
         // Correctness: this is safe because we can't drop any ancillas here
         let mut circ = self.circ.borrow_mut();
 
-        let lhs = lplace.as_bits(&self.st.env);
+        let lhs = &lplace.as_bits(&self.st.env);
         let (rhs, mut destructor) = match right {
             /*
              * Could consider breakign this out into a separate function
@@ -194,9 +194,10 @@ impl<'m> Interpreter<'m> {
             Operand::Const(value) => {
                 return match op {
                     UnOpKind::Minus => todo!(),
-                    UnOpKind::Not => {
+                    UnOpKind::Linear => {
                         circ.cnot_const(&lhs, value);
                     }
+                    UnOpKind::Not => todo!(),
                     _ => {}
                 }
             }
@@ -216,9 +217,20 @@ impl<'m> Interpreter<'m> {
                     .as_ref()
                     .map(|dest| dest.clone());
                 // Is always safe to put a new one in here?
-                let dest = Destructor::new(&self.circ);
-                let bits = rplace.as_bits(&self.st.env);
-                (bits, Some(dest))
+                let mut dest = Destructor::new(&self.circ);
+                let rhs = rplace.as_bits(&self.st.env);
+
+                // Control first if necessary. Note that this will control
+                // classical bits on classical bits and qubits on qubits.
+                if lplace != rplace {
+                    let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
+                    let quant = util::tee(quant, &mut dest.gates);
+                    // no classical sink because no classical invertibility yet.
+                    let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
+                    circ.mapgate_pair(lhs, &rhs, Some(quant), Some(class));
+                }
+
+                (rhs, Some(dest))
             }
 
             /*
@@ -226,8 +238,19 @@ impl<'m> Interpreter<'m> {
              * default, a move will SWAP.
              */
             Operand::Move(rplace) => {
-                let bits = rplace.as_bits(&self.st.env);
-                (bits, None)
+                let rhs = rplace.as_bits(&self.st.env);
+                // Swap first if necessary. Note that this will swap clasical
+                // bits with classical bits and qubits with qubits.
+                if lplace != rplace {
+                    circ.mapgate_pair(
+                        lhs,
+                        &rhs,
+                        Some(|(_, u, v)| BaseGateQ::Swap(u, v)),
+                        Some(|(_, u, v)| BaseGateC::Swap(u, v)),
+                    );
+                }
+
+                (rhs, None)
             }
         };
 
@@ -246,11 +269,10 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                // FIXME: not correct any more: need to swap first.
-
-                // NOTE: this check defeats the purpose of the abstraction--but
-                // it's convenient for validation!
                 if sink.is_some() {
+                    // NOTE: this check defeats the purpose of the
+                    // abstraction--it doesn't quite work in the classical
+                    // case--but it's convenient for validation!
                     circ.mapgate_sq(&lhs, |u| BaseGateQ::X(u), sink);
                 } else {
                     circ.map_not(&lhs);

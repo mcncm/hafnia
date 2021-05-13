@@ -18,6 +18,44 @@ impl Qasm {
     fn headers(&self) -> String {
         format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
     }
+
+    fn emit_inst(&self, inst: &Inst, f: &mut fmt::Formatter) -> fmt::Result {
+        // FIXME this is a hack! These gates should be replaced at a point
+        // "higher up" that knows about the structure of the program. This isn't
+        // representation; it's content.
+        match inst {
+            Inst::QGate(GateQ { ctrls, base }) => {
+                if ctrls.len() != 0 {
+                    panic!("QASM doesn't support multiple controls");
+                } else {
+                    use BaseGateQ::*;
+                    match base {
+                        Swap(fst, snd) => {
+                            for gate in &[
+                                Cnot {
+                                    ctrl: *fst,
+                                    tgt: *snd,
+                                },
+                                Cnot {
+                                    ctrl: *snd,
+                                    tgt: *fst,
+                                },
+                                Cnot {
+                                    ctrl: *fst,
+                                    tgt: *snd,
+                                },
+                            ] {
+                                write!(f, "{}", gate.fmt_with(self))?;
+                            }
+                            Ok(())
+                        }
+                        gate => write!(f, "{}", gate.fmt_with(self)),
+                    }
+                }
+            }
+            inst => write!(f, "{}", inst.fmt_with(self)),
+        }
+    }
 }
 
 impl FmtWith<Qasm> for BaseGateQ {
@@ -30,7 +68,7 @@ impl FmtWith<Qasm> for BaseGateQ {
             T(tgt) => write!(f, "t q[{}]", tgt),
             Cnot { ctrl, tgt } => write!(f, "cx q[{}], q[{}]", ctrl, tgt),
             TDag(tgt) => write!(f, "tdg q[{}]", tgt),
-            Swap { .. } => todo!(),
+            Swap { .. } => unimplemented!("OpenQASM 2.0 doesn't support SWAP"),
         }
     }
 }
@@ -73,7 +111,7 @@ impl FmtWith<Qasm> for CircuitBuf {
         writeln!(f, "qreg q[{}];", self.qbit_size())?;
         writeln!(f, "creg c[{}];", self.cbit_size())?;
         for inst in self.iter() {
-            write!(f, "{}", inst.fmt_with(qasm))?;
+            qasm.emit_inst(inst, f)?;
         }
         Ok(())
     }
