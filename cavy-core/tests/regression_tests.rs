@@ -9,6 +9,7 @@ test_compiles! {
     /*
     FOUND: 2021-05-12
     FIXED: 2021-05-12
+    CAUSE: Never implemented
     */
     u2_parses {
         fn main () { let x: u2 = 1u2; }
@@ -17,6 +18,7 @@ test_compiles! {
     /*
     FOUND: 2021-05-12
     FIXED: 2021-05-12
+    CAUSE: Incorrect `Value::Unit` default value in values tree.
     */
     const_prop_tuple {
         fn main() {
@@ -27,18 +29,18 @@ test_compiles! {
 
     /*
     FOUND: 2021-05-12
-    FIXED:
+    FIXED: 2021-05-13
+    CAUSE: Dataflow framework statements misordered due to breaking up transfer
+           functions into `pre` and `post` components.
     */
     return_place_linearity {
         fn main() {
             let var = ?47u8;
             var = f(var);
             let num = !var;
-            io num -> my_number;
         }
 
         fn f(number: ?u8) -> ?u8 {
-            number = #number;
             ~number
         }
     }

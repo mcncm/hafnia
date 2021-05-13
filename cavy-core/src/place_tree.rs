@@ -22,6 +22,7 @@ use crate::{
 
 /// A generic store for place-indexed data, backed by a `LocalId` store of
 /// trees.
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PlaceStore<T> {
     store: Store<LocalId, PlaceNode<T>>,
 }
@@ -36,16 +37,24 @@ impl<T> PlaceStore<T> {
 
     /// Insert a value at a place and return the previous value, if any
     pub fn insert(&mut self, place: &Place, val: T) -> Option<T> {
-        let node = self.node_creating(place);
+        let node = self.create_node(place);
         node.this.replace(val)
     }
 
+    pub fn get_root(&self, local: LocalId) -> &PlaceNode<T> {
+        &self.store[local]
+    }
+
+    pub fn get_root_mut(&mut self, local: LocalId) -> &mut PlaceNode<T> {
+        &mut self.store[local]
+    }
+
     pub fn get(&self, place: &Place) -> Option<&T> {
-        self.node_at(place).and_then(|node| node.this.as_ref())
+        self.get_node(place).and_then(|node| node.this.as_ref())
     }
 
     pub fn get_mut(&mut self, place: &Place) -> Option<&mut T> {
-        self.node_at_mut(place).and_then(|node| node.this.as_mut())
+        self.get_node_mut(place).and_then(|node| node.this.as_mut())
     }
 
     /// Iterate over the `Place` tree in postorder from a root.
@@ -56,13 +65,13 @@ impl<T> PlaceStore<T> {
 
     /// Iterate over the `Place` tree in postorder, from a starting path.
     pub fn iter_post_from(&mut self, place: &Place) -> impl Iterator<Item = &T> + '_ {
-        self.node_at(place)
+        self.get_node(place)
             .map(|node| node.iter_post())
             .into_iter()
             .flatten()
     }
 
-    fn node_at(&self, place: &Place) -> Option<&PlaceNode<T>> {
+    pub fn get_node(&self, place: &Place) -> Option<&PlaceNode<T>> {
         let mut node = Some(&self.store[place.root]);
         let mut projections = place.path.iter();
         while let Some(sub) = node {
@@ -77,7 +86,7 @@ impl<T> PlaceStore<T> {
 
     // Hm, ok, this is why people want to write generically over mutability.
 
-    fn node_at_mut(&mut self, place: &Place) -> Option<&mut PlaceNode<T>> {
+    pub fn get_node_mut(&mut self, place: &Place) -> Option<&mut PlaceNode<T>> {
         let mut node = Some(&mut self.store[place.root]);
         let mut projections = place.path.iter();
         while let Some(sub) = node {
@@ -90,8 +99,17 @@ impl<T> PlaceStore<T> {
         node
     }
 
-    /// Get a node at a `Place`, possibly creating nodes along the way.
-    fn node_creating(&mut self, place: &Place) -> &mut PlaceNode<T> {
+    /// Returns a node for a place, creating one if there was previously none.
+    pub fn create_node(&mut self, place: &Place) -> &mut PlaceNode<T> {
+        self.create_node_with(place, |_| ())
+    }
+
+    /// Get a node at a `Place`, creating nodes, and--according to the given
+    /// closure--possibly mutating the path data along the way.
+    pub fn create_node_with<F>(&mut self, place: &Place, mut f: F) -> &mut PlaceNode<T>
+    where
+        F: FnMut(&mut Option<T>),
+    {
         // I just noticed something. This "Store" type is a leaky abstraction. I
         // have to carry around all this knowledge about its
         // implementation everywhere I go.
@@ -101,6 +119,9 @@ impl<T> PlaceStore<T> {
 
         let mut node = &mut self.store[place.root];
         for elem in &place.path {
+            //Call the closure to possibly do something with the data in this
+            // node.
+            f(&mut node.this);
             let slot = match elem {
                 Proj::Field(n) => {
                     let diff = 1 + n.saturating_sub(node.slots.len());
@@ -119,6 +140,12 @@ impl<T> PlaceStore<T> {
         }
         node
     }
+
+    pub fn extend(&mut self, other: Self) {
+        for (this, other) in self.store.iter_mut().zip(other.store.into_iter()) {
+            this.extend(other);
+        }
+    }
 }
 
 impl<T> PlaceStore<T>
@@ -127,9 +154,9 @@ where
 {
     /// Clone a subtree from one path to another
     pub fn clone_subtree(&mut self, to: &Place, from: &Place) -> Result<(), ()> {
-        match self.node_at(from).cloned() {
+        match self.get_node(from).cloned() {
             Some(node) => {
-                *self.node_creating(to) = node;
+                *self.create_node_with(to, |_| ()) = node;
                 Ok(())
             }
             None => Err(()),
@@ -146,7 +173,7 @@ impl<T> FromIterator<PlaceNode<T>> for PlaceStore<T> {
 }
 
 /// A node in a `Place` tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PlaceNode<T> {
     /// Items at this `Place`
     pub this: Option<T>,
@@ -155,13 +182,33 @@ pub struct PlaceNode<T> {
 }
 
 impl<T> PlaceNode<T> {
-    fn iter_post<'a>(&'a self) -> PlaceTreePost<'a, T> {
+    pub fn iter_post<'a>(&'a self) -> PlaceTreePost<'a, T> {
         PlaceTreePost {
             stack: vec![],
             node: self,
             slots: self.slots.iter(),
             end: false,
         }
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        if other.this.is_some() {
+            self.this = other.this;
+        }
+
+        let shorter = std::cmp::min(self.slots.len(), other.slots.len());
+        // How do you zip over part of an iterator?
+        let mut other = other.slots.into_iter();
+        for i in 0..shorter {
+            let other = other.next();
+            match (&mut self.slots[i], other) {
+                (u @ None, Some(v @ Some(_))) => *u = v,
+                (Some(u), Some(Some(v))) => u.extend(v),
+                (_, Some(None)) => {}
+                (_, None) => break,
+            }
+        }
+        self.slots.extend(other);
     }
 }
 

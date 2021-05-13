@@ -288,7 +288,7 @@ macro_rules! interner_type {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Store<Idx, V> {
     backing_store: Vec<V>,
     phantom: PhantomData<Idx>,
@@ -326,6 +326,10 @@ impl<Idx: Index, V> Store<Idx, V> {
 
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, V> {
         self.backing_store.iter_mut()
+    }
+
+    pub fn into_iter(self) -> std::vec::IntoIter<V> {
+        self.backing_store.into_iter()
     }
 
     pub fn extend<It>(&mut self, iter: It)

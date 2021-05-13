@@ -36,7 +36,6 @@ use crate::{context::Context, mir::*, place_tree::PlaceStore, values::Value};
 /// For now, even *this* optimization is intraprocedural. That *must* change.
 pub fn optimize(mir: &mut Mir, _ctx: &Context) {
     for gr in mir.graphs.iter_mut() {
-        use crate::util::FmtWith;
         simpl_graph(gr);
     }
 }

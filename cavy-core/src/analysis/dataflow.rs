@@ -492,10 +492,11 @@ where
 
         // Update the *block tail* state
         self.update_stmt_state(blk, block.stmts.len(), state);
-        self.update_block_state(blk, state);
-
         self.analysis
             .transfer_block_post(state, &block.kind, blk_pt);
+        // Then, the *block state* must be the state at the *very end*: not
+        // during the block tail, but after it.
+        self.update_block_state(blk, state);
     }
 }
 
@@ -534,13 +535,13 @@ where
             let gl = GraphPt { blk, stmt: loc };
             self.analysis.transfer_stmt_post(state, stmt, gl);
             self.update_stmt_state(blk, loc, state);
+            self.analysis.transfer_stmt_pre(state, stmt, gl);
             if loc == 0 {
                 // NOTE: keep this at the end! The `block_state` should be the
                 // *last* state updated, whether at the top or bottom
                 // (`Backward` or `Forward` case, resp.) of the block.
                 self.update_block_state(blk, state);
             }
-            self.analysis.transfer_stmt_pre(state, stmt, gl);
         }
     }
 }

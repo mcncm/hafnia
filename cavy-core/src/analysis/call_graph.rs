@@ -215,9 +215,7 @@ impl<'cg> SccFinder<'cg> {
 
 mod errors {
     use crate::ast::FnId;
-    use crate::context::{Context, SymbolId};
     use crate::source::Span;
-    use crate::util::FmtWith;
     use cavy_macros::Diagnostic;
 
     #[derive(Diagnostic)]
