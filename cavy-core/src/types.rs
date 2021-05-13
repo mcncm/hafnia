@@ -142,7 +142,10 @@ impl TyId {
             Type::Bool | Type::Uint(_) | Type::Q_Bool | Type::Q_Uint(_)
         ) || if let Type::Ref(RefKind::Shrd, inner) = ty {
             let ty = &ctx.types[*inner];
-            matches!(ty, Type::Q_Bool | Type::Q_Uint(_))
+            matches!(
+                ty,
+                Type::Bool | Type::Uint(_) | Type::Q_Bool | Type::Q_Uint(_)
+            )
         } else {
             false
         }

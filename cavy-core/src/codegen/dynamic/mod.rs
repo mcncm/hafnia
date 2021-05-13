@@ -202,19 +202,19 @@ impl<'a> Interpreter<'a> {
 
         // Calling convention:
 
-        let mut locals = st.env.locals.idx_enumerate();
-        let (ret_local, _) = locals.next().unwrap();
+        let mut callee_locals = st.env.locals.idx_enumerate();
+        let (callee_ret_local, _) = callee_locals.next().unwrap();
         // Copy the return location
-        let ret_adrs = ret.as_bits(&self.st.env);
-        st.env.memcpy(&ret_local.into(), &ret_adrs);
-        for (arg, (arg_local, _)) in args.iter().zip(locals) {
-            let arg = match arg {
+        let caller_ret_adr = ret.as_bits(&self.st.env);
+        st.env.memcpy(&callee_ret_local.into(), &caller_ret_adr);
+        for (caller_arg, (callee_arg_local, _)) in args.iter().zip(callee_locals) {
+            let caller_arg = match caller_arg {
                 Operand::Const(_) => unreachable!(),
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
             // Copy the argument locations
-            let arg_adrs = arg.as_bits(&self.st.env);
-            st.env.memcpy(&arg_local.into(), &arg_adrs);
+            let caller_arg_adr = caller_arg.as_bits(&self.st.env);
+            st.env.memcpy(&callee_arg_local.into(), &caller_arg_adr);
         }
 
         // New stack frame
@@ -222,8 +222,6 @@ impl<'a> Interpreter<'a> {
         self.run();
         // Restore interpreter state
         std::mem::swap(&mut self.st, &mut st);
-        // // Copy return value back
-        // self.st.env.mem_copy(ret, &ret_local);
     }
 
     fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {

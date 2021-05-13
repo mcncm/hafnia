@@ -1373,16 +1373,8 @@ mod typing {
                 }
                 And | Or | Xor => {
                     use RefKind::*;
-                    let lty = &self.ctx.types[left];
-                    let rty = &self.ctx.types[right];
-                    match (lty, rty) {
-                        (Type::Ref(Shrd, lty), Type::Ref(Shrd, rty)) => {
-                            if rty == rty && *lty == self.ctx.common.q_bool {
-                                return Ok(left);
-                            }
-                        }
-                        (Type::Bool, Type::Bool) => return Ok(self.ctx.common.bool),
-                        _ => (),
+                    if left == right && left.is_bitlike(self.ctx) {
+                        return Ok(left);
                     }
                 }
             };
@@ -1673,7 +1665,7 @@ mod typing {
         let ty = match &annot.data {
             AnnotKind::Bool => ctx.common.bool,
             AnnotKind::Uint(u) => match u {
-                Uint::U2 => unimplemented!(),
+                Uint::U2 => ctx.common.u2,
                 Uint::U4 => ctx.common.u4,
                 Uint::U8 => ctx.common.u8,
                 Uint::U16 => ctx.common.u16,

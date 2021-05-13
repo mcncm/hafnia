@@ -306,12 +306,10 @@ impl<Idx: Index, V> Store<Idx, V> {
         }
     }
 
-    #[inline]
     pub fn len(&self) -> usize {
         self.backing_store.len()
     }
 
-    #[inline]
     pub fn is_empty(&self) -> bool {
         self.backing_store.is_empty()
     }

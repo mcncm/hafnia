@@ -25,6 +25,7 @@ impl Uint {
     pub fn from_lexeme(lexeme: Lexeme) -> Result<Self, ()> {
         #![allow(clippy::result_unit_err)]
         let u = match lexeme {
+            Lexeme::U2 => Self::U2,
             Lexeme::U4 => Self::U4,
             Lexeme::U8 => Self::U8,
             Lexeme::U16 => Self::U16,

@@ -26,7 +26,7 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::{context::Context, mir::*, values::Value};
+use crate::{context::Context, mir::*, place_tree::PlaceStore, values::Value};
 
 /// Main entry point for compile-time evaluation. This takes the form of a Mir
 /// optimization, which is currently a function taking a mutable reference to
@@ -36,12 +36,13 @@ use crate::{context::Context, mir::*, values::Value};
 /// For now, even *this* optimization is intraprocedural. That *must* change.
 pub fn optimize(mir: &mut Mir, _ctx: &Context) {
     for gr in mir.graphs.iter_mut() {
+        use crate::util::FmtWith;
         simpl_graph(gr);
     }
 }
 
 fn simpl_graph(gr: &mut Graph) {
-    let mut interp = Interpreter::new();
+    let mut interp = Interpreter::new(&gr.locals);
     simpl_block(gr.entry_block, gr, &mut interp);
 }
 
@@ -101,48 +102,15 @@ enum Evaluated {
     No,
 }
 
-struct Environment {
-    backing_store: HashMap<LocalId, Value>,
-}
-
-impl Environment {
-    fn new() -> Self {
-        Self {
-            backing_store: HashMap::new(),
-        }
-    }
-
-    fn get(&self, place: &Place) -> Option<&Value> {
-        self.backing_store
-            .get(&place.root)
-            .and_then(|value| value.follow(&place.path))
-    }
-
-    fn insert(&mut self, place: &Place, value: Value) {
-        match self.backing_store.entry(place.root) {
-            Entry::Occupied(mut e) => {
-                let old = e.get_mut().follow_mut(&place.path);
-                *old = value;
-            }
-            Entry::Vacant(e) => {
-                let mut root = Value::Unit;
-                let slot = root.follow_mut(&place.path);
-                *slot = value;
-                e.insert(root);
-            }
-        };
-    }
-}
-
 struct Interpreter {
-    env: Environment,
+    env: PlaceStore<Value>,
 }
 
 /// A graph-local interpreter for classical computations
 impl Interpreter {
-    fn new() -> Self {
+    fn new(locals: &LocalStore) -> Self {
         Self {
-            env: Environment::new(),
+            env: PlaceStore::new(locals.len()),
         }
     }
 

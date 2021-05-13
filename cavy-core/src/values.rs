@@ -1,11 +1,12 @@
+//! The representaiton of classical values used by the current constant
+//! propagation code, which is due for replacement.
+
+// In fact, I could use the generic place tree that was added recently.
+
 use crate::{ast::Expr, mir::Proj, num::USmall, token::Token};
 use std::fmt;
 
-/// The enum of all the classical Cavy values, comprising the unit type
-/// booleans, integers of several sizes, and the quantized counterparts of these
-/// types. The quantized integer types are all little-endian by default. In
-/// future versions of the compiler, it may be possible to specify the
-/// endianness of the backend.
+/// The enum of primitive classical Cavy values expressible by literals
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(non_camel_case_types)]
 pub enum Value {
@@ -20,11 +21,6 @@ pub enum Value {
     U8(u8),
     U16(u16),
     U32(u32),
-
-    // All composite types are to be represented as lists
-    List(Vec<Value>),
-
-    // Provisional, experimental type
     Ord,
 }
 
@@ -39,8 +35,7 @@ impl Value {
             U8(_) => 8,
             U16(_) => 16,
             U32(_) => 32,
-            List(elems) => elems.iter().map(|elem| elem.size()).sum(),
-            Ord => todo!(),
+            Ord => 0,
         }
     }
 
@@ -60,82 +55,8 @@ impl Value {
             Value::U8(n) => (0..8).map(|i| (n & (1 << i)) != 0).collect(),
             Value::U16(n) => (0..16).map(|i| (n & (1 << i)) != 0).collect(),
             Value::U32(n) => (0..32).map(|i| (n & (1 << i)) != 0).collect(),
-            Value::List(elems) => elems.iter().map(|e| e.bits()).flatten().collect(),
-            Value::Ord => panic!(),
+            Value::Ord => unimplemented!(),
         }
-    }
-
-    pub fn is_truthy(&self) -> bool {
-        match self {
-            Self::Bool(x) => *x,
-            _ => todo!(),
-        }
-    }
-
-    /// Get the path positions held by this value
-    pub fn slot(&self, elem: usize) -> Option<&Value> {
-        match self {
-            Value::List(factors) => {
-                if elem < factors.len() {
-                    Some(&factors[elem])
-                } else {
-                    None
-                }
-            }
-            // Invariant enforced by type checker
-            _ => unreachable!(),
-        }
-    }
-
-    /// Get a mutable reference to a slot, whether or not there was a value
-    /// there before. If there was not, put a unit value into it.
-    pub fn slot_mut(&mut self, elem: usize) -> &mut Value {
-        if let Value::Unit = self {
-            let factors = std::iter::repeat(Value::Unit).take(elem).collect();
-            *self = Value::List(factors);
-        }
-
-        match self {
-            Value::List(factors) => {
-                if elem >= factors.len() {
-                    let diff = 1 + elem - factors.len();
-                    factors.extend(std::iter::repeat(Value::Unit).take(diff));
-                }
-                &mut factors[elem]
-            }
-            // Invariant enforced by type checker
-            _ => {
-                unreachable!()
-            }
-        }
-    }
-
-    /// Follow a path to its end from this value
-    pub fn follow(&self, path: &[Proj]) -> Option<&Value> {
-        let mut node = Some(self);
-        for elem in path {
-            // Derefs don't affect anything!
-            if let Proj::Field(field) = elem {
-                node = match node {
-                    Some(node) => node.slot(*field),
-                    None => return None,
-                }
-            }
-        }
-        node
-    }
-
-    // NOTE Is it a "problem" that the `follow` and `follow_mut` APIs aren't
-    // symmetric?
-    /// Follow a path to its end from this value, mutably:
-    pub fn follow_mut(&mut self, path: &[Proj]) -> &mut Value {
-        let mut node = self;
-        for elem in path {
-            if let Proj::Field(field) = elem {
-                node = node.slot_mut(*field);
-            }
-        }
-        node
     }
 }
 
@@ -175,12 +96,6 @@ impl From<u32> for Value {
     }
 }
 
-impl From<()> for Value {
-    fn from((): ()) -> Value {
-        Value::List(vec![])
-    }
-}
-
 impl fmt::Display for Value {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -195,17 +110,7 @@ impl fmt::Display for Value {
             U8(x) =>       write!(f, "{}", x),
             U16(x) =>      write!(f, "{}", x),
             U32(x) =>      write!(f, "{}", x),
-
-            List(data) => {
-                let repr = data
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                write!(f, "({})", repr)
-            }
-
-            Ord => f.write_str("ord"),
+            Ord =>         f.write_str("ord"),
         }
     }
 }

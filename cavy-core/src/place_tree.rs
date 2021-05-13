@@ -27,10 +27,11 @@ pub struct PlaceStore<T> {
 }
 
 impl<T> PlaceStore<T> {
-    pub fn new() -> Self {
-        Self {
-            store: Store::new(),
-        }
+    pub fn new(locals: usize) -> Self {
+        let store = std::iter::from_fn(|| Some(PlaceNode::default()))
+            .take(locals)
+            .collect();
+        Self { store }
     }
 
     /// Insert a value at a place and return the previous value, if any
@@ -66,8 +67,8 @@ impl<T> PlaceStore<T> {
         let mut projections = place.path.iter();
         while let Some(sub) = node {
             node = match projections.next() {
-                Some(Proj::Field(n)) => sub.slots[*n].as_ref(),
-                Some(Proj::Deref) => sub.slots[0].as_ref(),
+                Some(Proj::Field(n)) => sub.slots.get(*n).map(|x| x.as_ref()).flatten(),
+                Some(Proj::Deref) => sub.slots.get(0).map(|x| x.as_ref()).flatten(),
                 None => None,
             };
         }
@@ -120,6 +121,22 @@ impl<T> PlaceStore<T> {
     }
 }
 
+impl<T> PlaceStore<T>
+where
+    T: Clone,
+{
+    /// Clone a subtree from one path to another
+    pub fn clone_subtree(&mut self, to: &Place, from: &Place) -> Result<(), ()> {
+        match self.node_at(from).cloned() {
+            Some(node) => {
+                *self.node_creating(to) = node;
+                Ok(())
+            }
+            None => Err(()),
+        }
+    }
+}
+
 impl<T> FromIterator<PlaceNode<T>> for PlaceStore<T> {
     fn from_iter<I: IntoIterator<Item = PlaceNode<T>>>(iter: I) -> Self {
         Self {
@@ -129,7 +146,7 @@ impl<T> FromIterator<PlaceNode<T>> for PlaceStore<T> {
 }
 
 /// A node in a `Place` tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PlaceNode<T> {
     /// Items at this `Place`
     pub this: Option<T>,

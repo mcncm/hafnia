@@ -913,7 +913,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
                 span,
                 data: AnnotKind::Bool,
             },
-            U4 | U8 | U16 | U32 => Annot {
+            U2 | U4 | U8 | U16 | U32 => Annot {
                 span,
                 data: AnnotKind::Uint(Uint::from_lexeme(lexeme).unwrap()),
             },
