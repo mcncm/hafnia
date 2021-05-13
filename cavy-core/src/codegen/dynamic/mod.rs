@@ -1,6 +1,7 @@
 mod compute;
 mod gates;
 mod mem;
+mod util;
 
 use mem::BitArray;
 
@@ -25,6 +26,12 @@ use crate::{
 
 use self::mem::{AsBits, BitAllocators};
 
+/// Main entry point for this module
+pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
+    let interp = Interpreter::new(mir, ctx);
+    interp.exec()
+}
+
 pub struct Environment<'a> {
     /// The graph locals. We must hold onto these here in order to have access
     /// to type information and be able look up bit addresses
@@ -40,15 +47,9 @@ pub struct Environment<'a> {
 
 impl<'a> Environment<'a> {
     fn new(locals: &'a LocalStore, ctx: &'a Context<'a>) -> Self {
-        let bindings = locals.iter().map(|loc| EnvEntry {
-            bits: BitArray::uninit(loc.ty.size(ctx)),
-            // It's *never* the callee's responsibility to destroy its
-            // arguments; they're either owned, or they outlive the function.
-            destructor: None,
-        });
         Self {
             locals,
-            bindings: Store::from_iter(bindings),
+            bindings: Store::new(),
             ctx,
         }
     }
@@ -146,6 +147,12 @@ impl<'a> InterpreterState<'a> {
 }
 
 struct CircAssembler<'a> {
+    // NOTE: I'm no longer sure that this comment is true. I think that we can
+    // statically allocate everything, including temporaries used when
+    // inserting/expanding gates.
+    //
+    // But, for now, there is probably no *harm* in leaving this ownership
+    // relationship as-is. We can evolve it later.
     /// This needs to own the allocators because we might use temporaries while
     /// inserting gates.
     allocators: BitAllocators,
@@ -175,12 +182,13 @@ impl<'a> Interpreter<'a> {
     pub fn new(mir: &'a Mir, ctx: &'a Context<'a>) -> Self {
         let entry_point = mir.entry_point.unwrap();
         let gr = &mir.graphs[entry_point];
-        Self {
-            circ: Rc::new(RefCell::new(CircAssembler::new(ctx))),
-            st: InterpreterState::new(gr, ctx),
-            ctx,
-            mir,
-        }
+        let mut st = InterpreterState::new(gr, ctx);
+        let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
+
+        // Initialize the environment
+        st.env
+            .mem_init(std::iter::empty(), &mut circ.borrow_mut().allocators);
+        Self { ctx, circ, st, mir }
     }
 
     /// Run the interpreter, starting from its entry block.
@@ -200,22 +208,19 @@ impl<'a> Interpreter<'a> {
         let gr = &self.mir.graphs[*callee];
         let mut st = InterpreterState::new(gr, self.ctx);
 
-        // Calling convention:
-
-        let mut callee_locals = st.env.locals.idx_enumerate();
-        let (callee_ret_local, _) = callee_locals.next().unwrap();
-        // Copy the return location
+        // Calling conventions
         let caller_ret_adr = ret.as_bits(&self.st.env);
-        st.env.memcpy(&callee_ret_local.into(), &caller_ret_adr);
-        for (caller_arg, (callee_arg_local, _)) in args.iter().zip(callee_locals) {
+        let caller_arg_adrs = args.iter().map(|caller_arg| {
             let caller_arg = match caller_arg {
                 Operand::Const(_) => unreachable!(),
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
-            // Copy the argument locations
-            let caller_arg_adr = caller_arg.as_bits(&self.st.env);
-            st.env.memcpy(&callee_arg_local.into(), &caller_arg_adr);
-        }
+            caller_arg.as_bits(&self.st.env)
+        });
+        // Copy the parameters locations
+        let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
+        st.env
+            .mem_init(params, &mut self.circ.borrow_mut().allocators);
 
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);

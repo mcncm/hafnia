@@ -1,4 +1,4 @@
-use crate::{arch::MeasurementMode, circuit::*};
+use crate::{arch::MeasurementMode, circuit::*, values::Value};
 
 use super::{mem::*, *};
 
@@ -12,8 +12,8 @@ impl<'a> Drop for Destructor<'a> {
 
 // This impl should deal with received *bits*.
 impl<'m> CircAssembler<'m> {
-    // This method needs mutable access to the circuit as well as the allocator.
-    pub fn push_qgate<G>(&mut self, gate: G, _st: &InterpreterState)
+    // This method needs mutable access to the selfuit as well as the allocator.
+    pub fn push_qgate<G>(&mut self, gate: G)
     where
         GateQ: From<G>,
     {
@@ -26,7 +26,7 @@ impl<'m> CircAssembler<'m> {
         self.gate_buf.push(gate);
     }
 
-    pub fn push_cgate<G>(&mut self, gate: G, _st: &InterpreterState)
+    pub fn push_cgate<G>(&mut self, gate: G)
     where
         GateC: From<G>,
     {
@@ -97,7 +97,12 @@ impl<'m> CircAssembler<'m> {
 
     /// Measure some qubits and store them in classical bits
     pub fn meas(&mut self, srcs: &[Qbit], tgts: &[Cbit], _st: &InterpreterState) {
-        debug_assert!(srcs.len() == tgts.len());
+        debug_assert!(
+            srcs.len() == tgts.len(),
+            "got {} source qbits and {} target bits",
+            srcs.len(),
+            tgts.len()
+        );
         for (&src, &tgt) in srcs.iter().zip(tgts) {
             self.gate_buf.push(Inst::Meas(src, tgt));
         }
@@ -118,6 +123,196 @@ impl<'m> CircAssembler<'m> {
         self.free(addrs.iter().copied(), free_state);
         for &addr in addrs {
             self.gate_buf.push(Inst::QFree(addr, free_state));
+        }
+    }
+
+    pub fn cnot_const(&mut self, obj: &BitSlice, value: &Value) {
+        let const_bits = value.bits();
+        if obj.cbits.is_empty() {
+            for (idx, u) in obj.qbits.iter().enumerate() {
+                if const_bits[idx] {
+                    self.push_qgate(BaseGateQ::X(*u));
+                }
+            }
+        } else if obj.qbits.is_empty() {
+            for (idx, u) in obj.cbits.iter().enumerate() {
+                if const_bits[idx] {
+                    self.push_cgate(BaseGateC::Not(*u));
+                }
+            }
+        } else {
+            panic!("`cnot_const` must be called on all-classical or all-quantum lhs");
+        }
+    }
+
+    // == basic gate mappers ==
+
+    /// Apply a Z gate to all the qubits
+    pub fn map_phase(&mut self, obj: &BitSlice) {
+        let phase = |(_, u)| BaseGateQ::Z(u);
+        // An interesting bit of Rust type noise.
+        self.mapgate_single::<_, _>(obj, Some(phase), None::<fn(_) -> _>);
+    }
+
+    /// Apply an H gate to all the qubits
+    pub fn map_hadamard(&mut self, obj: &BitSlice) {
+        let split = |(_, u)| BaseGateQ::H(u);
+        // An interesting bit of Rust type noise.
+        self.mapgate_single::<_, _>(obj, Some(split), None::<fn(_) -> _>);
+    }
+
+    /// NOT all the bits--classical and quantum--in one place
+    pub fn map_not(&mut self, obj: &BitSlice) {
+        let notq = |(_, u)| BaseGateQ::X(u);
+        let notc = |(_, u)| BaseGateC::Not(u);
+        self.mapgate_single(obj, Some(notq), Some(notc));
+    }
+
+    /// CNOT all the bits--classical and quantum--in two places, which should be
+    /// of the same size.
+    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice) {
+        let swapq = |(_, ctrl, tgt)| BaseGateQ::Cnot { ctrl, tgt };
+        let swapc = |(_, ctrl, tgt)| BaseGateC::Cnot { ctrl, tgt };
+        self.mapgate_pair(ctrl, tgt, Some(swapq), Some(swapc));
+    }
+
+    /// SWAP all the bits--classical and quantum--in two places, which should be
+    /// of the same size.
+    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice) {
+        let swapq = |(_, q1, q2)| BaseGateQ::Swap(q1, q2);
+        let swapc = |(_, c1, c2)| BaseGateC::Swap(c1, c2);
+        self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
+    }
+
+    // == teed gate mappers
+
+    /// The main optionally-teed mapping function for the common use case of
+    /// single-qubit gates
+    pub fn mapgate_sq<F>(&mut self, obj: &BitSlice, f: F, sink: Option<&mut Vec<GateQ>>)
+    where
+        F: Fn(Qbit) -> BaseGateQ,
+    {
+        let fp = |(_, q)| f(q);
+
+        match sink {
+            Some(sink) => {
+                let tee_f = util::tee(fp, sink);
+                self.mapgate_single::<_, _>(obj, Some(tee_f), None::<fn(_) -> _>);
+            }
+            None => {
+                self.mapgate_single::<_, _>(obj, Some(fp), None::<fn(_) -> _>);
+            }
+        }
+    }
+
+    /// The main optionally-teed mapping function for the common use case of
+    /// two-qubit gates
+    pub fn mapgate_tq<F>(
+        &mut self,
+        fst: &BitSlice,
+        snd: &BitSlice,
+        f: F,
+        sink: Option<&mut Vec<BaseGateQ>>,
+    ) where
+        F: Fn(Qbit, Qbit) -> BaseGateQ,
+    {
+        let fp = |(_, q1, q2)| f(q1, q2);
+
+        match sink {
+            Some(sink) => {
+                let tee_f = util::tee(fp, sink);
+                self.mapgate_pair::<_, _, _, GateC>(fst, snd, Some(tee_f), None::<fn(_) -> GateC>);
+            }
+            None => {
+                self.mapgate_pair::<_, _, _, GateC>(fst, snd, Some(fp), None::<fn(_) -> GateC>);
+            }
+        }
+    }
+
+    /// Map single-bit classical and quantum gates over an allocation
+    pub fn mapgate_single<'a, Q, C>(
+        &'a mut self,
+        obj: &BitSlice,
+        quant: Option<Q>,
+        class: Option<C>,
+    ) where
+        Q: FnMut((usize, Qbit)) -> BaseGateQ,
+        C: FnMut((usize, Cbit)) -> BaseGateC,
+    {
+        if let Some(mut f) = quant {
+            for (idx, qbit) in obj.qbits.iter().enumerate() {
+                // NOTE: these copies shouldn't be necessary--this will be fixed
+                // when arrays become iterable in Rust 2021.
+                let gate = f((idx, *qbit));
+                self.push_qgate(gate);
+            }
+        }
+
+        if let Some(mut g) = class {
+            for (idx, cbit) in obj.cbits.iter().enumerate() {
+                let gate = g((idx, *cbit));
+                self.push_cgate(gate);
+            }
+        }
+    }
+
+    /// Map two-bit classical and quantum gates over an allocation
+    pub fn mapgate_pair<'a, Q, C, GQ, GC>(
+        &'a mut self,
+        fst: &BitSlice,
+        snd: &BitSlice,
+        quant: Option<Q>,
+        class: Option<C>,
+    ) where
+        Q: FnMut((usize, Qbit, Qbit)) -> GQ,
+        C: FnMut((usize, Cbit, Cbit)) -> GC,
+        GateQ: From<GQ>,
+        GateC: From<GC>,
+    {
+        if let Some(mut f) = quant {
+            for ((idx, fst_qbit), snd_qbit) in fst.qbits.iter().enumerate().zip(snd.qbits.iter()) {
+                let gate = f((idx, *fst_qbit, *snd_qbit));
+                self.push_qgate(gate);
+            }
+        }
+
+        if let Some(mut g) = class {
+            for ((idx, fst_cbit), snd_cbit) in fst.cbits.iter().enumerate().zip(snd.cbits.iter()) {
+                let gate = g((idx, *fst_cbit, *snd_cbit));
+                self.push_cgate(gate);
+            }
+        }
+    }
+
+    /// Map two-bit classical-quantum gates over a pair of allocations. Unlike
+    /// the previous two-allocation mapping function, this one has a definite
+    /// direction: `ctrl` controls `snd`.
+    pub fn mapgate_class_ctrl<'a, F>(&'a mut self, ctrl: &BitSlice, tgt: &BitSlice, f: Option<F>)
+    where
+        F: FnMut((usize, Cbit, Qbit)) -> BaseGateQ,
+    {
+        if let Some(mut f) = f {
+            for ((idx, ctrl_bit), tgt_bit) in ctrl.cbits.iter().enumerate().zip(tgt.qbits.iter()) {
+                let gate = f((idx, *ctrl_bit, *tgt_bit));
+                let mut gate = <GateC>::from(gate);
+                gate.ctrls.push(*ctrl_bit);
+                self.push_cgate(gate);
+            }
+        }
+    }
+
+    /// Free an allocation, calling a closure to determine how to free each bit.
+    pub fn map_free<'a, Q, C>(&'a mut self, obj: &BitSlice, mut quant: Q, mut class: C)
+    where
+        Q: FnMut((usize, Qbit)) -> FreeState,
+        C: FnMut((usize, Cbit)) -> FreeState,
+    {
+        for (idx, qbit) in obj.qbits.iter().enumerate() {
+            self.free_qbit(*qbit, quant((idx, *qbit)));
+        }
+
+        for (idx, cbit) in obj.cbits.iter().enumerate() {
+            self.free_cbit(*cbit, class((idx, *cbit)));
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::ops;
+use std::ops::{self, Deref};
 
 use crate::{
     circuit::{Cbit, FreeState, Inst, Qbit},
@@ -74,37 +74,12 @@ impl BitAllocators {
             class: CbAlloc::new(Counter::new()),
         }
     }
-}
 
-impl<'c> CircAssembler<'c> {
-    fn alloc_class(&mut self, n: usize) -> Vec<Cbit> {
-        let gates = &mut self.gate_buf;
-        (&mut self.allocators.class)
-            .take(n)
-            .map(|bit| {
-                gates.push(Inst::CInit(bit));
-                bit
-            })
-            .collect()
-    }
-
-    fn alloc_quant(&mut self, n: usize) -> Vec<Qbit> {
-        let gates = &mut self.gate_buf;
-        (&mut self.allocators.quant)
-            .take(n)
-            .map(|bit| {
-                gates.push(Inst::QInit(bit));
-                bit
-            })
-            .collect()
-    }
-
-    /// Allocate space for a given type
-    pub fn alloc_for_ty(&mut self, ty: TyId) -> BitArray {
-        let sz = ty.size(self.ctx);
+    pub fn alloc_for_ty(&mut self, ty: TyId, ctx: &Context) -> BitArray {
+        let sz = ty.size(&ctx);
         BitArray {
-            cbits: self.alloc_class(sz.csize),
-            qbits: self.alloc_quant(sz.qsize),
+            cbits: self.class.by_ref().take(sz.csize).collect(),
+            qbits: self.quant.by_ref().take(sz.qsize).collect(),
         }
     }
 }
@@ -151,7 +126,7 @@ impl<'a> Environment<'a> {
     {
         let value = right.as_bits(self).to_owned();
         let bits = &mut self.bits_at_mut(left);
-        bits.copy_from_slice(&value.as_ref());
+        bits.copy_from_slice(&value.as_slice());
     }
 
     /// Get a sub-allocation at a place.
@@ -183,29 +158,35 @@ impl<'a> Environment<'a> {
     }
 }
 
-impl Default for EnvEntry<'_> {
-    fn default() -> Self {
-        Self {
-            bits: BitArray::new(),
-            destructor: None,
+impl Environment<'_> {
+    /// Initialize the locals addresses: copy parameter addresses and allocate
+    /// fresh bits for the rest of them, from the *global allocator*.
+    pub fn mem_init<'a, I>(&mut self, mut params: I, allocator: &mut BitAllocators)
+    where
+        I: Iterator<Item = BitSlice<'a>>,
+    {
+        let mut locals = self.locals.iter();
+        // First copy in the parameter addresses
+        while let Some(param) = params.next() {
+            locals.next().expect("more parameters than locals");
+            let entry = EnvEntry {
+                bits: param.to_owned(),
+                destructor: None,
+            };
+            self.bindings.insert(entry);
         }
-    }
-}
+        // Then assign bits for the rest of the locals from the global allocator
+        for local in locals {
+            let ty = local.ty;
+            let bits = allocator.alloc_for_ty(ty, self.ctx);
+            let entry = EnvEntry {
+                bits,
+                destructor: None,
+            };
+            self.bindings.insert(entry);
+        }
 
-impl<'m> Interpreter<'m> {
-    // Allocate space for a given place: this requires access to the graph in
-    // the *current* stack frame, so this method can't (or shouldn't, without
-    // introducing too much coupling) belong to the global allocator. The
-    // problem here is that `Place` is borrowed (from `self.x`), so how will we
-    // take `&mut self`?
-    //
-    // NOTE: should this return a view of the allocated memory, rather than an
-    // owned address array?
-    pub fn alloc_for_place(&mut self, place: &Place) -> BitArray {
-        let ty = self.st.env.locals.type_of(&place, self.ctx);
-        let bitset = self.circ.borrow_mut().alloc_for_ty(ty);
-        self.st.env.memcpy(place, &bitset);
-        bitset
+        debug_assert_eq!(self.locals.len(), self.bindings.len());
     }
 }
 
@@ -219,7 +200,7 @@ pub struct BitArray {
 }
 
 impl BitArray {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
             qbits: Vec::new(),
             cbits: Vec::new(),
@@ -247,17 +228,17 @@ impl BitArray {
     }
 
     pub fn copy_from_slice(&mut self, slice: &BitSlice) {
-        self.as_ref_mut().copy_from_slice(slice);
+        self.as_slice_mut().copy_from_slice(slice);
     }
 
-    pub fn as_ref(&self) -> BitSlice {
+    pub fn as_slice(&self) -> BitSlice {
         BitSlice {
             qbits: &self.qbits,
             cbits: &self.cbits,
         }
     }
 
-    pub fn as_ref_mut(&mut self) -> BitSliceMut {
+    pub fn as_slice_mut(&mut self) -> BitSliceMut {
         BitSliceMut {
             qbits: &mut self.qbits,
             cbits: &mut self.cbits,
@@ -343,6 +324,6 @@ impl AsBits for LocalId {
 
 impl AsBits for BitArray {
     fn as_bits<'a>(&'a self, _env: &'a Environment) -> BitSlice<'a> {
-        self.as_ref()
+        self.as_slice()
     }
 }
