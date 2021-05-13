@@ -120,7 +120,7 @@ fn get_config(argmatches: &ArgMatches) -> Config {
 }
 
 fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
-    use target::{latex, qasm, summary};
+    use target::{debug, latex, qasm, summary};
 
     let perf = argmatches.is_present("perf");
     let nwtarg = argmatches.is_present("nwtarg");
@@ -143,6 +143,8 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
             package,
         }),
         Some("summary") => Box::new(summary::Summary { perf }),
+        Some("debug") => Box::new(debug::SerialDebug {}),
+        Some("null") => Box::new(target::null::NullTarget()),
         _ => unreachable!(),
     }
 }

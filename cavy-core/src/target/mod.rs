@@ -4,6 +4,7 @@
 
 use crate::{circuit::CircuitBuf, context::Context, util::FmtWith};
 
+pub mod debug;
 pub mod latex;
 pub mod qasm;
 #[cfg(feature = "summary")]

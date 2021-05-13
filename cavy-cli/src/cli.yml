@@ -23,6 +23,7 @@ args:
         - "summary"
         - "qasm"
         - "latex"
+        - "debug"
         - "null"
       default_value: "qasm"
   - standalone:

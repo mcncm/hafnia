@@ -2,6 +2,7 @@
 //! anything that mutates the Mir.
 
 use crate::{context::Context, mir::Mir, session::Config};
+mod util;
 
 /// Type of an optimization routine
 type OptFn = dyn Fn(&mut Mir, &Context);
