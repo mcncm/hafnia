@@ -262,15 +262,19 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
     use RvalueKind::*;
     match stmt {
         StmtKind::Assn(lhs, rhs) => {
-            insert_action(use_data, lhs, pt, Action::Def);
             match &rhs.data {
                 BinOp(_, fst, snd) => {
                     use_operand(use_data, fst, pt);
                     use_operand(use_data, snd, pt);
                 }
                 UnOp(_, op) | Use(op) => use_operand(use_data, op, pt),
-                Ref(_, place) => insert_action(use_data, place, pt, Action::Use),
+                Ref(_, place) => {
+                    insert_action(use_data, place, pt, Action::Use);
+                    // Don't collect an action for the lhs
+                    return;
+                }
             }
+            insert_action(use_data, lhs, pt, Action::Def);
         }
         StmtKind::Assert(place) => {
             insert_action(use_data, place, pt, Action::Use);
@@ -307,8 +311,8 @@ fn collect_tail(use_data: &mut PlaceStore<UseData>, tail: &BlockKind, pt: GraphP
 
 fn use_operand(use_data: &mut PlaceStore<UseData>, op: &Operand, pt: GraphPt) {
     match op {
-        Operand::Const(_) => {}
-        Operand::Copy(place) | Operand::Move(place) => {
+        Operand::Const(_) | Operand::Copy(_) => {}
+        Operand::Move(place) => {
             insert_action(use_data, place, pt, Action::Use);
         }
     }

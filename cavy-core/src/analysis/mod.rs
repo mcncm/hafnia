@@ -91,7 +91,7 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         let mut call_graph_ana = call_graph::CallGraphAnalysis::new(&mut call_sites);
         let mut subcond_ana = subconditional::SubCondAnalysis::new(&mut sub_cond_data, &());
         let mut unsafe_ana = unsafety::UnsafeAnalysis::new(&mir.graph_data, fn_id);
-        SummaryRunner::new(fn_id, gr, ctx, &mut errs)
+        SummaryRunner::new(gr, ctx, Some(&mut errs))
             .register(&mut call_graph_ana)
             .register(&mut subcond_ana)
             .register(&mut unsafe_ana)

@@ -64,6 +64,7 @@ decl_opts![
     constprop:  1,
     def_use_chains: 1,
     unipotence: 2,
+    cleanup: 1,
 ];
 
 /// Main entry point for the `opt` module

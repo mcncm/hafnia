@@ -42,8 +42,12 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_use(&mut self, lplace: &Place, op: &Operand) {
+        let mut circ = self.circ.borrow_mut();
+        let lhs = lplace.as_bits(&self.st.env);
         match op {
-            Operand::Const(value) => {}
+            Operand::Const(value) => {
+                circ.cnot_const(&lhs, value);
+            }
             Operand::Copy(rplace) => {
                 // NOTE not actually correct
                 self.st.env.memcpy(lplace, rplace);
@@ -285,8 +289,8 @@ impl<'m> Interpreter<'m> {
 
             UnOpKind::Linear => {
                 let not = |(_, ctrl, tgt)| BaseGateQ::X(tgt);
-                // FIXME which side where?
-                circ.mapgate_class_ctrl(&lhs, &rhs, Some(not));
+                // This is the correct argument order. That could be confusing.
+                circ.mapgate_class_ctrl(&rhs, &lhs, Some(not));
             }
             UnOpKind::Delin => {
                 circ.meas(&rhs.qbits, &lhs.cbits, &self.st);

@@ -621,9 +621,8 @@ pub trait SummaryAnalysis {
 // NOTE: this can, and maybe should, be made lazy.
 /// An execution environment for simple analyses.
 pub struct SummaryRunner<'a> {
-    fn_id: FnId,
     gr: &'a mir::Graph,
-    errs: &'a mut ErrorBuf,
+    errs: Option<&'a mut ErrorBuf>,
     ctx: &'a Context<'a>,
     analyses: Vec<&'a mut dyn SummaryAnalysis>,
 }
@@ -631,9 +630,8 @@ pub struct SummaryRunner<'a> {
 // NOTE that we might eventually want `SummaryRunner` and `DataflowRunner` to
 // implement some common trait.
 impl<'a> SummaryRunner<'a> {
-    pub fn new(fn_id: FnId, gr: &'a Graph, ctx: &'a Context, errs: &'a mut ErrorBuf) -> Self {
+    pub fn new(gr: &'a Graph, ctx: &'a Context, errs: Option<&'a mut ErrorBuf>) -> Self {
         Self {
-            fn_id,
             gr,
             errs,
             ctx,
@@ -669,8 +667,10 @@ impl<'a> SummaryRunner<'a> {
     }
 
     fn check(&mut self) {
-        for ana in &mut self.analyses {
-            ana.check(&mut self.errs);
+        if let Some(errs) = &mut self.errs {
+            for ana in &mut self.analyses {
+                ana.check(errs);
+            }
         }
     }
 }

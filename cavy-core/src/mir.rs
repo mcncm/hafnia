@@ -11,6 +11,8 @@
 //! To compare these data structures with with the analogous ones in rustc, take
 //! a look at the module in `rustc_middle/src/mir/mod.rs`.
 
+use smallvec::SmallVec;
+
 use crate::store_type;
 use crate::{
     ast::{self, Ast, FnId},
@@ -560,6 +562,50 @@ impl Rvalue {
             data: RvalueKind::Use(Operand::Const(Value::Unit)),
         }
     }
+
+    /// Get all the read by the Rvalue
+    pub fn places<'a>(&'a self) -> SmallVec<[&Place; 2]> {
+        use RvalueKind::*;
+        let mut places = SmallVec::new();
+        let mut f = |op: &'a Operand| op.place().map(|pl| places.push(pl));
+        // what a monstrosity
+        match &self.data {
+            BinOp(_, lop, rop) => {
+                f(lop);
+                f(rop);
+            }
+            UnOp(_, op) => {
+                f(op);
+            }
+            Ref(_, pl) => places.push(pl),
+            Use(op) => {
+                f(op);
+            }
+        };
+        places
+    }
+
+    /// Get all the read by the Rvalue, mutably
+    pub fn places_mut<'a>(&'a mut self) -> SmallVec<[&mut Place; 2]> {
+        use RvalueKind::*;
+        let mut places = SmallVec::new();
+        let mut f = |op: &'a mut Operand| op.place_mut().map(|pl| places.push(pl));
+        // what a monstrosity
+        match &mut self.data {
+            BinOp(_, lop, rop) => {
+                f(lop);
+                f(rop);
+            }
+            UnOp(_, op) => {
+                f(op);
+            }
+            Ref(_, pl) => places.push(pl),
+            Use(op) => {
+                f(op);
+            }
+        };
+        places
+    }
 }
 
 #[derive(Debug)]
@@ -571,6 +617,13 @@ pub enum Operand {
 
 impl Operand {
     pub fn place(&self) -> Option<&Place> {
+        match self {
+            Self::Const(_) => None,
+            Self::Copy(place) | Self::Move(place) => Some(place),
+        }
+    }
+
+    pub fn place_mut(&mut self) -> Option<&mut Place> {
         match self {
             Self::Const(_) => None,
             Self::Copy(place) | Self::Move(place) => Some(place),
