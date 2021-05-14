@@ -57,6 +57,10 @@ impl<T> PlaceStore<T> {
         self.get_node_mut(place).and_then(|node| node.this.as_mut())
     }
 
+    pub fn iter(&self) -> std::slice::Iter<'_, PlaceNode<T>> {
+        self.store.iter()
+    }
+
     /// Iterate over the `Place` tree in postorder from a root.
     pub fn iter_post(&self, local: LocalId) -> impl Iterator<Item = &T> + '_ {
         let node = &self.store[local];

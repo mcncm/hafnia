@@ -1,4 +1,4 @@
-//! This module handles the mir-level "optimizations", which are understood as
+//! This module def_use_chainsmir-level "optimizations", which are understood as
 //! anything that mutates the Mir.
 
 use crate::{context::Context, mir::Mir, session::Config};
@@ -57,8 +57,12 @@ macro_rules! decl_opts {
 
 // And this is where we actually declare the optimizations we wish to use,
 // together with the optimization level at which they turn on.
+//
+// The entry-point function in the corresponding module must be named
+// `optimize`.
 decl_opts![
     constprop:  1,
+    def_use_chains: 1,
     unipotence: 2,
 ];
 

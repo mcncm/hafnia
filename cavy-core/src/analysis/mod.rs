@@ -41,9 +41,9 @@ mod unsafety;
 
 use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
 
-use self::dataflow::{
-    Backward, DataflowAnalysis, DataflowCtx, DataflowRunner, Forward, SummaryRunner,
-};
+use self::dataflow::{Backward, DataflowAnalysis, DataflowCtx, DataflowRunner, Forward};
+
+pub use dataflow::{SummaryAnalysis, SummaryRunner};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
