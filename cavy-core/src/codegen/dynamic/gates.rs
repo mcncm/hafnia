@@ -147,43 +147,98 @@ impl<'m> CircAssembler<'m> {
 
     // == basic gate mappers ==
 
+    /*
+    NOTE if anyone is reading this, I know this needs better abstraction(s).
+    There's just *too much* code here. One day it will be beautiful and elegant,
+    but today it just has to work.
+    */
+
     /// Apply a Z gate to all the qubits
-    pub fn map_phase(&mut self, obj: &BitSlice) {
-        let phase = |(_, u)| BaseGateQ::Z(u);
-        // An interesting bit of Rust type noise.
-        self.mapgate_single::<_, _>(obj, Some(phase), None::<fn(_) -> _>);
+    pub fn map_phase(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let phase = |u| BaseGateQ::Z(u);
+        self.mapgate_sq(obj, phase, sink);
     }
 
     /// Apply an H gate to all the qubits
-    pub fn map_hadamard(&mut self, obj: &BitSlice) {
-        let split = |(_, u)| BaseGateQ::H(u);
-        // An interesting bit of Rust type noise.
-        self.mapgate_single::<_, _>(obj, Some(split), None::<fn(_) -> _>);
+    pub fn map_hadamard(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let split = |u| BaseGateQ::H(u);
+        self.mapgate_sq(obj, split, sink)
     }
 
     /// NOT all the bits--classical and quantum--in one place
-    pub fn map_not(&mut self, obj: &BitSlice) {
+    pub fn map_not(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
         let notq = |(_, u)| BaseGateQ::X(u);
         let notc = |(_, u)| BaseGateC::Not(u);
-        self.mapgate_single(obj, Some(notq), Some(notc));
+        // no `mapgate_sq` for both cbits and qbits yet
+        if let Some(sink) = sink {
+            let notq = util::tee(notq, sink);
+            self.mapgate_single(obj, Some(notq), Some(notc));
+        } else {
+            self.mapgate_single(obj, Some(notq), Some(notc));
+        }
     }
 
     /// CNOT all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice) {
-        let swapq = |(_, ctrl, tgt)| BaseGateQ::Cnot { ctrl, tgt };
-        let swapc = |(_, ctrl, tgt)| BaseGateC::Cnot { ctrl, tgt };
-        self.mapgate_pair(ctrl, tgt, Some(swapq), Some(swapc));
+    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let ctrlq = |(_, ctrl, tgt)| BaseGateQ::Cnot { ctrl, tgt };
+        let ctrlc = |(_, ctrl, tgt)| BaseGateC::Cnot { ctrl, tgt };
+
+        if let Some(sink) = sink {
+            let ctrlq = util::tee(ctrlq, sink);
+            self.mapgate_pair(ctrl, tgt, Some(ctrlq), Some(ctrlc));
+        } else {
+            self.mapgate_pair(ctrl, tgt, Some(ctrlq), Some(ctrlc));
+        }
     }
 
     /// SWAP all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice) {
+    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
         let swapq = |(_, q1, q2)| BaseGateQ::Swap(q1, q2);
         let swapc = |(_, c1, c2)| BaseGateC::Swap(c1, c2);
-        self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
+
+        if let Some(sink) = sink {
+            let swapq = util::tee(swapq, sink);
+            self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
+        } else {
+            self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
+        }
     }
 
+    pub fn map_ccnot(
+        &mut self,
+        tgt: &BitSlice,
+        fst: &BitSlice,
+        fst_sign: bool,
+        snd: &BitSlice,
+        snd_sign: bool,
+        sink: Option<&mut Vec<GateQ>>,
+    ) {
+        let quant = |(idx, fst, snd)| {
+            let lhs = tgt.qbits[idx];
+            // Correctness: fst != lhs, snd != lhs
+            GateQ {
+                ctrls: vec![(fst, fst_sign), (snd, snd_sign)],
+                base: BaseGateQ::X(lhs),
+            }
+        };
+        let class = |(idx, fst, snd)| {
+            let lhs = tgt.cbits[idx];
+            // The correctness assumption above doesn't hold here!
+            GateC {
+                ctrls: vec![(fst, snd_sign), (snd, fst_sign)],
+                base: BaseGateC::Not(lhs).into(),
+            }
+        };
+
+        if let Some(sink) = sink {
+            let quant = util::tee(quant, sink);
+            self.mapgate_pair(fst, snd, Some(quant), Some(class));
+        } else {
+            self.mapgate_pair(fst, snd, Some(quant), Some(class));
+        }
+    }
     // == teed gate mappers
 
     /// The main optionally-teed mapping function for the common use case of
@@ -197,10 +252,10 @@ impl<'m> CircAssembler<'m> {
         match sink {
             Some(sink) => {
                 let tee_f = util::tee(fp, sink);
-                self.mapgate_single::<_, _>(obj, Some(tee_f), None::<fn(_) -> _>);
+                self.mapgate_single::<_, _, _, GateC>(obj, Some(tee_f), None::<fn(_) -> _>);
             }
             None => {
-                self.mapgate_single::<_, _>(obj, Some(fp), None::<fn(_) -> _>);
+                self.mapgate_single::<_, _, _, GateC>(obj, Some(fp), None::<fn(_) -> _>);
             }
         }
     }
@@ -230,14 +285,16 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Map single-bit classical and quantum gates over an allocation
-    pub fn mapgate_single<'a, Q, C>(
+    pub fn mapgate_single<'a, Q, C, GQ, GC>(
         &'a mut self,
         obj: &BitSlice,
         quant: Option<Q>,
         class: Option<C>,
     ) where
-        Q: FnMut((usize, Qbit)) -> BaseGateQ,
-        C: FnMut((usize, Cbit)) -> BaseGateC,
+        Q: FnMut((usize, Qbit)) -> GQ,
+        C: FnMut((usize, Cbit)) -> GC,
+        GateQ: From<GQ>,
+        GateC: From<GC>,
     {
         if let Some(mut f) = quant {
             for (idx, qbit) in obj.qbits.iter().enumerate() {
@@ -295,7 +352,9 @@ impl<'m> CircAssembler<'m> {
             for ((idx, ctrl_bit), tgt_bit) in ctrl.cbits.iter().enumerate().zip(tgt.qbits.iter()) {
                 let gate = f((idx, *ctrl_bit, *tgt_bit));
                 let mut gate = <GateC>::from(gate);
-                gate.ctrls.push(*ctrl_bit);
+                // FIXME this is sort of a stopgap to get the code to compile;
+                // it's not really correct once we have classical uncomputation.
+                gate.ctrls.push((*ctrl_bit, true));
                 self.push_cgate(gate);
             }
         }

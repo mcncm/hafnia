@@ -49,7 +49,7 @@ pub enum BaseGateQ {
 /// These are gates that might decompose into more primitive base gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateQ {
-    pub ctrls: Vec<Qbit>,
+    pub ctrls: Vec<(Qbit, bool)>,
     pub base: BaseGateQ,
 }
 
@@ -88,7 +88,7 @@ impl From<BaseGateC> for BaseGate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateC {
-    pub ctrls: Vec<Cbit>,
+    pub ctrls: Vec<(Cbit, bool)>,
     pub base: BaseGate,
 }
 
@@ -258,7 +258,10 @@ impl MaxBits for BaseGateQ {
 
 impl MaxBits for GateQ {
     fn max_qbit(&self) -> Option<Qbit> {
-        std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_qbit())
+        std::cmp::max(
+            self.ctrls.iter().map(|(u, _)| u).max().cloned(),
+            self.base.max_qbit(),
+        )
     }
 
     fn max_cbit(&self) -> Option<Cbit> {
@@ -304,7 +307,10 @@ impl MaxBits for GateC {
     }
 
     fn max_cbit(&self) -> Option<Cbit> {
-        std::cmp::max(self.ctrls.iter().max().cloned(), self.base.max_cbit())
+        std::cmp::max(
+            self.ctrls.iter().map(|(u, _)| u).max().cloned(),
+            self.base.max_cbit(),
+        )
     }
 }
 

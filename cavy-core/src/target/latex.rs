@@ -160,7 +160,7 @@ enum Elem {
     // Quantum gates
     X, Z, H, T, TDag,
     // A quantum control label with a distance to its target
-    QCtrl(isize),
+    QCtrl(isize, bool),
     // A swap label with a distance to its target
     Swap(isize),
     // A control target
@@ -169,7 +169,7 @@ enum Elem {
     // in order to have no incoming wires.
     CTarg(Option<isize>),
     // An classical control label with a distance to its target
-    CCtrl(isize),
+    CCtrl(isize, bool),
     // A swap target
     TargX,
     // Trash a qubit
@@ -207,7 +207,8 @@ impl FmtWith<LaTeX> for Elem {
             H => f.write_str(r"\gate{H}"),
             T => f.write_str(r"\gate{T}"),
             TDag => f.write_str(r"\gate{T^\dag}"),
-            QCtrl(dist) => write!(f, r"\ctrl{{{}}}", dist),
+            QCtrl(dist, true) => write!(f, r"\ctrl{{{}}}", dist),
+            QCtrl(dist, false) => write!(f, r"\octrl{{{}}}", dist),
             Targ => f.write_str(r"\targ{}"),
             CTarg(dist) => {
                 if latex.uses_nwtarg() {
@@ -222,12 +223,15 @@ impl FmtWith<LaTeX> for Elem {
                 }
                 Ok(())
             }
-            CCtrl(dist) => {
+            CCtrl(dist, true) => {
                 if !matches!(latex.package, Quantikz { .. }) {
                     todo!();
                 }
 
                 write!(f, r"\cwbend{{{}}}", dist)
+            }
+            CCtrl(_dist, false) => {
+                todo!();
             }
             Swap(dist) => write!(f, r"\swap{{{}}}", dist),
             TargX => f.write_str(r"\targX{}"),
@@ -554,7 +558,7 @@ impl<'l> LayoutArray<'l> {
             Cnot { ctrl, tgt } => {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);
-                ctrls.push((ctrl, Elem::QCtrl(dist)));
+                ctrls.push((ctrl, Elem::QCtrl(dist, true)));
                 (tgt, Elem::Targ)
             }
             Swap(u, v) => {
@@ -566,9 +570,10 @@ impl<'l> LayoutArray<'l> {
         };
 
         for ctrl in gate.ctrls.into_iter() {
-            let ctrl = self.qwire(ctrl);
+            let sign = ctrl.1;
+            let ctrl = self.qwire(ctrl.0);
             let dist = self.dist(ctrl, base.0);
-            ctrls.push((ctrl, Elem::QCtrl(dist)));
+            ctrls.push((ctrl, Elem::QCtrl(dist, sign)));
         }
 
         if !(ctrls.is_empty()) {
@@ -583,16 +588,18 @@ impl<'l> LayoutArray<'l> {
 
     fn push_cgate(&mut self, gate: GateC) {
         if gate.ctrls.len() > 0 {
-            // Let's special-case this like mad
+            // Let's special-case this like mad: only build the circuit for
+            // classical control from one bit.
             if gate.ctrls.len() == 1 {
                 match gate.base {
                     C(_) => {}
                     Q(baseq) => match baseq {
                         BaseGateQ::X(tgt) => {
                             let src = gate.ctrls[0];
-                            let (src, tgt) = (self.cwire(src), self.qwire(tgt));
+                            let sign = src.1;
+                            let (src, tgt) = (self.cwire(src.0), self.qwire(tgt));
                             let dist = self.dist(src, tgt);
-                            let src = (src, Elem::CCtrl(dist));
+                            let src = (src, Elem::CCtrl(dist, sign));
                             let tgt = (tgt, Elem::X);
                             self.insert_multiple(vec![src, tgt]);
                         }

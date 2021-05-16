@@ -28,7 +28,7 @@ impl<'m> Interpreter<'m> {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
             RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
-            RvalueKind::Ref(_, rplace) => self.st.env.memcpy(place, rplace),
+            RvalueKind::Ref(kind, rplace) => self.compute_ref(kind, place, rplace),
             RvalueKind::Use(op) => self.compute_use(place, op),
         };
     }
@@ -49,14 +49,43 @@ impl<'m> Interpreter<'m> {
                 circ.cnot_const(&lhs, value);
             }
             Operand::Copy(rplace) => {
-                // NOTE not actually correct
+                // NOTE not correct
                 self.st.env.memcpy(lplace, rplace);
             }
-            // NOTE: When is this correct/safe? When should we swap? Can we
-            // always mem_copy?
+            // ASSUMPTION: we're always going to copy shared references, and
+            // their destructors will never mutate.
             Operand::Move(rplace) => {
-                self.st.env.memcpy(lplace, rplace);
+                let rhs = rplace.as_bits(&self.st.env);
+                // swap unconditionally
+                if lplace != rplace {
+                    let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
+                    let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
+                    circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
+                }
             }
+        }
+    }
+
+    pub fn compute_ref(&mut self, kind: &RefKind, lplace: &Place, rplace: &Place) {
+        let parent = self.st.env.bindings[rplace.root]
+            .destructor
+            .as_ref()
+            .map(|dest| dest.clone());
+        // Is always safe to put a new one in here?
+        let mut dest = Destructor::new(&self.circ);
+        let rhs = rplace.as_bits(&self.st.env);
+        let lhs = lplace.as_bits(&self.st.env);
+
+        let mut circ = self.circ.borrow_mut();
+
+        // Control first if necessary. Note that this will control
+        // classical bits on classical bits and qubits on qubits.
+        if lplace != rplace {
+            let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
+            let quant = util::tee(quant, &mut dest.gates);
+            // FIXME no classical sink because no classical invertibility yet.
+            let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
+            circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
         }
     }
 
@@ -114,22 +143,50 @@ impl<'m> Interpreter<'m> {
         }
     }
 
-    fn compute_copy_copy_binop(&mut self, place: &Place, op: &BinOpKind, fst: &Place, snd: &Place) {
+    fn compute_copy_copy_binop(
+        &mut self,
+        place: &Place,
+        op: &BinOpKind,
+        fst_place: &Place,
+        snd_place: &Place,
+    ) {
         use BinOpKind::*;
         // Correctness: this is safe because we can't destroy a reference during
         // a binop.
         let mut circ = self.circ.borrow_mut();
 
-        let mut destructor = Destructor::from_parents(&[fst, snd], self);
+        let mut destructor = Destructor::from_parents(&[fst_place, snd_place], self);
         let sink = &mut destructor.gates;
 
         let lhs = &place.as_bits(&self.st.env);
-        let fst = &fst.as_bits(&self.st.env);
-        let snd = &snd.as_bits(&self.st.env);
+        let fst = &fst_place.as_bits(&self.st.env);
+        let snd = &snd_place.as_bits(&self.st.env);
 
         match op {
-            Equal => {}
-            Nequal => {}
+            Equal => {
+                if self.st.env.type_of(fst_place) != self.ctx.common.shrd_q_bool {
+                    // for larger types, we have to take the AND of the XNORs,
+                    // which means allocating intermediates. This isn't
+                    // something we're going to be able to tackle in five
+                    // minutes.
+                    unimplemented!();
+                }
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_not(lhs, Some(sink));
+            }
+            Nequal => {
+                if self.st.env.type_of(fst_place) != self.ctx.common.shrd_q_bool {
+                    // for larger types, we have to take the AND of the XNORs,
+                    // which means allocating intermediates. This isn't
+                    // something we're going to be able to tackle in five
+                    // minutes.
+                    unimplemented!();
+                }
+                // For `&?bool`s, though, NEQUAL == XOR.
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
+            }
             DotDot => {}
             Plus => {}
             Minus => {}
@@ -137,28 +194,25 @@ impl<'m> Interpreter<'m> {
             Mod => {}
             Less => {}
             Greater => {}
-            Swap => {}
-            And => {
-                let quant = |(idx, fst, snd)| {
-                    let lhs = lhs.qbits[idx];
-                    GateQ {
-                        ctrls: vec![fst, snd],
-                        base: BaseGateQ::X(lhs),
-                    }
-                };
-                let quant = util::tee(quant, sink);
-
-                let class = |(idx, fst, snd)| {
-                    let lhs = lhs.cbits[idx];
-                    GateC {
-                        ctrls: vec![fst, snd],
-                        base: BaseGateC::Not(lhs).into(),
-                    }
-                };
-                circ.mapgate_pair(fst, snd, Some(quant), Some(class));
+            Swap => {
+                circ.map_swap(fst, snd, Some(sink));
             }
-            Or => {}
-            Xor => {}
+
+            And => {
+                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink));
+            }
+
+            Or => {
+                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink));
+                circ.map_not(lhs, Some(sink));
+            }
+
+            Xor => {
+                // NOTE: the control and target arguments here are in the
+                // *correct* order, they're just confusing. You can refactor later.
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
+            }
         }
 
         self.st.env.bindings[place.root]
@@ -227,11 +281,7 @@ impl<'m> Interpreter<'m> {
                 // Control first if necessary. Note that this will control
                 // classical bits on classical bits and qubits on qubits.
                 if lplace != rplace {
-                    let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
-                    let quant = util::tee(quant, &mut dest.gates);
-                    // no classical sink because no classical invertibility yet.
-                    let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
-                    circ.mapgate_pair(lhs, &rhs, Some(quant), Some(class));
+                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates));
                 }
 
                 (rhs, Some(dest))
@@ -273,18 +323,11 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                if sink.is_some() {
-                    // NOTE: this check defeats the purpose of the
-                    // abstraction--it doesn't quite work in the classical
-                    // case--but it's convenient for validation!
-                    circ.mapgate_sq(&lhs, |u| BaseGateQ::X(u), sink);
-                } else {
-                    circ.map_not(&lhs);
-                }
+                circ.map_not(&lhs, sink);
             }
 
             UnOpKind::Split => {
-                circ.map_hadamard(&lhs);
+                circ.map_hadamard(&lhs, None);
             }
 
             UnOpKind::Linear => {

@@ -67,6 +67,7 @@ fn optimize_graph(gr: &mut Graph) {
         })
         .flatten()
         .collect();
+
     // Next, build the chains.
     let chains = build_chains(single_def_use);
     // And then *apply* the chains to rewrite the graph.
@@ -85,13 +86,13 @@ fn apply_defuse_chain(gr: &mut Graph, mut chain: Vec<GraphPt>) {
         Some(pt) => pt,
         None => return,
     };
-    let place = get_lhs_at(gr, first).unwrap();
+    let mut place = get_lhs_at(gr, first).unwrap();
     let mut prev = place.clone();
     for pt in chain {
-        prev = replace_places_at(gr, pt, &place, &prev, false)
+        prev = replace_places_at(gr, pt, &mut place, &prev, false)
             .expect("mid-chain points should have an lhs");
     }
-    replace_places_at(gr, last, &place, &prev, true);
+    replace_places_at(gr, last, &mut place, &prev, true);
 }
 
 /// `replace_lhs` true if the left-hand-side should be replaced; false if only the rhs
@@ -99,7 +100,7 @@ fn apply_defuse_chain(gr: &mut Graph, mut chain: Vec<GraphPt>) {
 fn replace_places_at(
     gr: &mut Graph,
     pt: GraphPt,
-    place: &Place,
+    place: &mut Place,
     prev: &Place,
     last: bool,
 ) -> Option<Place> {
@@ -108,8 +109,28 @@ fn replace_places_at(
         let stmt = &mut block.stmts[pt.stmt];
         use StmtKind::*;
         match &mut stmt.kind {
-            Assn(lhs, rhs) => {
-                replace_places_rv(rhs, place, prev);
+            Assn(lhs, rv) => {
+                use RvalueKind::*;
+                match &mut rv.data {
+                    BinOp(_, lop, rop) => {
+                        replace_place_op(lop, place, prev);
+                        replace_place_op(rop, place, prev);
+                        // NOTE: binary operators break chains; here we change the
+                        // place we're reassigning with to the new lhs. This is
+                        // stateful and bad, and impossible to understand.
+                        *place = lhs.clone();
+                    }
+                    UnOp(_, op) | Use(op) => replace_place_op(op, place, prev),
+                    Ref(_, pl) => {
+                        *pl = place.clone();
+                        // NOTE: references break chains; here we change the
+                        // place we're reassigning with to the new lhs. This is
+                        // stateful and bad, and impossible to understand. Also,
+                        // references don't *have* to do this; figuring out how
+                        // to be rid of it would be another good optimization.
+                        *place = lhs.clone();
+                    }
+                }
                 if !last {
                     return Some(std::mem::replace(lhs, place.clone()));
                 }
@@ -146,18 +167,6 @@ fn replace_places_at(
         }
     };
     None
-}
-
-fn replace_places_rv(rv: &mut Rvalue, place: &Place, prev: &Place) {
-    use RvalueKind::*;
-    match &mut rv.data {
-        BinOp(_, lop, rop) => {
-            replace_place_op(lop, place, prev);
-            replace_place_op(rop, place, prev);
-        }
-        UnOp(_, op) | Use(op) => replace_place_op(op, place, prev),
-        Ref(_, pl) => *pl = place.clone(),
-    }
 }
 
 fn replace_place_op(op: &mut Operand, place: &Place, prev: &Place) {
@@ -262,6 +271,7 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
     use RvalueKind::*;
     match stmt {
         StmtKind::Assn(lhs, rhs) => {
+            insert_action(use_data, lhs, pt, Action::Def);
             match &rhs.data {
                 BinOp(_, fst, snd) => {
                     use_operand(use_data, fst, pt);
@@ -270,11 +280,8 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
                 UnOp(_, op) | Use(op) => use_operand(use_data, op, pt),
                 Ref(_, place) => {
                     insert_action(use_data, place, pt, Action::Use);
-                    // Don't collect an action for the lhs
-                    return;
                 }
             }
-            insert_action(use_data, lhs, pt, Action::Def);
         }
         StmtKind::Assert(place) => {
             insert_action(use_data, place, pt, Action::Use);
@@ -311,8 +318,8 @@ fn collect_tail(use_data: &mut PlaceStore<UseData>, tail: &BlockKind, pt: GraphP
 
 fn use_operand(use_data: &mut PlaceStore<UseData>, op: &Operand, pt: GraphPt) {
     match op {
-        Operand::Const(_) | Operand::Copy(_) => {}
-        Operand::Move(place) => {
+        Operand::Const(_) => {}
+        Operand::Move(place) | Operand::Copy(place) => {
             insert_action(use_data, place, pt, Action::Use);
         }
     }

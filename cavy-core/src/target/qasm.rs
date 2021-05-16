@@ -78,7 +78,12 @@ impl FmtWith<Qasm> for GateQ {
         use BaseGateQ::*;
         match (self.ctrls.len(), self.base) {
             (0, _) => write!(f, "{}", self.base.fmt_with(qasm)),
-            (1, X(tgt)) => write!(f, "cx q[{}], q[{}]", self.ctrls[0], tgt),
+            (1, X(tgt)) => {
+                if !self.ctrls[0].1 {
+                    unimplemented!();
+                }
+                write!(f, "cx q[{}], q[{}]", self.ctrls[0].0, tgt)
+            }
             // Unsupported gate
             _ => unreachable!(),
         }
