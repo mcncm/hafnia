@@ -44,4 +44,18 @@ test_compiles! {
             ~number
         }
     }
+
+    /*
+    FOUND: 2021-05-16
+    FIXED: 2021-05-16
+    CAUSE: in `sub_constr_loan`, was looking for lhs ascriptions from the *root*
+           of the `Place`, not from the end.
+    */
+    pair_borrow {
+        fn main() {
+            let x = ?true;
+            let y = ?true;
+            let pair = (&x, &y);
+        }
+    }
 }

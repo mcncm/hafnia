@@ -272,8 +272,9 @@ impl<'a> RegionInf<'a> {
     /// to manually insert one level of constraint before entering the
     /// `Constraints::insert_sub_constr_{..}` recursive pair.
     fn sub_constr_loan(&mut self, pt: GraphPt, lhs: &Place, ascr: Ascr, rhs_inner: &Place) {
-        let ltree = self.ascriptions.locals[lhs.root]
-            .as_ref()
+        let ltree = self
+            .ascriptions
+            .place_node(lhs)
             .expect("lhs of borrow must have a lifetime");
         let shrt = ltree
             .this

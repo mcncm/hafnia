@@ -45,6 +45,8 @@ const MAX_ARGS: usize = 64;
 /// its right associativity.
 struct Precedence(u8, bool);
 
+// TODO build this table with a macro; it's too easy to get these finnicky
+// numbers wrong.
 fn operator(lexeme: &Lexeme) -> Option<Precedence> {
     let prec = match lexeme {
         Equal => Precedence(0, true),
@@ -55,14 +57,15 @@ fn operator(lexeme: &Lexeme) -> Option<Precedence> {
         EqualEqual => Precedence(1, false),
         Dollar => Precedence(2, false),
         VertVert => Precedence(3, false),
-        AmpAmp => Precedence(4, false),
-        LAngle => Precedence(5, false),
-        RAngle => Precedence(5, false),
-        Plus => Precedence(6, false),
-        Minus => Precedence(6, false),
-        Star => Precedence(7, false),
-        Percent => Precedence(7, false),
-        DotDot => Precedence(8, false),
+        Carot => Precedence(4, false),
+        AmpAmp => Precedence(5, false),
+        LAngle => Precedence(6, false),
+        RAngle => Precedence(6, false),
+        Plus => Precedence(7, false),
+        Minus => Precedence(7, false),
+        Star => Precedence(8, false),
+        Percent => Precedence(8, false),
+        DotDot => Precedence(9, false),
         _ => return None,
     };
     Some(prec)

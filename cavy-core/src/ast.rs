@@ -312,6 +312,7 @@ impl FromToken for BinOp {
             Lexeme::RAngle => Greater,
             Lexeme::VertVert => Or,
             Lexeme::AmpAmp => And,
+            Lexeme::Carot => Xor,
             Lexeme::Dollar => Swap,
             _ => {
                 return Err(());
@@ -343,7 +344,7 @@ impl fmt::Display for BinOpKind {
             Self::Swap => Dollar,
             Self::And => AmpAmp,
             Self::Or => VertVert,
-            Self::Xor => CarotEqual,
+            Self::Xor => Carot,
         };
         write!(f, "{}", repr)
     }
