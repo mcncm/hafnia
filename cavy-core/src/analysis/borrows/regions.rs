@@ -1,7 +1,12 @@
 use std::fmt;
 
 use crate::{
-    analysis::ControlPlaces, mir::*, store::Store, store_type, types::RefKind, util::FmtWith,
+    analysis::controls::{ControlPlaces, CtrlCond},
+    mir::*,
+    store::Store,
+    store_type,
+    types::RefKind,
+    util::FmtWith,
 };
 
 use bitvec::prelude::*;
@@ -18,10 +23,17 @@ pub fn infer_regions<'a>(
     context: &'a DataflowCtx<'a>,
     controls: &'a ControlPlaces,
 ) -> RegionInf<'a> {
+    #[cfg(debug_assertions)]
+    {
+        if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
+            println!("{}", controls);
+        }
+    }
+
     let mut lifetimes = LifetimeStore::new();
     let ascriptions = ascription::ascribe(&mut lifetimes, &context);
 
-    let liveness_ana = liveness::LivenessAnalysis::new(context.gr);
+    let liveness_ana = liveness::LivenessAnalysis::new(context.gr, controls);
     let liveness = DataflowRunner::new(liveness_ana, &context)
         .run()
         .stmt_states;
@@ -188,15 +200,19 @@ impl<'a> RegionInf<'a> {
     fn collect_subtyping_constraints(&mut self) {
         for (pt, stmt) in util::enumerate_stmts(self.context.gr) {
             // The constraint must take effect in the *next* statement. Because
-            // we are not in a tail block, this is always safe.
+            // we are not in a block tail, this is always safe.
             let mut nxt = pt;
             nxt.stmt += 1;
 
             let (lhs, rvalue) = match &stmt.kind {
                 StmtKind::Assn(lhs, Rvalue { data: rvalue, .. }) => (lhs, rvalue),
                 // only assignments (and calls) should generate subtyping constraints
-                _ => return,
+                _ => continue,
             };
+
+            // NOTE: difference from Rust: controls have to outlive the
+            // livetimes of anything that is assigned underneath them.
+            self.control_constr(nxt, lhs, &self.controls[pt.blk]);
 
             match rvalue {
                 RvalueKind::BinOp(_, lop, rop) => {
@@ -244,8 +260,12 @@ impl<'a> RegionInf<'a> {
                         // Here, we *do* need to look forward into the
                         // next block(s) to get the point(s) to insert the statement.
                         for &blk in self.context.gr[pt.blk].successors() {
-                            let pt = GraphPt::first(blk);
-                            self.sub_constr_oper(pt, ret, arg);
+                            let nxt = GraphPt::first(blk);
+                            self.sub_constr_oper(nxt, ret, arg);
+
+                            // NOTE: difference from Rust: the condition must outlive
+                            // anything assigned to underneath it.
+                            self.control_constr(nxt, ret, &self.controls[nxt.blk]);
                         }
                     }
                 }
@@ -314,6 +334,19 @@ impl<'a> RegionInf<'a> {
             }
             (None, None) => {}
             _ => unreachable!("lhs and rhs ascription trees differ"),
+        }
+    }
+
+    /// We must also generate constraints from *controls*, because we can't
+    /// uncompute otherwise! This is a point of departure from the Rust NLL
+    /// algorithm.
+    fn control_constr(&mut self, pt: GraphPt, lhs: &Place, ctrls: &[CtrlCond]) {
+        for ascr in self.ascriptions.place_ascriptions(lhs) {
+            for CtrlCond { place: ctrl, .. } in ctrls {
+                for long in self.ascriptions.place_ascriptions(ctrl) {
+                    self.constraints.outlives_from(long.lt, ascr.lt, pt);
+                }
+            }
         }
     }
 
@@ -739,6 +772,23 @@ mod dbg {
                 }
             }
             Ok(())
+        }
+    }
+
+    impl fmt::Display for ControlPlaces {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("Controls:\n")?;
+            for (blk, ctrls) in self.iter().enumerate() {
+                writeln!(f, "\t{}: {}", blk, Seq(ctrls.clone()))?;
+            }
+            Ok(())
+        }
+    }
+
+    impl fmt::Display for CtrlCond {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let sgn = if self.value { "+" } else { "-" };
+            write!(f, "{} {}", sgn, &self.place)
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
             self,
             regions::{LtId, RegionInf},
         },
-        control_places,
+        controls::control_places,
         dominators::DominatorAnalysis,
         Backward, DataflowCtx, DataflowRunner,
     },

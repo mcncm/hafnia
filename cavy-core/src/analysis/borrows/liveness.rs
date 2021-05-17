@@ -18,7 +18,13 @@
 
 use std::marker::PhantomData;
 
-use crate::{bitset, context::Context, mir::*, store::BitSet};
+use crate::{
+    analysis::controls::{ControlPlaces, CtrlCond},
+    bitset,
+    context::Context,
+    mir::*,
+    store::BitSet,
+};
 
 use super::{
     super::dataflow::{Backward, DataflowAnalysis, Lattice, Statementwise},
@@ -35,15 +41,17 @@ impl Lattice for LiveVars {
     }
 }
 
-pub struct LivenessAnalysis {
+pub struct LivenessAnalysis<'a> {
     /// The number of locals in the CFG
     vars: usize,
+    controls: &'a ControlPlaces,
 }
 
-impl LivenessAnalysis {
-    pub fn new(gr: &Graph) -> Self {
+impl<'a> LivenessAnalysis<'a> {
+    pub fn new(gr: &'a Graph, controls: &'a ControlPlaces) -> Self {
         Self {
             vars: gr.locals.len(),
+            controls,
         }
     }
 
@@ -80,16 +88,28 @@ impl LivenessAnalysis {
     fn gen_operand(&self, state: &mut LiveVars, operand: &Operand) {
         operand.place().map(|place| self.gen(state, place));
     }
+
+    /// This is a difference from Rust: controls have to be live for the
+    /// entirety of all blocks they control, because this is a circuit model,
+    /// and the data has to *be there* to attach control gates to.
+    ///
+    /// Incidentally, this one of the reasons a liveness analysis based on
+    /// `Place`s--rather than variables--might be a lot better.
+    fn gen_controls(&self, state: &mut LiveVars, pt: GraphPt) {
+        for CtrlCond { place, .. } in &self.controls[pt.blk] {
+            self.gen(state, place);
+        }
+    }
 }
 
-impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
+impl<'a> DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis<'a> {
     type Domain = LiveVars;
 
     fn bottom(&self) -> Self::Domain {
         LiveVars::empty(self.vars)
     }
 
-    fn transfer_block_post(&self, state: &mut Self::Domain, block: &BlockKind, _pt: GraphPt) {
+    fn transfer_block_post(&self, state: &mut Self::Domain, block: &BlockKind, pt: GraphPt) {
         match block {
             BlockKind::Goto(_) => {}
             BlockKind::Switch(switch) => self.gen(state, &switch.cond),
@@ -115,6 +135,11 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
                 self.gen(state, &Graph::return_site().into())
             }
         }
+        // *should* only have to do this *once*, at the block tail
+        //
+        // TODO: ok, but is this "post" or "pre"? I can't keep straight my
+        // convention for backwards analyses.
+        self.gen_controls(state, pt);
     }
 
     fn initial_state(&self, _blk: BlockId) -> Self::Domain {

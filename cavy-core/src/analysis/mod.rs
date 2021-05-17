@@ -29,7 +29,7 @@
 //!   difficult if iteration is necessary.
 
 mod call_graph;
-mod controls;
+pub mod controls;
 mod dataflow;
 // mod conditional;
 pub mod borrows;
@@ -58,8 +58,6 @@ pub use self::dataflow::{
 pub use graph::dominators;
 
 pub use dataflow::{SummaryAnalysis, SummaryRunner};
-
-pub use controls::{control_places, ControlPlaces};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();

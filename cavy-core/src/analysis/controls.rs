@@ -24,7 +24,15 @@ pub fn control_blocks(
     controls
 }
 
-pub type ControlPlaces = Store<BlockId, Vec<(Place, bool)>>;
+/// A control condition on a `Place` appearing in some classical control
+/// structure.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct CtrlCond {
+    pub place: Place,
+    pub value: bool,
+}
+
+pub type ControlPlaces = Store<BlockId, Vec<CtrlCond>>;
 
 /// For each block, compute the `Places` it's controlled by, and which value(s)
 /// that control takes on the branch. At the moment, we don't have ML-style
@@ -43,14 +51,14 @@ pub fn control_places(gr: &Graph, postdom: &Store<BlockId, Dominators>) -> Contr
         // that our block does not postdominate. Therefore we can take *any*
         // path up the CFG, since that will give us every dominator.
         while let Some(prev) = preds[curr].first() {
-            if !postdom[*prev].contains(&curr) {
+            if !postdom[*prev].contains(&blk) {
                 match &gr[*prev].kind {
                     BlockKind::Switch(switch) => {
                         let place = switch.cond.clone();
                         let branch = switch.blks.iter().enumerate().find(|(_, &blk)| blk == curr);
                         let (branch, _) = branch.unwrap();
                         let value = branch == 1; // *RIDICULOUS* hackery
-                        ctrls.push((place, value));
+                        ctrls.push(CtrlCond { place, value });
                     }
                     _ => {
                         unreachable!("I assumed that block could not be postdominated")

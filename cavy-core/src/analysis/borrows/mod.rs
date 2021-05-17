@@ -16,8 +16,8 @@ use crate::{cavy_errors::ErrorBuf, context::Context, mir::*, store::Store};
 use crate::{store_type, util::FmtWith};
 
 use super::{
+    controls::ControlPlaces,
     dataflow::{DataflowCtx, DataflowRunner},
-    ControlPlaces,
 };
 
 mod ascription;
@@ -29,13 +29,6 @@ mod util;
 
 /// Main entry point for region inference and borrow checking
 pub fn check(context: DataflowCtx, controls: &ControlPlaces, errs: &mut ErrorBuf) {
-    #[cfg(debug_assertions)]
-    {
-        if context.ctx.conf.phase_config.last_phase == crate::session::Phase::Analysis {
-            println!("{:?}", controls);
-        }
-    }
-
     let regions = regions::infer_regions(&context, controls);
 
     #[cfg(debug_assertions)]
