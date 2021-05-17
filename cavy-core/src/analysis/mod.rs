@@ -29,6 +29,7 @@
 //!   difficult if iteration is necessary.
 
 mod call_graph;
+mod controls;
 mod dataflow;
 // mod conditional;
 pub mod borrows;
@@ -54,7 +55,11 @@ pub use self::dataflow::{
     Statementwise,
 };
 
+pub use graph::dominators;
+
 pub use dataflow::{SummaryAnalysis, SummaryRunner};
+
+pub use controls::{control_places, ControlPlaces};
 
 pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
     let mut errs = ErrorBuf::new();
@@ -88,14 +93,14 @@ pub fn check(mir: &Mir, ctx: &Context) -> Result<(), ErrorBuf> {
         }
 
         let dom = graph::DominatorAnalysis::<Forward>::new(gr);
-        let dominators = DataflowRunner::new(dom, &context).run().block_states;
+        let _dominators = DataflowRunner::new(dom, &context).run().block_states;
 
         let postdom = graph::DominatorAnalysis::<Backward>::new(gr);
         let postdominators = DataflowRunner::new(postdom, &context).run().block_states;
 
-        let _controls = graph::dominators::controls(&dominators, &postdominators);
+        let controls = controls::control_places(gr, &postdominators);
 
-        borrows::check(context, &mut errs);
+        borrows::check(context, &controls, &mut errs);
 
         // == Summary analyses ==
 

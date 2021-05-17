@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::{mir::*, store::Store, store_type, types::RefKind, util::FmtWith};
+use crate::{
+    analysis::ControlPlaces, mir::*, store::Store, store_type, types::RefKind, util::FmtWith,
+};
 
 use bitvec::prelude::*;
 
@@ -12,7 +14,10 @@ use super::{
 };
 
 /// Main entry point for region inference
-pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
+pub fn infer_regions<'a>(
+    context: &'a DataflowCtx<'a>,
+    controls: &'a ControlPlaces,
+) -> RegionInf<'a> {
     let mut lifetimes = LifetimeStore::new();
     let ascriptions = ascription::ascribe(&mut lifetimes, &context);
 
@@ -26,6 +31,7 @@ pub fn infer_regions<'a>(context: &'a DataflowCtx<'a>) -> RegionInf<'a> {
         ascriptions,
         liveness,
         context,
+        controls,
         constraints: Constraints::new(),
     };
 
@@ -110,6 +116,14 @@ pub struct RegionInf<'a> {
     pub liveness: Store<BlockId, Vec<LiveVars>>,
     context: &'a DataflowCtx<'a>,
     constraints: Constraints,
+    /// NOTE: yeah, ok, it's a little wacky and weird for this to be `pub` when,
+    /// for this data structure, it's just used to compute lifetimes, which are
+    /// the *actual* notionally public data. But we're doing this *other* wacky
+    /// thing where we recompute the lifetimes and pass them to the codegen
+    /// module. We'll also need the controls *there*, so... Let's just make this
+    /// public, and then we don't have to do any more plumbing today.
+    /// Ridiculous, I know, but my deadline is imminent.
+    pub controls: &'a ControlPlaces,
 }
 
 struct Constraints {

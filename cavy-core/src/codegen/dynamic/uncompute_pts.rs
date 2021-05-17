@@ -6,7 +6,9 @@ use crate::{
             self,
             regions::{LtId, RegionInf},
         },
-        DataflowCtx,
+        control_places,
+        dominators::DominatorAnalysis,
+        Backward, DataflowCtx, DataflowRunner,
     },
     bitset,
     context::Context,
@@ -38,7 +40,14 @@ use crate::mir::{Graph, GraphPt, LocalId};
 /// backend I'm using right now.
 pub fn uncompute_points(gr: &Graph, ctx: &Context) -> BTreeMap<GraphPt, Vec<LocalId>> {
     let context = DataflowCtx::new(gr, ctx);
-    let regions = borrows::regions::infer_regions(&context);
+
+    // We'll need these again, too, in order to get our controls.
+    let postdom = DominatorAnalysis::<Backward>::new(gr);
+    let postdominators = DataflowRunner::new(postdom, &context).run().block_states;
+
+    let controls = control_places(gr, &postdominators);
+
+    let regions = borrows::regions::infer_regions(&context, &controls);
 
     let lt_ends = lifetime_ends(&regions, gr);
     let mut pts = BTreeMap::new();

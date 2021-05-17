@@ -56,24 +56,3 @@ impl<D: Direction> DataflowAnalysis<D, Blockwise> for DominatorAnalysis<D> {
         bits
     }
 }
-
-// == Some dominator-related computations ==
-
-/// For each block, compute the blocks it's controlled by. Block B is
-/// "controlled" by block A if A dominates B and B does not postdominate A.
-pub fn controls(
-    dom: &Store<BlockId, Dominators>,
-    postdom: &Store<BlockId, Dominators>,
-) -> Store<BlockId, BitSet<BlockId>> {
-    let mut controls = Store::new();
-    for (blk, doms) in dom.idx_enumerate() {
-        let mut ctrls = BitSet::empty(dom.len());
-        for dom in doms.0.iter() {
-            if !postdom[dom].0.contains(&blk) {
-                *ctrls.get_mut(dom).unwrap() = true;
-            }
-        }
-        controls.insert(ctrls);
-    }
-    controls
-}

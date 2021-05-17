@@ -215,6 +215,7 @@ impl FmtWith<LaTeX> for Elem {
                 LiveC if latex.has_nwtarg() => f.write_str(r"\nwtarg{} \cw"),
                 _ => f.write_str(r"\targ{}"),
             },
+
             CTarg(dist) => {
                 if latex.uses_nwtarg() {
                     f.write_str(r"\nwtarg{}")?;
