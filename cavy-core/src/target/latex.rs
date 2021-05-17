@@ -163,10 +163,11 @@ enum Elem {
     QCtrl(isize, bool),
     // A swap label with a distance to its target
     Swap(isize),
-    // A control target
-    Targ,
+    // A control target, with an optional incoming wire
+    Targ(Liveness),
     // A classical control target. With some target options, this uses a custom command
     // in order to have no incoming wires.
+    // NOTE: this should be deprecated in favor of `Targ` with a liveness option
     CTarg(Option<isize>),
     // An classical control label with a distance to its target
     CCtrl(isize, bool),
@@ -209,7 +210,11 @@ impl FmtWith<LaTeX> for Elem {
             TDag => f.write_str(r"\gate{T^\dag}"),
             QCtrl(dist, true) => write!(f, r"\ctrl{{{}}}", dist),
             QCtrl(dist, false) => write!(f, r"\octrl{{{}}}", dist),
-            Targ => f.write_str(r"\targ{}"),
+            Targ(liveness) => match liveness {
+                Dead if latex.has_nwtarg() => f.write_str(r"\nwtarg{}"),
+                LiveC if latex.has_nwtarg() => f.write_str(r"\nwtarg{} \cw"),
+                _ => f.write_str(r"\targ{}"),
+            },
             CTarg(dist) => {
                 if latex.uses_nwtarg() {
                     f.write_str(r"\nwtarg{}")?;
@@ -515,34 +520,33 @@ impl<'l> LayoutArray<'l> {
         }
     }
 
+    // TODO: clean up where and how wires are made live; eliminate some of these
+    // unnecessary clones.
     fn push_qgate(&mut self, gate: GateQ) {
         let (base, mut ctrls) = self.qgate_elems(gate);
-
-        // Maybe this should done *deeper* than this. Or have nothing to do with
-        // gate-pushing at all, instead triggered by a `Live_` instruction.
-        let &(wire, _) = &base;
-        let wire = &mut self.wires[wire];
-        wire.liveness = LiveQ;
 
         if ctrls.is_empty() {
             // We can do this unconditionally instead of inserting: if there’s
             // already a ket, it’s safe to update it, and this doesn’t change the
             // actual gates of the circuit.
-            if let (Elem::X, Occupied(ref mut k @ Elem::Ket("0"))) = (&base.1, wire.last_mut()) {
+            if let (Elem::X, Occupied(ref mut k @ Elem::Ket("0"))) =
+                (&base.1, self.wires[base.0].last_mut())
+            {
                 *k = Elem::Ket("1");
                 return;
             }
             self.insert_single(base.0, base.1);
+            self.wires[base.0].liveness = LiveQ;
             return;
         }
+
+        ctrls.push(base);
+        self.insert_multiple(ctrls.clone());
 
         for (wire, _) in ctrls.iter() {
             let wire = &mut self.wires[*wire];
             wire.liveness = LiveQ;
         }
-
-        ctrls.push(base);
-        self.insert_multiple(ctrls);
     }
 
     fn qgate_elems(&mut self, gate: GateQ) -> ((usize, Elem), Vec<(usize, Elem)>) {
@@ -559,7 +563,9 @@ impl<'l> LayoutArray<'l> {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);
                 ctrls.push((ctrl, Elem::QCtrl(dist, true)));
-                (tgt, Elem::Targ)
+
+                let targ = Elem::Targ(self.wires[tgt].liveness);
+                (tgt, targ)
             }
             Swap(u, v) => {
                 let (u, v) = (self.qwire(u), self.qwire(v));
@@ -577,9 +583,8 @@ impl<'l> LayoutArray<'l> {
         }
 
         if !(ctrls.is_empty()) {
-            let base = &mut base.1;
-            if let Elem::X = base {
-                *base = Elem::Targ;
+            if let Elem::X = base.1 {
+                base.1 = Elem::Targ(self.wires[base.0].liveness);
             }
         }
 
@@ -778,7 +783,7 @@ impl LaTeX {
     }
 
     fn has_nwtarg(&self) -> bool {
-        if let Package::Qcircuit { .. } = self.package {
+        if let Package::Quantikz { .. } = self.package {
             self.standalone
         } else {
             false

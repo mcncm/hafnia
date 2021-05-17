@@ -100,12 +100,12 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
                     ref callee,
                     ..
                 } = **call;
+                // write to the return value
+                self.kill(state, ret);
                 // read from the args
                 for arg in args.iter() {
                     self.gen_operand(state, arg);
                 }
-                // write to the return value
-                self.kill(state, ret);
                 // And then, what do we do with the function? At the moment this
                 // doesn't matter, but it will.
                 let _ = callee;
@@ -124,8 +124,8 @@ impl DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis {
     fn transfer_stmt_post(&self, state: &mut Self::Domain, stmt: &Stmt, _loc: GraphPt) {
         match &stmt.kind {
             StmtKind::Assn(lhs, rhs) => {
-                self.gen_rvalue(state, rhs);
                 self.kill(state, lhs);
+                self.gen_rvalue(state, rhs);
             }
             StmtKind::Assert(place) => self.gen(state, place),
             StmtKind::Drop(_place) => {

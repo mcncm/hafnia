@@ -60,8 +60,8 @@ impl<'m> Interpreter<'m> {
                 circ.cnot_const(&lhs, value);
             }
             Operand::Copy(rplace) => {
-                // NOTE not correct
-                todo!();
+                // a no-op. These *should* be optimized out, but it turns out
+                // they are not.
             }
             // ASSUMPTION: we're always going to copy shared references, and
             // their destructors will never mutate.

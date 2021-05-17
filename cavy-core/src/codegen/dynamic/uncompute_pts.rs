@@ -39,6 +39,7 @@ use crate::mir::{Graph, GraphPt, LocalId};
 pub fn uncompute_points(gr: &Graph, ctx: &Context) -> BTreeMap<GraphPt, Vec<LocalId>> {
     let context = DataflowCtx::new(gr, ctx);
     let regions = borrows::regions::infer_regions(&context);
+
     let lt_ends = lifetime_ends(&regions, gr);
     let mut pts = BTreeMap::new();
     // Nothing like three nested loops to wake you up
