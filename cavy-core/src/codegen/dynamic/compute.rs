@@ -15,11 +15,6 @@ use super::{
     *,
 };
 
-enum Data {
-    Place(Place),
-    Const(()),
-}
-
 impl<'m> Interpreter<'m> {
     pub fn uncompute(&mut self, pt: GraphPt) {
         if let Some(locals) = self.st.uncompute_pts.get(&pt) {
@@ -69,7 +64,7 @@ impl<'m> Interpreter<'m> {
                 let rhs = rplace.as_bits(&self.st);
                 // swap unconditionally
                 if lplace != rplace {
-                    let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
+                    let quant = |(_, fst, snd)| self.st.control(BaseGateQ::Swap(fst, snd));
                     let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
                     circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
                 }
@@ -88,7 +83,7 @@ impl<'m> Interpreter<'m> {
         // Control first if necessary. Note that this will control
         // classical bits on classical bits and qubits on qubits.
         if lplace != rplace {
-            let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
+            let quant = |(_, tgt, ctrl)| self.st.control(BaseGateQ::Cnot { ctrl, tgt });
             let quant = util::tee(quant, &mut dest.gates);
             // FIXME no classical sink because no classical invertibility yet.
             let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
@@ -181,9 +176,9 @@ impl<'m> Interpreter<'m> {
                     // minutes.
                     unimplemented!();
                 }
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
-                circ.map_not(lhs, Some(sink));
+                circ.map_cnot(fst, lhs, Some(sink), &self.st);
+                circ.map_cnot(snd, lhs, Some(sink), &self.st);
+                circ.map_not(lhs, Some(sink), &self.st);
             }
             Nequal => {
                 if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
@@ -194,8 +189,8 @@ impl<'m> Interpreter<'m> {
                     unimplemented!();
                 }
                 // For `&?bool`s, though, NEQUAL == XOR.
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_cnot(fst, lhs, Some(sink), &self.st);
+                circ.map_cnot(snd, lhs, Some(sink), &self.st);
             }
             DotDot => {}
             Plus => {}
@@ -205,23 +200,23 @@ impl<'m> Interpreter<'m> {
             Less => {}
             Greater => {}
             Swap => {
-                circ.map_swap(fst, snd, Some(sink));
+                circ.map_swap(fst, snd, Some(sink), &self.st);
             }
 
             And => {
-                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink));
+                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink), &self.st);
             }
 
             Or => {
-                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink));
-                circ.map_not(lhs, Some(sink));
+                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink), &self.st);
+                circ.map_not(lhs, Some(sink), &self.st);
             }
 
             Xor => {
                 // NOTE: the control and target arguments here are in the
                 // *correct* order, they're just confusing. You can refactor later.
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_cnot(fst, lhs, Some(sink), &self.st);
+                circ.map_cnot(snd, lhs, Some(sink), &self.st);
             }
         }
 
@@ -290,7 +285,7 @@ impl<'m> Interpreter<'m> {
                 // Control first if necessary. Note that this will control
                 // classical bits on classical bits and qubits on qubits.
                 if lplace != rplace {
-                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates));
+                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates), &self.st);
                 }
 
                 (rhs, Some(dest))
@@ -332,14 +327,19 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                circ.map_not(&lhs, sink);
+                circ.map_not(&lhs, sink, &self.st);
             }
 
             UnOpKind::Split => {
-                circ.map_hadamard(&lhs, None);
+                circ.map_hadamard(&lhs, None, &self.st);
             }
 
             UnOpKind::Linear => {
+                // In particular, this should *not* receive a control, even if
+                // it appears under a control, because the created qubits could
+                // outlive any reference.
+                //
+                // ...Right? I *THINK* that's right. Ach, we *really* have to be sure about this case, though.
                 let not = |(_, ctrl, tgt)| BaseGateQ::X(tgt);
                 // This is the correct argument order. That could be confusing.
                 circ.mapgate_class_ctrl(&rhs, &lhs, Some(not));

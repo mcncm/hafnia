@@ -6,16 +6,23 @@ use crate::{
             self,
             regions::{LtId, RegionInf},
         },
-        controls::control_places,
+        controls::{control_places, CtrlCond},
         dominators::DominatorAnalysis,
         Backward, DataflowCtx, DataflowRunner,
     },
     bitset,
     context::Context,
     mir::Stmt,
+    store::Store,
 };
 
-use crate::mir::{Graph, GraphPt, LocalId};
+use crate::mir::{BlockId, Graph, GraphPt, LocalId};
+
+/// Facts about the CFG that we need to know to do codegen
+pub struct CfgFacts {
+    pub controls: Store<BlockId, Vec<CtrlCond>>,
+    pub uncompute_pts: BTreeMap<GraphPt, Vec<LocalId>>,
+}
 
 // NOTE: this is really also where we should compute which controls are on which
 // block, because blocks could also have been moved around.
@@ -38,7 +45,7 @@ use crate::mir::{Graph, GraphPt, LocalId};
 ///
 /// Also, in any case, this might be a bit of an artifact of the style of
 /// backend I'm using right now.
-pub fn uncompute_points(gr: &Graph, ctx: &Context) -> BTreeMap<GraphPt, Vec<LocalId>> {
+pub fn cfg_facts(gr: &Graph, ctx: &Context) -> CfgFacts {
     let context = DataflowCtx::new(gr, ctx);
 
     // We'll need these again, too, in order to get our controls.
@@ -68,7 +75,11 @@ pub fn uncompute_points(gr: &Graph, ctx: &Context) -> BTreeMap<GraphPt, Vec<Loca
             pts.insert(*pt, ending_locals);
         }
     }
-    pts
+
+    CfgFacts {
+        controls,
+        uncompute_pts: pts,
+    }
 }
 
 bitset! { Lifetimes(LtId) }
@@ -89,7 +100,7 @@ fn lifetime_ends(regions: &RegionInf, gr: &Graph) -> BTreeMap<GraphPt, Vec<LtId>
                 lts_at(
                     GraphPt {
                         blk,
-                        stmt: gr[blk].len(),
+                        stmt: gr[blk].stmts.len(),
                     },
                     regions,
                 )
@@ -98,7 +109,7 @@ fn lifetime_ends(regions: &RegionInf, gr: &Graph) -> BTreeMap<GraphPt, Vec<LtId>
         // first statement looks at pred blocks
         let mut state = pred_lts;
         // Include the end of the block, which is not a real statement
-        for loc in 0..=block.stmts.len() {
+        for loc in 0..block.len() {
             let pt = GraphPt { blk, stmt: loc };
             let mut lts = vec![];
             let new_state = lts_at(pt, regions);

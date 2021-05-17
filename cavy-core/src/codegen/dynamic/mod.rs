@@ -17,6 +17,7 @@ use std::{
 };
 
 use crate::{
+    analysis::controls::{ControlPlaces, CtrlCond},
     ast::FnId,
     circuit::{BaseGateQ, CircuitBuf, GateQ},
     context::Context,
@@ -29,18 +30,14 @@ use crate::{
 
 use self::{
     mem::{AsBits, BitAllocators},
-    uncompute_pts::uncompute_points,
+    uncompute_pts::{cfg_facts, CfgFacts},
 };
 
 /// Main entry point for this module
 pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
-    let uncompute_pts: Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>> = mir
-        .graphs
-        .iter()
-        .map(|gr| uncompute_points(gr, ctx))
-        .collect();
+    let mir_facts: Store<FnId, CfgFacts> = mir.graphs.iter().map(|gr| cfg_facts(gr, ctx)).collect();
 
-    let interp = Interpreter::new(mir, &uncompute_pts, ctx);
+    let interp = Interpreter::new(mir, &mir_facts, ctx);
     interp.exec()
 }
 
@@ -97,8 +94,11 @@ impl<'a> Destructor<'a> {
 /// not happy with it. It's weird that mingles data that lives for the duration
 /// of a stack frame with "environment"-like state that changes from statement
 /// to statement.
+///
+/// Maybe partition the immutable-for-a-stack-frame ones from the always-mutable
+/// ones?
 pub struct InterpreterState<'a> {
-    // immutable fields
+    // "immutable" fields
     ctx: &'a Context<'a>,
     /// The forward graph
     blocks: &'a BlockStore,
@@ -108,23 +108,26 @@ pub struct InterpreterState<'a> {
     locals: &'a LocalStore,
     /// Stack memory addresses for each local
     bindings: Store<LocalId, BitArray>,
+    /// The controls on each block
+    controls: &'a ControlPlaces,
     /// The points at which destructors must run
     uncompute_pts: &'a BTreeMap<GraphPt, Vec<LocalId>>,
+
     // stateful fields
-    /// The forest of destructors
+    /// Destructors from inactive blocks, to be merged later. (TODO doesn't work for loops)
+    latent_destructors: HashMap<BlockId, PlaceStore<Rc<Destructor<'a>>>>,
+    /// The active forest of destructors
     destructors: PlaceStore<Rc<Destructor<'a>>>,
+    /// The currently active block
+    blk: BlockId,
     /// Blocks that could get executed next
     next_candidates: Vec<BlockId>,
-    /// Blocks that will not get executed again (TODO this won't work for loops)
+    /// Blocks that will not get executed again (TODO this doesn't work for loops)
     visited_blocks: HashSet<BlockId>,
 }
 
 impl<'a> InterpreterState<'a> {
-    fn new(
-        gr: &'a Graph,
-        uncompute_pts: &'a BTreeMap<GraphPt, Vec<LocalId>>,
-        ctx: &'a Context<'a>,
-    ) -> Self {
+    fn new(gr: &'a Graph, cfg_facts: &'a CfgFacts, ctx: &'a Context<'a>) -> Self {
         Self {
             blocks: gr.get_blocks(),
             preds: gr.get_preds(),
@@ -132,7 +135,10 @@ impl<'a> InterpreterState<'a> {
             visited_blocks: HashSet::new(),
             ctx,
             locals: &gr.locals,
-            uncompute_pts,
+            blk: gr.entry_block,
+            latent_destructors: HashMap::new(),
+            controls: &cfg_facts.controls,
+            uncompute_pts: &cfg_facts.uncompute_pts,
             bindings: Store::new(),
             destructors: PlaceStore::new(gr.locals.len()),
         }
@@ -140,6 +146,10 @@ impl<'a> InterpreterState<'a> {
 
     fn type_of(&self, place: &Place) -> TyId {
         self.locals.type_of(place, self.ctx)
+    }
+
+    fn ctrls(&self) -> &[CtrlCond] {
+        &self.controls[self.blk]
     }
 }
 
@@ -172,20 +182,16 @@ pub struct Interpreter<'a> {
     mir: &'a Mir,
     st: InterpreterState<'a>,
     circ: Rc<RefCell<CircAssembler<'a>>>,
-    uncompute_pts: &'a Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>>,
+    mir_facts: &'a Store<FnId, CfgFacts>,
     ctx: &'a Context<'a>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(
-        mir: &'a Mir,
-        uncompute_pts: &'a Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>>,
-        ctx: &'a Context<'a>,
-    ) -> Self {
+    pub fn new(mir: &'a Mir, mir_facts: &'a Store<FnId, CfgFacts>, ctx: &'a Context<'a>) -> Self {
         let entry_point = mir.entry_point.unwrap();
         let gr = &mir.graphs[entry_point];
-        let gr_uncom_pts = &uncompute_pts[entry_point];
-        let mut st = InterpreterState::new(gr, gr_uncom_pts, ctx);
+        let cfg_facts = &mir_facts[entry_point];
+        let mut st = InterpreterState::new(gr, cfg_facts, ctx);
         let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
 
         // Initialize the environment
@@ -195,7 +201,7 @@ impl<'a> Interpreter<'a> {
             circ,
             st,
             mir,
-            uncompute_pts,
+            mir_facts,
         }
     }
 
@@ -225,8 +231,8 @@ impl<'a> Interpreter<'a> {
             callee, args, ret, ..
         } = call;
         let gr = &self.mir.graphs[*callee];
-        let uncompute_pts = &self.uncompute_pts[*callee];
-        let mut st = InterpreterState::new(gr, uncompute_pts, self.ctx);
+        let cfg_facts = &self.mir_facts[*callee];
+        let mut st = InterpreterState::new(gr, cfg_facts, self.ctx);
 
         // Calling conventions
         let caller_ret_adr = ret.as_bits(&self.st);
@@ -272,6 +278,7 @@ impl<'a> Interpreter<'a> {
 
     fn exec_block(&mut self, blk: BlockId) {
         let block = &self.st.blocks[blk];
+        self.st.blk = blk;
         for (loc, stmt) in block.stmts.iter().enumerate() {
             self.uncompute(GraphPt { blk, stmt: loc });
             self.exec_stmt(stmt);
