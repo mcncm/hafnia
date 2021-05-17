@@ -165,6 +165,17 @@ impl<I: Index> std::ops::BitAnd for BitSet<I> {
     }
 }
 
+impl<I: Index> std::ops::Not for BitSet<I> {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self {
+            data: !self.data,
+            _d: PhantomData,
+        }
+    }
+}
+
 /// Create a newtyped bitset that implements all the right things
 #[macro_export]
 macro_rules! bitset {
@@ -174,11 +185,11 @@ macro_rules! bitset {
 
         impl $name {
             pub fn full(n: usize) -> Self {
-                Self(BitSet::<$I>::full(n))
+                Self(crate::store::BitSet::<$I>::full(n))
             }
 
             pub fn empty(n: usize) -> Self {
-                Self(BitSet::<$I>::empty(n))
+                Self(crate::store::BitSet::<$I>::empty(n))
             }
 
             pub fn contains(&self, idx: &$I) -> bool {
@@ -189,7 +200,10 @@ macro_rules! bitset {
                 self.0.iter()
             }
 
-            pub fn get_mut(&mut self, idx: $I) -> Option<BitRef<'_, bitvec::ptr::Mut>> {
+            pub fn get_mut(
+                &mut self,
+                idx: $I,
+            ) -> Option<bitvec::prelude::BitRef<'_, bitvec::ptr::Mut>> {
                 self.0.get_mut(idx)
             }
 
@@ -218,6 +232,14 @@ macro_rules! bitset {
 
             fn bitand(self, rhs: Self) -> Self::Output {
                 Self(self.0 & rhs.0)
+            }
+        }
+
+        impl std::ops::Not for $name {
+            type Output = Self;
+
+            fn not(self) -> Self::Output {
+                Self(!self.0)
             }
         }
     };

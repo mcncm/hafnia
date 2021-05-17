@@ -21,7 +21,7 @@ mod ascription;
 mod borrow_check;
 mod liveness;
 mod loan_scope;
-mod regions;
+pub mod regions;
 mod util;
 
 /// Main entry point for region inference and borrow checking

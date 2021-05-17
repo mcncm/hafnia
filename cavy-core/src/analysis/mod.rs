@@ -31,7 +31,7 @@
 mod call_graph;
 mod dataflow;
 // mod conditional;
-mod borrows;
+pub mod borrows;
 mod feedback;
 mod fmt;
 mod graph;
@@ -39,9 +39,20 @@ mod linearity;
 mod subconditional;
 mod unsafety;
 
-use crate::{ast::FnId, cavy_errors::ErrorBuf, context::Context, mir::Mir, store::Store};
+use std::collections::BTreeMap;
 
-use self::dataflow::{Backward, DataflowAnalysis, DataflowCtx, DataflowRunner, Forward};
+use crate::{
+    ast::FnId,
+    cavy_errors::ErrorBuf,
+    context::Context,
+    mir::{Graph, GraphPt, LocalId, Mir},
+    store::Store,
+};
+
+pub use self::dataflow::{
+    Backward, Blockwise, DataflowAnalysis, DataflowCtx, DataflowRunner, Forward, Lattice,
+    Statementwise,
+};
 
 pub use dataflow::{SummaryAnalysis, SummaryRunner};
 

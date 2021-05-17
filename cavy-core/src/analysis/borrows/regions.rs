@@ -42,7 +42,10 @@ store_type! { LifetimeStore : LtId -> Lifetime }
 
 /// See [Named
 /// lifetimes](https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#layer-4-named-lifetimes):
-/// this is exactly the data structure j
+/// this is exactly the data structure described there.
+///
+/// I think it should maybe be transposed: instead we'll have a bitvector of all
+/// lifetimes for each graph point.
 pub struct Lifetime {
     /// The "finite" points within the graph
     pts: Store<BlockId, BitVec>,
