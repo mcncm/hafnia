@@ -4,6 +4,7 @@ use crate::{
     ast::{BinOpKind, UnOpKind},
     circuit::{BaseGateC, BaseGateQ, Cbit, FreeState, GateC, Qbit},
     mir::Operand,
+    place_tree::PlaceNode,
     types::RefKind,
     values::Value,
 };
@@ -20,6 +21,16 @@ enum Data {
 }
 
 impl<'m> Interpreter<'m> {
+    pub fn uncompute(&mut self, pt: GraphPt) {
+        if let Some(locals) = self.st.uncompute_pts.get(&pt) {
+            for local in locals {
+                let node = self.st.destructors.get_root_mut(*local);
+                // Run the destructors
+                std::mem::swap(node, &mut PlaceNode::default());
+            }
+        }
+    }
+
     // NOTE: this function is probably just wrong. We probably don't want to
     // delegate all the `memcpy`ing to these `Rvalue`-specific methods.
     //
@@ -67,9 +78,8 @@ impl<'m> Interpreter<'m> {
     }
 
     pub fn compute_ref(&mut self, kind: &RefKind, lplace: &Place, rplace: &Place) {
-        let parent = self.st.destructors.get(rplace).map(|dest| dest.clone());
         // Is always safe to put a new one in here?
-        let mut dest = Destructor::new(&self.circ);
+        let mut dest = Destructor::from_parent(rplace, self);
         let rhs = rplace.as_bits(&self.st);
         let lhs = lplace.as_bits(&self.st);
 
@@ -84,6 +94,9 @@ impl<'m> Interpreter<'m> {
             let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
             circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
         }
+
+        drop(circ);
+        self.st.destructors.insert(lplace, Rc::new(dest));
     }
 
     pub fn compute_drop(&mut self, place: &Place) {
@@ -212,6 +225,9 @@ impl<'m> Interpreter<'m> {
             }
         }
 
+        // We're still holding this borrow. Relinquish it before possibly
+        // executing a destructor.
+        drop(circ);
         // Is there *not* an std method for this?
         self.st.destructors.get_mut(place).map(|dest| {
             *dest = Rc::new(destructor);
@@ -268,9 +284,7 @@ impl<'m> Interpreter<'m> {
              * certain optimizations?
              */
             Operand::Copy(rplace) => {
-                let parent = self.st.destructors.get(rplace).map(|dest| dest.clone());
-                // Is always safe to put a new one in here?
-                let mut dest = Destructor::new(&self.circ);
+                let mut dest = Destructor::from_parent(rplace, &self);
                 let rhs = rplace.as_bits(&self.st);
 
                 // Control first if necessary. Note that this will control
@@ -338,9 +352,8 @@ impl<'m> Interpreter<'m> {
         /*
         Finally, insert the destructor, if there is one, and make it immutable
         for all time.
-
-        FIXME make sure this doesn't run parent destructors?
         */
+        drop(circ);
         if let Some(destructor) = destructor {
             self.st.destructors.insert(lplace, Rc::new(destructor));
         }

@@ -49,7 +49,7 @@ impl Qasm {
                             }
                             Ok(())
                         }
-                        gate => write!(f, "{}", gate.fmt_with(self)),
+                        gate => writeln!(f, "{};", gate.fmt_with(self)),
                     }
                 }
             }

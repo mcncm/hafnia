@@ -1,6 +1,7 @@
 mod compute;
 mod gates;
 mod mem;
+mod uncompute_pts;
 mod util;
 
 use mem::BitArray;
@@ -9,13 +10,14 @@ use smallvec::{smallvec, SmallVec};
 
 use std::{
     cell::{Ref, RefCell},
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     iter::FromIterator,
     ops::RangeFrom,
     rc::Rc,
 };
 
 use crate::{
+    ast::FnId,
     circuit::{BaseGateQ, CircuitBuf, GateQ},
     context::Context,
     mir::*,
@@ -25,11 +27,20 @@ use crate::{
     types::TyId,
 };
 
-use self::mem::{AsBits, BitAllocators};
+use self::{
+    mem::{AsBits, BitAllocators},
+    uncompute_pts::uncompute_points,
+};
 
 /// Main entry point for this module
 pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
-    let interp = Interpreter::new(mir, ctx);
+    let uncompute_pts: Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>> = mir
+        .graphs
+        .iter()
+        .map(|gr| uncompute_points(gr, ctx))
+        .collect();
+
+    let interp = Interpreter::new(mir, &uncompute_pts, ctx);
     interp.exec()
 }
 
@@ -97,6 +108,8 @@ pub struct InterpreterState<'a> {
     locals: &'a LocalStore,
     /// Stack memory addresses for each local
     bindings: Store<LocalId, BitArray>,
+    /// The points at which destructors must run
+    uncompute_pts: &'a BTreeMap<GraphPt, Vec<LocalId>>,
     // stateful fields
     /// The forest of destructors
     destructors: PlaceStore<Rc<Destructor<'a>>>,
@@ -107,7 +120,11 @@ pub struct InterpreterState<'a> {
 }
 
 impl<'a> InterpreterState<'a> {
-    fn new(gr: &'a Graph, ctx: &'a Context<'a>) -> Self {
+    fn new(
+        gr: &'a Graph,
+        uncompute_pts: &'a BTreeMap<GraphPt, Vec<LocalId>>,
+        ctx: &'a Context<'a>,
+    ) -> Self {
         Self {
             blocks: gr.get_blocks(),
             preds: gr.get_preds(),
@@ -115,6 +132,7 @@ impl<'a> InterpreterState<'a> {
             visited_blocks: HashSet::new(),
             ctx,
             locals: &gr.locals,
+            uncompute_pts,
             bindings: Store::new(),
             destructors: PlaceStore::new(gr.locals.len()),
         }
@@ -154,27 +172,50 @@ pub struct Interpreter<'a> {
     mir: &'a Mir,
     st: InterpreterState<'a>,
     circ: Rc<RefCell<CircAssembler<'a>>>,
+    uncompute_pts: &'a Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>>,
     ctx: &'a Context<'a>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(mir: &'a Mir, ctx: &'a Context<'a>) -> Self {
+    pub fn new(
+        mir: &'a Mir,
+        uncompute_pts: &'a Store<FnId, BTreeMap<GraphPt, Vec<LocalId>>>,
+        ctx: &'a Context<'a>,
+    ) -> Self {
         let entry_point = mir.entry_point.unwrap();
         let gr = &mir.graphs[entry_point];
-        let mut st = InterpreterState::new(gr, ctx);
+        let gr_uncom_pts = &uncompute_pts[entry_point];
+        let mut st = InterpreterState::new(gr, gr_uncom_pts, ctx);
         let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
 
         // Initialize the environment
         st.mem_init(std::iter::empty(), &mut circ.borrow_mut().allocators);
-        Self { ctx, circ, st, mir }
+        Self {
+            ctx,
+            circ,
+            st,
+            mir,
+            uncompute_pts,
+        }
     }
 
     /// Run the interpreter, starting from its entry block.
     pub fn exec(mut self) -> CircuitBuf {
         self.run();
+
+        // FIXME: some destructors are never run because they’re executed when
+        // their lifetimes *end*. But some lifetimes are *empty*. We could just
+        // never compute any reference with an empty lifetime. They could be
+        // optimized away, in fact. But to make our lives simpler, we'll run
+        // a "gc pass" where we eliminate all remaining destructors.
+        self.st.destructors = PlaceStore::new(0);
+
         let circ = match Rc::try_unwrap(self.circ) {
             Ok(refcell) => refcell.into_inner(),
-            Err(_) => panic!("leftover pointer to circuit assembler"),
+            Err(_) => {
+                dbg!(self.st.destructors);
+                panic!("dangling pointer to circuit assembler")
+            }
         };
         circ.gate_buf
     }
@@ -184,7 +225,8 @@ impl<'a> Interpreter<'a> {
             callee, args, ret, ..
         } = call;
         let gr = &self.mir.graphs[*callee];
-        let mut st = InterpreterState::new(gr, self.ctx);
+        let uncompute_pts = &self.uncompute_pts[*callee];
+        let mut st = InterpreterState::new(gr, uncompute_pts, self.ctx);
 
         // Calling conventions
         let caller_ret_adr = ret.as_bits(&self.st);
@@ -228,13 +270,14 @@ impl<'a> Interpreter<'a> {
         std::mem::swap(other, &mut self.st.next_candidates);
     }
 
-    fn exec_block(&mut self, blk_id: BlockId) {
-        let blk = &self.st.blocks[blk_id];
-        for stmt in &blk.stmts {
+    fn exec_block(&mut self, blk: BlockId) {
+        let block = &self.st.blocks[blk];
+        for (loc, stmt) in block.stmts.iter().enumerate() {
+            self.uncompute(GraphPt { blk, stmt: loc });
             self.exec_stmt(stmt);
         }
-        self.st.visited_blocks.insert(blk_id);
-        self.terminate(&blk.kind);
+        self.st.visited_blocks.insert(blk);
+        self.terminate(&block.kind);
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) {
@@ -296,5 +339,18 @@ impl<'a> Interpreter<'a> {
                 self.exec_block(*succ);
             }
         }
+    }
+}
+
+// === boilerplate impls ===
+
+impl<'a> std::fmt::Debug for Destructor<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "gates: {:?}", self.gates)?;
+        f.write_str("parents:\n")?;
+        for parent in self.parents.iter() {
+            writeln!(f, "\t {:?}", parent)?;
+        }
+        Ok(())
     }
 }
