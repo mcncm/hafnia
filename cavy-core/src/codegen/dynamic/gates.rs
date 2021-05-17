@@ -70,7 +70,7 @@ impl<'m> CircAssembler<'m> {
         match io {
             IoStmtKind::In => todo!(),
             IoStmtKind::Out { place, symb } => {
-                let bits = st.env.bits_at(place);
+                let bits = st.bits_at(place);
                 for (i, &bit) in bits.cbits.iter().enumerate() {
                     let name = self.ctx.symbols[*symb].clone(); // blegh
                     let io = crate::circuit::IoOutGate {

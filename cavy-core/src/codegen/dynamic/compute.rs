@@ -43,19 +43,19 @@ impl<'m> Interpreter<'m> {
 
     fn compute_use(&mut self, lplace: &Place, op: &Operand) {
         let mut circ = self.circ.borrow_mut();
-        let lhs = lplace.as_bits(&self.st.env);
+        let lhs = lplace.as_bits(&self.st);
         match op {
             Operand::Const(value) => {
                 circ.cnot_const(&lhs, value);
             }
             Operand::Copy(rplace) => {
                 // NOTE not correct
-                self.st.env.memcpy(lplace, rplace);
+                todo!();
             }
             // ASSUMPTION: we're always going to copy shared references, and
             // their destructors will never mutate.
             Operand::Move(rplace) => {
-                let rhs = rplace.as_bits(&self.st.env);
+                let rhs = rplace.as_bits(&self.st);
                 // swap unconditionally
                 if lplace != rplace {
                     let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
@@ -67,14 +67,11 @@ impl<'m> Interpreter<'m> {
     }
 
     pub fn compute_ref(&mut self, kind: &RefKind, lplace: &Place, rplace: &Place) {
-        let parent = self.st.env.bindings[rplace.root]
-            .destructor
-            .as_ref()
-            .map(|dest| dest.clone());
+        let parent = self.st.destructors.get(rplace).map(|dest| dest.clone());
         // Is always safe to put a new one in here?
         let mut dest = Destructor::new(&self.circ);
-        let rhs = rplace.as_bits(&self.st.env);
-        let lhs = lplace.as_bits(&self.st.env);
+        let rhs = rplace.as_bits(&self.st);
+        let lhs = lplace.as_bits(&self.st);
 
         let mut circ = self.circ.borrow_mut();
 
@@ -91,16 +88,16 @@ impl<'m> Interpreter<'m> {
 
     pub fn compute_drop(&mut self, place: &Place) {
         // Execute any destructors
-        self.st.env.bindings[place.root].destructor.take();
+        self.st.destructors.get_mut(place).take();
 
         // Correctness: the destructor is done using the circuit assembler, so
         // we can borrow it here.
         let mut circ = self.circ.borrow_mut();
 
-        let lhs = place.as_bits(&self.st.env);
+        let lhs = place.as_bits(&self.st);
 
         // Then free the bits
-        let ty = self.st.env.type_of(place);
+        let ty = self.st.type_of(place);
         if let Some(RefKind::Shrd) = ty.ref_kind(self.ctx) {
             circ.map_free(&lhs, |(_, _)| FreeState::Clean, |(_, _)| FreeState::Clean);
         } else {
@@ -136,7 +133,7 @@ impl<'m> Interpreter<'m> {
     // TODO: Figure out where to put this and how it affects the factoring of
     // this module.
     fn destructor_for(&mut self, place: &Place, parents: &[&Place]) -> Option<Destructor<'m>> {
-        if let Some(RefKind::Uniq) = self.st.env.type_of(place).ref_kind(self.ctx) {
+        if let Some(RefKind::Uniq) = self.st.type_of(place).ref_kind(self.ctx) {
             Some(Destructor::from_parents(parents, self))
         } else {
             None
@@ -158,13 +155,13 @@ impl<'m> Interpreter<'m> {
         let mut destructor = Destructor::from_parents(&[fst_place, snd_place], self);
         let sink = &mut destructor.gates;
 
-        let lhs = &place.as_bits(&self.st.env);
-        let fst = &fst_place.as_bits(&self.st.env);
-        let snd = &snd_place.as_bits(&self.st.env);
+        let lhs = &place.as_bits(&self.st);
+        let fst = &fst_place.as_bits(&self.st);
+        let snd = &snd_place.as_bits(&self.st);
 
         match op {
             Equal => {
-                if self.st.env.type_of(fst_place) != self.ctx.common.shrd_q_bool {
+                if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
                     // for larger types, we have to take the AND of the XNORs,
                     // which means allocating intermediates. This isn't
                     // something we're going to be able to tackle in five
@@ -176,7 +173,7 @@ impl<'m> Interpreter<'m> {
                 circ.map_not(lhs, Some(sink));
             }
             Nequal => {
-                if self.st.env.type_of(fst_place) != self.ctx.common.shrd_q_bool {
+                if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
                     // for larger types, we have to take the AND of the XNORs,
                     // which means allocating intermediates. This isn't
                     // something we're going to be able to tackle in five
@@ -215,9 +212,10 @@ impl<'m> Interpreter<'m> {
             }
         }
 
-        self.st.env.bindings[place.root]
-            .destructor
-            .replace(Rc::new(destructor));
+        // Is there *not* an std method for this?
+        self.st.destructors.get_mut(place).map(|dest| {
+            *dest = Rc::new(destructor);
+        });
     }
 
     fn compute_place_const_binop(
@@ -244,7 +242,7 @@ impl<'m> Interpreter<'m> {
         // Correctness: this is safe because we can't drop any ancillas here
         let mut circ = self.circ.borrow_mut();
 
-        let lhs = &lplace.as_bits(&self.st.env);
+        let lhs = &lplace.as_bits(&self.st);
         let (rhs, mut destructor) = match right {
             /*
              * Could consider breakign this out into a separate function
@@ -270,13 +268,10 @@ impl<'m> Interpreter<'m> {
              * certain optimizations?
              */
             Operand::Copy(rplace) => {
-                let parent = self.st.env.bindings[rplace.root]
-                    .destructor
-                    .as_ref()
-                    .map(|dest| dest.clone());
+                let parent = self.st.destructors.get(rplace).map(|dest| dest.clone());
                 // Is always safe to put a new one in here?
                 let mut dest = Destructor::new(&self.circ);
-                let rhs = rplace.as_bits(&self.st.env);
+                let rhs = rplace.as_bits(&self.st);
 
                 // Control first if necessary. Note that this will control
                 // classical bits on classical bits and qubits on qubits.
@@ -292,7 +287,7 @@ impl<'m> Interpreter<'m> {
              * default, a move will SWAP.
              */
             Operand::Move(rplace) => {
-                let rhs = rplace.as_bits(&self.st.env);
+                let rhs = rplace.as_bits(&self.st);
                 // Swap first if necessary. Note that this will swap clasical
                 // bits with classical bits and qubits with qubits.
                 if lplace != rplace {
@@ -343,11 +338,11 @@ impl<'m> Interpreter<'m> {
         /*
         Finally, insert the destructor, if there is one, and make it immutable
         for all time.
+
+        FIXME make sure this doesn't run parent destructors?
         */
         if let Some(destructor) = destructor {
-            self.st.env.bindings[lplace.root]
-                .destructor
-                .replace(Rc::new(destructor));
+            self.st.destructors.insert(lplace, Rc::new(destructor));
         }
     }
 }

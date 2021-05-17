@@ -19,6 +19,7 @@ use crate::{
     circuit::{BaseGateQ, CircuitBuf, GateQ},
     context::Context,
     mir::*,
+    place_tree::{PlaceNode, PlaceStore},
     session::Config,
     store::Store,
     types::TyId,
@@ -32,55 +33,19 @@ pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
     interp.exec()
 }
 
-pub struct Environment<'a> {
-    /// The graph locals. We must hold onto these here in order to have access
-    /// to type information and be able look up bit addresses
-    locals: &'a LocalStore,
-    // NOTE: address lookups can probably be sped up considerably by modifying,
-    // or removing, this data structure.
-    /// Mapping of locals to memory locations. Note that they are _not_
-    /// write-once, because of the SWAP-elimination optimization.
-    bindings: Store<LocalId, EnvEntry<'a>>,
-    /// Also needs a local `ctx` copy for type lookup
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> Environment<'a> {
-    fn new(locals: &'a LocalStore, ctx: &'a Context<'a>) -> Self {
-        Self {
-            locals,
-            bindings: Store::new(),
-            ctx,
-        }
-    }
-
-    fn type_of(&self, place: &Place) -> TyId {
-        self.locals.type_of(place, self.ctx)
-    }
-}
-
-/// Data tracked at a `LocalId`: the bits it points to, as well as any satellite
-/// data associated with deferred analyses
-struct EnvEntry<'a> {
-    /// The memory bits this local points to
-    bits: BitArray,
-    destructor: Option<Rc<Destructor<'a>>>,
-}
-
 /// The destructor for a local which, in this first "toy" version, is just a
 /// reference-counted blob in a DAG. The relatively naive--and ridiculously
 /// heavyweight--way this creature works is a large part of what makes this
 /// backend so "dynamic". Using these things is *approximately* writing Python.
 ///
-/// NOTE: The assumption that they do form a DAG is not unconditional. We may
-/// have to forbid recursion, for example.
+/// NOTE: The assumption that they do form a DAG is not unconditional. This just
+/// won't work with recursion, for example.
 ///
 /// NOTE: This works because of the order in which Rust runs `drop`s: first the
 /// type's destructor, then those of its fields.
 pub struct Destructor<'a> {
     parents: SmallVec<[Rc<Destructor<'a>>; 2]>,
-    /// The gates to unwind on drop. Could (maybe should!) add classical
-    /// gates.
+    /// The gates to unwind on drop. Classical uncomputation not yet supported.
     gates: Vec<GateQ>,
     /// This will hold a shared mutable reference to the assembler, so it can
     /// freely unwind on drop.
@@ -99,12 +64,7 @@ impl<'a> Destructor<'a> {
     fn from_parents(parents: &[&Place], interp: &Interpreter<'a>) -> Self {
         let parents = parents
             .iter()
-            .map(|parent| {
-                interp.st.env.bindings[parent.root]
-                    .destructor
-                    .as_ref()
-                    .map(|dest| dest.clone())
-            })
+            .map(|parent| interp.st.destructors.get(parent).map(|dest| dest.clone()))
             .flatten()
             .collect();
         Self {
@@ -119,19 +79,31 @@ impl<'a> Destructor<'a> {
     }
 }
 
-/// This struct essentially represents a stack frame. Everything that is pushed
-/// onto the stack when a new procedure is called should live here.
+/// This struct essentially represents a stack frame: everything respecting a
+/// stack discipline that is pushed for a new procedure call.
+///
+/// Even though this struct is a bit of a stopgap for this "demo" backend, I'm
+/// not happy with it. It's weird that mingles data that lives for the duration
+/// of a stack frame with "environment"-like state that changes from statement
+/// to statement.
 pub struct InterpreterState<'a> {
+    // immutable fields
+    ctx: &'a Context<'a>,
     /// The forward graph
     blocks: &'a BlockStore,
     /// The predecessor graph
     preds: Ref<'a, Store<BlockId, Vec<BlockId>>>,
+    /// Locals: needed to retrieve types
+    locals: &'a LocalStore,
+    /// Stack memory addresses for each local
+    bindings: Store<LocalId, BitArray>,
+    // stateful fields
+    /// The forest of destructors
+    destructors: PlaceStore<Rc<Destructor<'a>>>,
     /// Blocks that could get executed next
     next_candidates: Vec<BlockId>,
     /// Blocks that will not get executed again (TODO this won't work for loops)
     visited_blocks: HashSet<BlockId>,
-    /// Program state in this scope
-    env: Environment<'a>,
 }
 
 impl<'a> InterpreterState<'a> {
@@ -139,10 +111,17 @@ impl<'a> InterpreterState<'a> {
         Self {
             blocks: gr.get_blocks(),
             preds: gr.get_preds(),
-            env: Environment::new(&gr.locals, ctx),
             next_candidates: vec![gr.entry_block],
             visited_blocks: HashSet::new(),
+            ctx,
+            locals: &gr.locals,
+            bindings: Store::new(),
+            destructors: PlaceStore::new(gr.locals.len()),
         }
+    }
+
+    fn type_of(&self, place: &Place) -> TyId {
+        self.locals.type_of(place, self.ctx)
     }
 }
 
@@ -186,8 +165,7 @@ impl<'a> Interpreter<'a> {
         let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
 
         // Initialize the environment
-        st.env
-            .mem_init(std::iter::empty(), &mut circ.borrow_mut().allocators);
+        st.mem_init(std::iter::empty(), &mut circ.borrow_mut().allocators);
         Self { ctx, circ, st, mir }
     }
 
@@ -209,18 +187,17 @@ impl<'a> Interpreter<'a> {
         let mut st = InterpreterState::new(gr, self.ctx);
 
         // Calling conventions
-        let caller_ret_adr = ret.as_bits(&self.st.env);
+        let caller_ret_adr = ret.as_bits(&self.st);
         let caller_arg_adrs = args.iter().map(|caller_arg| {
             let caller_arg = match caller_arg {
                 Operand::Const(_) => unreachable!(),
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
-            caller_arg.as_bits(&self.st.env)
+            caller_arg.as_bits(&self.st)
         });
         // Copy the parameters locations
         let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
-        st.env
-            .mem_init(params, &mut self.circ.borrow_mut().allocators);
+        st.mem_init(params, &mut self.circ.borrow_mut().allocators);
 
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);
@@ -230,7 +207,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {
-        let cond_bits = self.st.env.bits_at(cond);
+        let cond_bits = self.st.bits_at(cond);
         // No `match` statements yet; only `if`s.
         debug_assert!(cond_bits.qbits.len() + cond_bits.cbits.len() == 1);
         todo!()

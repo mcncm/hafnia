@@ -102,7 +102,7 @@ impl<'a> MemFree<Cbit> for CircAssembler<'a> {
     }
 }
 
-impl<'a> Environment<'a> {
+impl<'a> InterpreterState<'a> {
     pub fn bitset_ranges(&self, place: &Place) -> (ops::Range<usize>, ops::Range<usize>) {
         // start with the root type
         let ty = self.locals[place.root].ty;
@@ -120,70 +120,29 @@ impl<'a> Environment<'a> {
         (start.quant..end.quant, start.class..end.class)
     }
 
-    pub fn memcpy<B>(&mut self, left: &Place, right: &B)
-    where
-        B: AsBits,
-    {
-        let value = right.as_bits(self).to_owned();
-        let bits = &mut self.bits_at_mut(left);
-        bits.copy_from_slice(&value.as_slice());
-    }
-
     /// Get a sub-allocation at a place.
     pub fn bits_at(&self, place: &Place) -> BitSlice {
         let ranges = self.bitset_ranges(place);
-        let bitset = &self.get_entry(place.root).bits;
-        bitset.index(ranges)
+        self.bindings[place.root].index(ranges)
     }
 
-    /// Get a sub-allocation at a place, mutably
-    pub fn bits_at_mut(&mut self, place: &Place) -> BitSliceMut {
-        let ranges = self.bitset_ranges(place);
-        let bitset = &mut self.get_entry_mut(place.root).bits;
-        bitset.index_mut(ranges)
-    }
-
-    fn get_entry<'b>(&'b self, local: LocalId) -> &'b EnvEntry<'a>
-    where
-        'a: 'b,
-    {
-        &self.bindings[local]
-    }
-
-    fn get_entry_mut<'b>(&'b mut self, local: LocalId) -> &'b mut EnvEntry<'a>
-    where
-        'a: 'b,
-    {
-        &mut self.bindings[local]
-    }
-}
-
-impl Environment<'_> {
     /// Initialize the locals addresses: copy parameter addresses and allocate
     /// fresh bits for the rest of them, from the *global allocator*.
-    pub fn mem_init<'a, I>(&mut self, mut params: I, allocator: &mut BitAllocators)
+    pub fn mem_init<'b, I>(&mut self, mut params: I, allocator: &mut BitAllocators)
     where
-        I: Iterator<Item = BitSlice<'a>>,
+        I: Iterator<Item = BitSlice<'b>>,
     {
         let mut locals = self.locals.iter();
         // First copy in the parameter addresses
         while let Some(param) = params.next() {
             locals.next().expect("more parameters than locals");
-            let entry = EnvEntry {
-                bits: param.to_owned(),
-                destructor: None,
-            };
-            self.bindings.insert(entry);
+            self.bindings.insert(param.to_owned());
         }
         // Then assign bits for the rest of the locals from the global allocator
         for local in locals {
             let ty = local.ty;
             let bits = allocator.alloc_for_ty(ty, self.ctx);
-            let entry = EnvEntry {
-                bits,
-                destructor: None,
-            };
-            self.bindings.insert(entry);
+            self.bindings.insert(bits);
         }
 
         debug_assert_eq!(self.locals.len(), self.bindings.len());
@@ -298,11 +257,11 @@ impl<'a> BitSliceMut<'a> {
 
 /// Something that can be viewed as a `BitSlice` with the help of an environment
 pub trait AsBits {
-    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a>;
+    fn as_bits<'a>(&'a self, st: &'a InterpreterState) -> BitSlice<'a>;
 }
 
 impl<'a> AsBits for BitSlice<'a> {
-    fn as_bits<'b>(&'b self, _env: &'b Environment) -> BitSlice<'b> {
+    fn as_bits<'b>(&'b self, _st: &'b InterpreterState) -> BitSlice<'b> {
         Self {
             qbits: &self.qbits,
             cbits: &self.cbits,
@@ -311,19 +270,19 @@ impl<'a> AsBits for BitSlice<'a> {
 }
 
 impl AsBits for Place {
-    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a> {
-        env.bits_at(self)
+    fn as_bits<'a>(&'a self, st: &'a InterpreterState) -> BitSlice<'a> {
+        st.bits_at(self)
     }
 }
 
 impl AsBits for LocalId {
-    fn as_bits<'a>(&'a self, env: &'a Environment) -> BitSlice<'a> {
-        env.bits_at(&<Place>::from(*self))
+    fn as_bits<'a>(&'a self, st: &'a InterpreterState) -> BitSlice<'a> {
+        st.bits_at(&<Place>::from(*self))
     }
 }
 
 impl AsBits for BitArray {
-    fn as_bits<'a>(&'a self, _env: &'a Environment) -> BitSlice<'a> {
+    fn as_bits<'a>(&'a self, _st: &'a InterpreterState) -> BitSlice<'a> {
         self.as_slice()
     }
 }
