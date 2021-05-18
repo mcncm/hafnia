@@ -34,15 +34,15 @@ use crate::{
 
 use crate::analysis::{SummaryAnalysis, SummaryRunner};
 
-pub fn optimize(mir: &mut Mir, _ctx: &Context) {
+pub fn optimize(mir: &mut Mir, ctx: &Context) {
     for gr in mir.graphs.iter_mut() {
-        optimize_graph(gr);
+        optimize_graph(gr, ctx);
     }
 }
 
-fn optimize_graph(gr: &mut Graph) {
+fn optimize_graph(gr: &mut Graph, ctx: &Context) {
     // First, check where everything is defined and used.
-    let use_data = collect_uses(gr);
+    let use_data = collect_uses(gr, ctx);
     // Then find everything that has only a single definition and use, and
     // collect it into a hash table so we can build some chains.
     //
@@ -56,7 +56,7 @@ fn optimize_graph(gr: &mut Graph) {
                     if data.uses.len() == 1 {
                         Some((data.defs[0], data.uses[0]))
                     } else if let Some(drop) = data.drop {
-                        Some((data.defs[0], drop))
+                        Some((data.defs[0], (drop, Terminal)))
                     } else {
                         None
                     }
@@ -67,9 +67,9 @@ fn optimize_graph(gr: &mut Graph) {
         })
         .flatten()
         .collect();
-
     // Next, build the chains.
     let chains = build_chains(single_def_use);
+
     // And then *apply* the chains to rewrite the graph.
     for chain in chains.into_iter() {
         apply_defuse_chain(gr, chain);
@@ -155,7 +155,7 @@ fn replace_places_at(
                     replace_place_op(arg, place, &prev);
                 }
                 if !last {
-                    debug_assert_eq!(call.args.len(), 1);
+                    // debug_assert_eq!(call.args.len(), 1);
                     return Some(std::mem::replace(&mut call.ret, place.clone()));
                 }
             }
@@ -196,22 +196,34 @@ fn get_lhs_at(gr: &Graph, pt: GraphPt) -> Option<Place> {
 }
 
 /// Turn all the use-def pairs into contiguous chains of graph points
-fn build_chains(mut def_use: HashMap<GraphPt, GraphPt>) -> Vec<Vec<GraphPt>> {
+fn build_chains(mut def_use: HashMap<GraphPt, (GraphPt, TerminalUse)>) -> Vec<Vec<GraphPt>> {
     let mut chains: Vec<Vec<GraphPt>> = vec![];
     // the defs that at the front of some chain
     let mut heads = HashMap::<GraphPt, usize>::new();
     // the uses that are at the back of some chain
     let mut tails = HashMap::<GraphPt, usize>::new();
-    while let Some((def, mut use_)) = pop_map(&mut def_use) {
+    while let Some((def, (mut use_, mut term))) = pop_map(&mut def_use) {
         // we could be starting a new chain, or attaching at the head or tail of
         // an existing chain. We'll eventually run out of elements and make a
         // new chain, or attach.
-        let mut ch = vec![def];
-        while let Some((next_def, next_use)) = def_use.remove_entry(&use_) {
-            ch.push(next_def);
-            use_ = next_use;
+
+        // awful stateful buggy undebuggable terrible code
+        let mut terminated = false;
+        let mut ch = vec![def, use_];
+        loop {
+            if let Terminal = term {
+                terminated = true;
+                break;
+            }
+
+            if let Some((_, (next_use, next_term))) = def_use.remove_entry(&use_) {
+                term = next_term;
+                use_ = next_use;
+                ch.push(use_);
+            } else {
+                break;
+            }
         }
-        ch.push(use_);
 
         // Once we're done with the chain, try to attach it. Start by looking
         // for a tail to attach it to...
@@ -225,16 +237,20 @@ fn build_chains(mut def_use: HashMap<GraphPt, GraphPt>) -> Vec<Vec<GraphPt>> {
         //
         // NOTE: it shouldn't be possible for *both* of these to happen, unless
         // there's a cycle.
-        else if let Some((_, idx)) = heads.remove_entry(&use_) {
-            heads.insert(def, idx);
-            let chain = &mut chains[idx];
-            std::mem::swap(chain, &mut ch);
-            chain.pop();
-            chain.extend(ch);
+        else if !terminated & heads.contains_key(&use_) {
+            if let Some((_, idx)) = heads.remove_entry(&use_) {
+                heads.insert(def, idx);
+                let chain = &mut chains[idx];
+                std::mem::swap(chain, &mut ch);
+                chain.pop();
+                chain.extend(ch);
+            }
         }
-        // Othewise, just make a new chain.
+        // Otherwise, just make a new chain.
         else {
-            tails.insert(*ch.last().unwrap(), chains.len());
+            if !terminated {
+                tails.insert(*ch.last().unwrap(), chains.len());
+            }
             heads.insert(ch[0], chains.len());
             chains.push(ch.drain(0..).collect());
         }
@@ -252,7 +268,7 @@ where
     elem
 }
 
-fn collect_uses(gr: &Graph) -> PlaceStore<UseData> {
+fn collect_uses(gr: &Graph, ctx: &Context) -> PlaceStore<UseData> {
     let mut use_data = PlaceStore::new(gr.locals.len());
     for (blk, block) in gr.idx_enumerate() {
         let mut loc = 0;
@@ -262,7 +278,7 @@ fn collect_uses(gr: &Graph) -> PlaceStore<UseData> {
             loc += 1;
         }
         let pt = GraphPt { blk, stmt: loc };
-        collect_tail(&mut use_data, &block.kind, pt);
+        collect_tail(&mut use_data, &block.kind, pt, gr, ctx);
     }
     use_data
 }
@@ -274,17 +290,17 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
             insert_action(use_data, lhs, pt, Action::Def);
             match &rhs.data {
                 BinOp(_, fst, snd) => {
-                    use_operand(use_data, fst, pt);
-                    use_operand(use_data, snd, pt);
+                    use_operand(use_data, fst, pt, Terminal);
+                    use_operand(use_data, snd, pt, Terminal);
                 }
-                UnOp(_, op) | Use(op) => use_operand(use_data, op, pt),
+                UnOp(_, op) | Use(op) => use_operand(use_data, op, pt, Nonterminal),
                 Ref(_, place) => {
-                    insert_action(use_data, place, pt, Action::Use);
+                    insert_action(use_data, place, pt, Action::Use(Terminal));
                 }
             }
         }
         StmtKind::Assert(place) => {
-            insert_action(use_data, place, pt, Action::Use);
+            insert_action(use_data, place, pt, Action::Use(Terminal));
         }
         StmtKind::Drop(place) => {
             insert_action(use_data, place, pt, Action::Drop);
@@ -294,40 +310,75 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
                 IoStmtKind::In => todo!(),
                 IoStmtKind::Out { place, .. } => place,
             };
-            insert_action(use_data, place, pt, Action::Use);
+            insert_action(use_data, place, pt, Action::Use(Terminal));
         }
         StmtKind::Nop => {}
     }
 }
 
-fn collect_tail(use_data: &mut PlaceStore<UseData>, tail: &BlockKind, pt: GraphPt) {
+fn collect_tail(
+    use_data: &mut PlaceStore<UseData>,
+    tail: &BlockKind,
+    pt: GraphPt,
+    gr: &Graph,
+    ctx: &Context,
+) {
     match tail {
         BlockKind::Goto(_) => {}
         BlockKind::Ret => {}
         BlockKind::Switch(switch) => {
-            insert_action(use_data, &switch.cond, pt, Action::Use);
+            insert_action(use_data, &switch.cond, pt, Action::Use(Nonterminal));
         }
         BlockKind::Call(call) => {
-            insert_action(use_data, &call.ret, pt, Action::Def);
-            for arg in &call.args {
-                use_operand(use_data, arg, pt);
+            if let Some((n, _)) = matching_arg(call, gr, ctx) {
+                insert_action(use_data, &call.ret, pt, Action::Def);
+                use_operand(use_data, &call.args[n], pt, Nonterminal);
+                for (m, arg) in call.args.iter().enumerate() {
+                    if m != n {
+                        use_operand(use_data, arg, pt, Terminal);
+                    }
+                }
+            } else {
+                for arg in &call.args {
+                    use_operand(use_data, arg, pt, Terminal);
+                }
             }
         }
     }
 }
 
-fn use_operand(use_data: &mut PlaceStore<UseData>, op: &Operand, pt: GraphPt) {
+/// the first argument that has the same type as the return value
+fn matching_arg<'s>(
+    call: &'s FnCall,
+    gr: &'s Graph,
+    ctx: &'s Context,
+) -> Option<(usize, &'s Operand)> {
+    // Use the first argument of the same type as the return value
+    let ret_ty = gr.type_of(&call.ret, ctx);
+    call.args
+        .iter()
+        .enumerate()
+        .filter(
+            |(_, arg)| match arg.place().map(|place| gr.type_of(place, ctx)) {
+                Some(ty) => ty == ret_ty,
+                _ => false,
+            },
+        )
+        .next()
+}
+
+fn use_operand(use_data: &mut PlaceStore<UseData>, op: &Operand, pt: GraphPt, term: TerminalUse) {
     match op {
         Operand::Const(_) => {}
         Operand::Move(place) | Operand::Copy(place) => {
-            insert_action(use_data, place, pt, Action::Use);
+            insert_action(use_data, place, pt, Action::Use(term));
         }
     }
 }
 
 enum Action {
     Def,
-    Use,
+    Use(TerminalUse),
     Drop,
 }
 
@@ -336,16 +387,23 @@ fn insert_action(use_data: &mut PlaceStore<UseData>, place: &Place, pt: GraphPt,
     let data = node.this.get_or_insert_with(|| UseData::default());
     match action {
         Action::Def => data.defs.push(pt),
-        Action::Use => data.uses.push(pt),
+        Action::Use(term) => data.uses.push((pt, term)),
         Action::Drop => data.drop = Some(pt),
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+enum TerminalUse {
+    Terminal,
+    Nonterminal,
+}
+use TerminalUse::*;
 
 #[derive(Default)]
 struct UseData {
     /// The definition sites
     defs: SmallVec<[GraphPt; 1]>,
     /// The *unary* statements in which this appears as an RHS
-    uses: SmallVec<[GraphPt; 1]>,
+    uses: SmallVec<[(GraphPt, TerminalUse); 1]>,
     drop: Option<GraphPt>,
 }

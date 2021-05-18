@@ -26,6 +26,7 @@ fn optimize_graph(gr: &mut Graph, ctx: &Context) {
     let mut used = LocalsUsed {
         used: BitSet::empty(gr.locals.len()),
     };
+
     SummaryRunner::new(gr, ctx, None).register(&mut used).run();
     cleanup_graph(gr, &used);
 }
