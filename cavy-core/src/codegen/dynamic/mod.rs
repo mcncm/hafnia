@@ -243,14 +243,23 @@ impl<'a> Interpreter<'a> {
             };
             caller_arg.as_bits(&self.st)
         });
-        // Copy the parameters locations
+        // Copy the parameter locations
         let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
         st.mem_init(params, &mut self.circ.borrow_mut().allocators);
 
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);
         self.run();
-        // Restore interpreter state
+
+        // Accept destructor for return value and restore interpreter state
+        let mut ret_dest = st.destructors.get_node_mut(ret);
+        ret_dest.replace(
+            &mut self
+                .st
+                .destructors
+                .get_root_mut(Graph::return_site())
+                .clone(),
+        );
         std::mem::swap(&mut self.st, &mut st);
     }
 
@@ -258,6 +267,7 @@ impl<'a> Interpreter<'a> {
         let cond_bits = self.st.bits_at(cond);
         // No `match` statements yet; only `if`s.
         debug_assert!(cond_bits.qbits.len() + cond_bits.cbits.len() == 1);
+
         todo!()
     }
 

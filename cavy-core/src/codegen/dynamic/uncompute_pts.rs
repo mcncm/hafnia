@@ -97,15 +97,14 @@ fn lifetime_ends(regions: &RegionInf, gr: &Graph) -> BTreeMap<GraphPt, Vec<LtId>
         let pred_lts = preds[blk]
             .iter()
             .map(|&blk| {
-                lts_at(
-                    GraphPt {
-                        blk,
-                        stmt: gr[blk].stmts.len(),
-                    },
-                    regions,
-                )
+                let pt = GraphPt {
+                    blk,
+                    stmt: gr[blk].stmts.len(),
+                };
+                let lts = lts_at(pt, regions);
+                lts
             })
-            .fold(empty(regions), |acc, elem| acc & elem);
+            .fold(empty(regions), |acc, elem| acc | elem);
         // first statement looks at pred blocks
         let mut state = pred_lts;
         // Include the end of the block, which is not a real statement

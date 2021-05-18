@@ -223,7 +223,6 @@ impl DataflowAnalysis<Forward, Blockwise> for LinearityAnalysis {
             // Right now we only switch on copyable data, anyway.
             BlockKind::Switch(_) => {}
             BlockKind::Call(call) => {
-                println!("moving into {}", &call.ret);
                 state.move_into(&call.ret);
             }
             BlockKind::Ret => {}

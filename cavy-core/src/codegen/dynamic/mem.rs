@@ -227,7 +227,7 @@ impl BitArray {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BitSlice<'a> {
     pub qbits: &'a [Qbit],
     pub cbits: &'a [Cbit],

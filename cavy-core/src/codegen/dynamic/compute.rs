@@ -60,6 +60,9 @@ impl<'m> Interpreter<'m> {
             }
             // ASSUMPTION: we're always going to copy shared references, and
             // their destructors will never mutate.
+            //
+            // FIXME: all kinds of assumptions won't hold after optimizations,
+            // and this is not real documentation.
             Operand::Move(rplace) => {
                 let rhs = rplace.as_bits(&self.st);
                 // swap unconditionally
@@ -82,7 +85,10 @@ impl<'m> Interpreter<'m> {
 
         // Control first if necessary. Note that this will control
         // classical bits on classical bits and qubits on qubits.
-        if lplace != rplace {
+        if lhs != rhs {
+            debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
+            debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
+
             let quant = |(_, tgt, ctrl)| self.st.control(BaseGateQ::Cnot { ctrl, tgt });
             let quant = util::tee(quant, &mut dest.gates);
             // FIXME no classical sink because no classical invertibility yet.
@@ -284,7 +290,10 @@ impl<'m> Interpreter<'m> {
 
                 // Control first if necessary. Note that this will control
                 // classical bits on classical bits and qubits on qubits.
-                if lplace != rplace {
+                if lhs != &rhs {
+                    debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
+                    debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
+
                     circ.map_cnot(lhs, &rhs, Some(&mut dest.gates), &self.st);
                 }
 
@@ -299,11 +308,18 @@ impl<'m> Interpreter<'m> {
                 let rhs = rplace.as_bits(&self.st);
                 // Swap first if necessary. Note that this will swap clasical
                 // bits with classical bits and qubits with qubits.
-                if lplace != rplace {
+
+                if lhs != &rhs {
+                    // Now... We're assuming here that *all* of the bits are
+                    // distinct. We should either (a) assert this fact, or (b)
+                    // swap exactly the bits that differ.
+                    debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
+                    debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
+
                     circ.mapgate_pair(
                         lhs,
                         &rhs,
-                        Some(|(_, u, v)| BaseGateQ::Swap(u, v)),
+                        Some(|(_, u, v)| self.st.control(BaseGateQ::Swap(u, v))),
                         Some(|(_, u, v)| BaseGateC::Swap(u, v)),
                     );
                 }
