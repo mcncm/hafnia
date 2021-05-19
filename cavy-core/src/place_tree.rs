@@ -145,6 +145,15 @@ impl<T> PlaceStore<T> {
         node
     }
 
+    pub fn extend_with<F>(&mut self, other: Self, f: F)
+    where
+        F: Fn(&mut T, T) + Copy,
+    {
+        for (this, other) in self.store.iter_mut().zip(other.store.into_iter()) {
+            this.extend_with(other, f);
+        }
+    }
+
     pub fn extend(&mut self, other: Self) {
         for (this, other) in self.store.iter_mut().zip(other.store.into_iter()) {
             this.extend(other);
@@ -195,9 +204,21 @@ impl<T> PlaceNode<T> {
         }
     }
 
+    /// Merge by replacement
     pub fn extend(&mut self, other: Self) {
-        if other.this.is_some() {
-            self.this = other.this;
+        self.extend_with(other, |this, mut oth| std::mem::swap(this, &mut oth))
+    }
+
+    /// Merge another tree into this one, with the given behavior at each node
+    pub fn extend_with<F>(&mut self, other: Self, f: F)
+    where
+        F: Fn(&mut T, T),
+    {
+        match (&mut self.this, other.this) {
+            (None, None) => {}
+            (u @ None, v @ Some(_)) => *u = v,
+            (Some(_), None) => {}
+            (Some(u), Some(v)) => f(u, v),
         }
 
         let shorter = std::cmp::min(self.slots.len(), other.slots.len());
