@@ -19,7 +19,7 @@ use std::{
 use crate::{
     analysis::controls::{ControlPlaces, CtrlCond},
     ast::FnId,
-    circuit::{BaseGateQ, CircuitBuf, GateQ},
+    circuit::{BaseGateQ, CircuitBuf, GateQ, Qbit},
     context::Context,
     mir::*,
     place_tree::{PlaceNode, PlaceStore},
@@ -120,8 +120,6 @@ pub struct InterpreterState<'a> {
     destructors: PlaceStore<Rc<Destructor<'a>>>,
     /// The currently active block
     blk: BlockId,
-    /// Blocks that could get executed next
-    next_candidates: Vec<BlockId>,
     /// Blocks that will not get executed again (TODO this doesn't work for loops)
     visited_blocks: HashSet<BlockId>,
 }
@@ -131,7 +129,6 @@ impl<'a> InterpreterState<'a> {
         Self {
             blocks: gr.get_blocks(),
             preds: gr.get_preds(),
-            next_candidates: vec![gr.entry_block],
             visited_blocks: HashSet::new(),
             ctx,
             locals: &gr.locals,
@@ -151,6 +148,11 @@ impl<'a> InterpreterState<'a> {
     fn ctrls(&self) -> &[CtrlCond] {
         &self.controls[self.blk]
     }
+
+    fn save_destructors(&mut self, blk: BlockId) {
+        self.latent_destructors
+            .insert(blk, self.destructors.clone());
+    }
 }
 
 struct CircAssembler<'a> {
@@ -166,6 +168,7 @@ struct CircAssembler<'a> {
     /// ...And, like almost everything else, a copy of the Context.
     ctx: &'a Context<'a>,
     gate_buf: CircuitBuf,
+    controls: Vec<(Qbit, bool)>,
 }
 
 impl<'a> CircAssembler<'a> {
@@ -174,6 +177,7 @@ impl<'a> CircAssembler<'a> {
             ctx,
             allocators: BitAllocators::new(),
             gate_buf: CircuitBuf::new(),
+            controls: vec![],
         }
     }
 }
@@ -195,7 +199,11 @@ impl<'a> Interpreter<'a> {
         let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
 
         // Initialize the environment
-        st.mem_init(std::iter::empty(), &mut circ.borrow_mut().allocators);
+        st.mem_init(
+            std::iter::empty(),
+            &mut circ.borrow_mut().allocators,
+            &mir_facts[entry_point].shared_mem_borrows,
+        );
         Self {
             ctx,
             circ,
@@ -245,7 +253,11 @@ impl<'a> Interpreter<'a> {
         });
         // Copy the parameter locations
         let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
-        st.mem_init(params, &mut self.circ.borrow_mut().allocators);
+        st.mem_init(
+            params,
+            &mut self.circ.borrow_mut().allocators,
+            &self.mir_facts[*callee].shared_mem_borrows,
+        );
 
         // New stack frame
         std::mem::swap(&mut self.st, &mut st);
@@ -263,32 +275,30 @@ impl<'a> Interpreter<'a> {
         std::mem::swap(&mut self.st, &mut st);
     }
 
-    fn switch(&mut self, cond: &Place, _blks: &[BlockId]) {
-        let cond_bits = self.st.bits_at(cond);
-        // No `match` statements yet; only `if`s.
-        debug_assert!(cond_bits.qbits.len() + cond_bits.cbits.len() == 1);
-
-        todo!()
-    }
+    fn switch(&mut self, _cond: &Place, _blks: &[BlockId]) {}
 
     pub fn run(&mut self) {
-        let mut block_candidates = vec![];
-        self.swap_blocks(&mut block_candidates);
-        while !block_candidates.is_empty() {
-            for blk in block_candidates.drain(0..) {
-                self.exec_block(blk);
-            }
-            self.swap_blocks(&mut block_candidates);
-        }
-    }
-
-    fn swap_blocks(&mut self, other: &mut Vec<BlockId>) {
-        std::mem::swap(other, &mut self.st.next_candidates);
+        self.exec_block(self.st.blk);
     }
 
     fn exec_block(&mut self, blk: BlockId) {
         let block = &self.st.blocks[blk];
         self.st.blk = blk;
+
+        // controls
+        let mut controls = vec![];
+        for CtrlCond { place, value } in self.st.ctrls() {
+            // assert!(value); // they should all be positive...?
+            let ctrl_addrs = place.as_bits(&self.st);
+            for bit in ctrl_addrs.qbits.iter() {
+                controls.push((*bit, *value));
+            }
+        }
+
+        let mut circ = self.circ.borrow_mut();
+        circ.controls = controls;
+        drop(circ);
+
         for (loc, stmt) in block.stmts.iter().enumerate() {
             self.uncompute(GraphPt { blk, stmt: loc });
             self.exec_stmt(stmt);
@@ -341,7 +351,6 @@ impl<'a> Interpreter<'a> {
             BlockKind::Goto(_) => {}
             BlockKind::Switch(switch) => {
                 self.switch(&switch.cond, &switch.blks);
-                return;
             }
             BlockKind::Call(call) => {
                 self.funcall(call);
@@ -352,6 +361,7 @@ impl<'a> Interpreter<'a> {
         }
         // TODO: conditionals: add some conditions, I guess
         for succ in kind.successors() {
+            // self.st.save_destructors(*succ);
             if self.dfs_eligible(*succ) {
                 self.exec_block(*succ);
             }

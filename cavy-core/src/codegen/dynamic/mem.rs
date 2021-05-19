@@ -128,21 +128,41 @@ impl<'a> InterpreterState<'a> {
 
     /// Initialize the locals addresses: copy parameter addresses and allocate
     /// fresh bits for the rest of them, from the *global allocator*.
-    pub fn mem_init<'b, I>(&mut self, mut params: I, allocator: &mut BitAllocators)
-    where
+    pub fn mem_init<'b, I>(
+        &mut self,
+        mut params: I,
+        allocator: &mut BitAllocators,
+        // NOTE: 2021-05-18 this parameter is a *hack* to get around ugly
+        // circuits.
+        shared_mem: &HashMap<LocalId, Place>,
+    ) where
         I: Iterator<Item = BitSlice<'b>>,
     {
-        let mut locals = self.locals.iter();
+        let mut locals = self.locals.idx_enumerate();
         // First copy in the parameter addresses
         while let Some(param) = params.next() {
             locals.next().expect("more parameters than locals");
             self.bindings.insert(param.to_owned());
         }
-        // Then assign bits for the rest of the locals from the global allocator
-        for local in locals {
+
+        for (local_id, local) in locals {
             let ty = local.ty;
-            let bits = allocator.alloc_for_ty(ty, self.ctx);
-            self.bindings.insert(bits);
+
+            // NOTE: this check, and this `shared_mem` thing, are bad hacks.
+            // They must be replaced by *real* analyses and optimizations.
+            if shared_mem.contains_key(&local_id) {
+                // Just save these for later, after we know everything else has
+                // been inserted.
+                self.bindings.insert(BitArray::default());
+            } else {
+                let bits = allocator.alloc_for_ty(ty, self.ctx);
+                self.bindings.insert(bits);
+            }
+        }
+        // And then finish up the shared-memory ones.
+        for (local_id, referent) in shared_mem.iter() {
+            let bits = referent.as_bits(self).to_owned();
+            self.bindings[*local_id] = bits;
         }
 
         debug_assert_eq!(self.locals.len(), self.bindings.len());

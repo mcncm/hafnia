@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     analysis::{
@@ -12,7 +12,7 @@ use crate::{
     },
     bitset,
     context::Context,
-    mir::Stmt,
+    mir::{Place, RvalueKind, Stmt, StmtKind},
     store::Store,
 };
 
@@ -22,6 +22,9 @@ use crate::mir::{BlockId, Graph, GraphPt, LocalId};
 pub struct CfgFacts {
     pub controls: Store<BlockId, Vec<CtrlCond>>,
     pub uncompute_pts: BTreeMap<GraphPt, Vec<LocalId>>,
+    // Extra, dubious things computed as "optimizations"
+    /// Borrows that can share memory with the lender
+    pub shared_mem_borrows: HashMap<LocalId, Place>,
 }
 
 // NOTE: this is really also where we should compute which controls are on which
@@ -76,9 +79,12 @@ pub fn cfg_facts(gr: &Graph, ctx: &Context) -> CfgFacts {
         }
     }
 
+    let shared_mem = shared_mem_borrows(gr, &regions);
+
     CfgFacts {
         controls,
         uncompute_pts: pts,
+        shared_mem_borrows: shared_mem,
     }
 }
 
@@ -139,4 +145,64 @@ fn lts_at(pt: GraphPt, regions: &RegionInf) -> Lifetimes {
 
 fn empty(regions: &RegionInf) -> Lifetimes {
     Lifetimes::empty(regions.ascriptions.locals.len())
+}
+
+// Another really useful thing to know is if a shared borrow is in fact the only
+// one. If it is, we can reuse the memory of its referent. So only need to know
+// if its lifetime intersects any *other* lifetime. We can compute this
+// inefficiently, easily.
+//
+// * Get all the *loans* from the ascription store
+// * Sort by loanee *super* coarsly. Take everything with the same root.
+// * Take each one out, and... Actually, maybe don't even do that. Just use it
+//   if it's the only one.
+//
+//   This will be... basically a fake optimization to make my circuits look better.
+fn shared_mem_borrows<'a>(gr: &'a Graph, regions: &RegionInf) -> HashMap<LocalId, Place> {
+    let mut uniq_locals = HashSet::new();
+    let uniq_loan_places: HashSet<_> = regions
+        .ascriptions
+        .loans
+        .iter()
+        .map(|loan| &loan.place)
+        // All right, let's get *RIDICULOUS*
+        .filter(|pl| {
+            if !uniq_locals.contains(&pl.root) {
+                uniq_locals.insert(pl.root);
+                true
+            } else {
+                false
+            }
+        })
+        .collect();
+    // *LITERALLY* copy-and-pasted from the enumerate_stmts function
+    let stmts = gr
+        .idx_enumerate()
+        .map(|(blk, block)| {
+            block.stmts.iter().enumerate().map(move |(pos, stmt)| {
+                let loc = GraphPt { blk, stmt: pos };
+                (loc, stmt)
+            })
+        })
+        .flatten();
+
+    let mut shared_mem_refs = HashMap::new();
+    // and just take all the lhses from match some place whose root is only
+    // borrowed once in the CFG.
+    for (_, stmt) in stmts {
+        match &stmt.kind {
+            StmtKind::Assn(lhs, rhs) => match &rhs.data {
+                RvalueKind::Ref(_, place) => {
+                    if uniq_loan_places.contains(place) {
+                        if lhs.path.is_empty() {
+                            shared_mem_refs.insert(lhs.root, place.clone());
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    shared_mem_refs
 }

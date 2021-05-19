@@ -24,7 +24,7 @@ impl<'a> InterpreterState<'a> {
     {
         let mut g = GateQ::from(g);
         for CtrlCond { place, value } in self.ctrls() {
-            assert!(value); // they should all be positive...?
+            // assert!(value); // they should all be positive...?
             let ctrl_addrs = place.as_bits(self);
             for bit in ctrl_addrs.qbits.iter() {
                 g.ctrls.push((*bit, *value));
@@ -41,7 +41,9 @@ impl<'m> CircAssembler<'m> {
     where
         GateQ: From<G>,
     {
-        self.push_qgate_inner(GateQ::from(gate));
+        let mut gate = GateQ::from(gate);
+        gate.ctrls.extend(self.controls.clone());
+        self.push_qgate_inner(gate);
     }
 
     /// The inner function should *not* use the interpreter state, making it
@@ -150,6 +152,17 @@ impl<'m> CircAssembler<'m> {
         }
     }
 
+    /// `Init` instructions for each bit in an allocation
+    pub fn map_init(&mut self, obj: &BitSlice) {
+        for qbit in obj.qbits.iter() {
+            self.gate_buf.push(Inst::QInit(*qbit));
+        }
+
+        for cbit in obj.cbits.iter() {
+            self.gate_buf.push(Inst::CInit(*cbit));
+        }
+    }
+
     pub fn cnot_const(&mut self, obj: &BitSlice, value: &Value) {
         let const_bits = value.bits();
         if obj.cbits.is_empty() {
@@ -178,35 +191,20 @@ impl<'m> CircAssembler<'m> {
     */
 
     /// Apply a Z gate to all the qubits
-    pub fn map_phase(
-        &mut self,
-        obj: &BitSlice,
-        sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
-    ) {
-        let phase = |u| st.control(BaseGateQ::Z(u));
+    pub fn map_phase(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let phase = |u| BaseGateQ::Z(u);
         self.mapgate_sq(obj, phase, sink);
     }
 
     /// Apply an H gate to all the qubits
-    pub fn map_hadamard(
-        &mut self,
-        obj: &BitSlice,
-        sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
-    ) {
-        let split = |u| st.control(BaseGateQ::H(u));
+    pub fn map_hadamard(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let split = |u| BaseGateQ::H(u);
         self.mapgate_sq(obj, split, sink)
     }
 
     /// NOT all the bits--classical and quantum--in one place
-    pub fn map_not(
-        &mut self,
-        obj: &BitSlice,
-        sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
-    ) {
-        let notq = |(_, u)| st.control(BaseGateQ::X(u));
+    pub fn map_not(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let notq = |(_, u)| BaseGateQ::X(u);
         let notc = |(_, u)| BaseGateC::Not(u);
         // no `mapgate_sq` for both cbits and qbits yet
         if let Some(sink) = sink {
@@ -219,14 +217,8 @@ impl<'m> CircAssembler<'m> {
 
     /// CNOT all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_cnot(
-        &mut self,
-        ctrl: &BitSlice,
-        tgt: &BitSlice,
-        sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
-    ) {
-        let ctrlq = |(_, ctrl, tgt)| st.control(BaseGateQ::Cnot { ctrl, tgt });
+    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let ctrlq = |(_, ctrl, tgt)| BaseGateQ::Cnot { ctrl, tgt };
         let ctrlc = |(_, ctrl, tgt)| BaseGateC::Cnot { ctrl, tgt };
 
         if let Some(sink) = sink {
@@ -239,14 +231,8 @@ impl<'m> CircAssembler<'m> {
 
     /// SWAP all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_swap(
-        &mut self,
-        fst: &BitSlice,
-        snd: &BitSlice,
-        sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
-    ) {
-        let swapq = |(_, q1, q2)| st.control(BaseGateQ::Swap(q1, q2));
+    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+        let swapq = |(_, q1, q2)| BaseGateQ::Swap(q1, q2);
         let swapc = |(_, c1, c2)| BaseGateC::Swap(c1, c2);
 
         if let Some(sink) = sink {
@@ -265,15 +251,14 @@ impl<'m> CircAssembler<'m> {
         snd: &BitSlice,
         snd_sign: bool,
         sink: Option<&mut Vec<GateQ>>,
-        st: &InterpreterState,
     ) {
         let quant = |(idx, fst, snd)| {
             let lhs = tgt.qbits[idx];
             // Correctness: fst != lhs, snd != lhs
-            st.control(GateQ {
+            GateQ {
                 ctrls: vec![(fst, fst_sign), (snd, snd_sign)],
                 base: BaseGateQ::X(lhs),
-            })
+            }
         };
         let class = |(idx, fst, snd)| {
             let lhs = tgt.cbits[idx];
@@ -295,9 +280,11 @@ impl<'m> CircAssembler<'m> {
 
     /// The main optionally-teed mapping function for the common use case of
     /// single-qubit gates
-    pub fn mapgate_sq<F>(&mut self, obj: &BitSlice, f: F, sink: Option<&mut Vec<GateQ>>)
+    pub fn mapgate_sq<F, G>(&mut self, obj: &BitSlice, f: F, sink: Option<&mut Vec<GateQ>>)
     where
-        F: Fn(Qbit) -> GateQ,
+        F: Fn(Qbit) -> G,
+        G: Clone,
+        GateQ: From<G>,
     {
         let fp = |(_, q)| f(q);
 

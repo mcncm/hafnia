@@ -67,7 +67,7 @@ impl<'m> Interpreter<'m> {
                 let rhs = rplace.as_bits(&self.st);
                 // swap unconditionally
                 if lplace != rplace {
-                    let quant = |(_, fst, snd)| self.st.control(BaseGateQ::Swap(fst, snd));
+                    let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
                     let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
                     circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
                 }
@@ -89,7 +89,7 @@ impl<'m> Interpreter<'m> {
             debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
             debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
 
-            let quant = |(_, tgt, ctrl)| self.st.control(BaseGateQ::Cnot { ctrl, tgt });
+            let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
             let quant = util::tee(quant, &mut dest.gates);
             // FIXME no classical sink because no classical invertibility yet.
             let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
@@ -182,9 +182,9 @@ impl<'m> Interpreter<'m> {
                     // minutes.
                     unimplemented!();
                 }
-                circ.map_cnot(fst, lhs, Some(sink), &self.st);
-                circ.map_cnot(snd, lhs, Some(sink), &self.st);
-                circ.map_not(lhs, Some(sink), &self.st);
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_not(lhs, Some(sink));
             }
             Nequal => {
                 if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
@@ -195,8 +195,8 @@ impl<'m> Interpreter<'m> {
                     unimplemented!();
                 }
                 // For `&?bool`s, though, NEQUAL == XOR.
-                circ.map_cnot(fst, lhs, Some(sink), &self.st);
-                circ.map_cnot(snd, lhs, Some(sink), &self.st);
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
             }
             DotDot => {}
             Plus => {}
@@ -206,23 +206,23 @@ impl<'m> Interpreter<'m> {
             Less => {}
             Greater => {}
             Swap => {
-                circ.map_swap(fst, snd, Some(sink), &self.st);
+                circ.map_swap(fst, snd, Some(sink));
             }
 
             And => {
-                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink), &self.st);
+                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink));
             }
 
             Or => {
-                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink), &self.st);
-                circ.map_not(lhs, Some(sink), &self.st);
+                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink));
+                circ.map_not(lhs, Some(sink));
             }
 
             Xor => {
                 // NOTE: the control and target arguments here are in the
                 // *correct* order, they're just confusing. You can refactor later.
-                circ.map_cnot(fst, lhs, Some(sink), &self.st);
-                circ.map_cnot(snd, lhs, Some(sink), &self.st);
+                circ.map_cnot(fst, lhs, Some(sink));
+                circ.map_cnot(snd, lhs, Some(sink));
             }
         }
 
@@ -262,12 +262,13 @@ impl<'m> Interpreter<'m> {
         let lhs = &lplace.as_bits(&self.st);
         let (rhs, mut destructor) = match right {
             /*
-             * Could consider breakign this out into a separate function
+             * Could consider breaking this out into a separate function
              */
             Operand::Const(value) => {
                 return match op {
                     UnOpKind::Minus => todo!(),
                     UnOpKind::Linear => {
+                        circ.map_init(&lhs);
                         circ.cnot_const(&lhs, value);
                     }
                     UnOpKind::Not => todo!(),
@@ -294,7 +295,7 @@ impl<'m> Interpreter<'m> {
                     debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
                     debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
 
-                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates), &self.st);
+                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates));
                 }
 
                 (rhs, Some(dest))
@@ -343,11 +344,11 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                circ.map_not(&lhs, sink, &self.st);
+                circ.map_not(&lhs, sink);
             }
 
             UnOpKind::Split => {
-                circ.map_hadamard(&lhs, None, &self.st);
+                circ.map_hadamard(&lhs, None);
             }
 
             UnOpKind::Linear => {

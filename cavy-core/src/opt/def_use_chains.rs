@@ -115,20 +115,25 @@ fn replace_places_at(
                     BinOp(_, lop, rop) => {
                         replace_place_op(lop, place, prev);
                         replace_place_op(rop, place, prev);
+
+                        // NOTE: on NOTE: not necessary since `TerminalUse`?
                         // NOTE: binary operators break chains; here we change the
                         // place we're reassigning with to the new lhs. This is
                         // stateful and bad, and impossible to understand.
-                        *place = lhs.clone();
+                        // *place = lhs.clone();
                     }
                     UnOp(_, op) | Use(op) => replace_place_op(op, place, prev),
                     Ref(_, pl) => {
                         *pl = place.clone();
+
+                        // NOTE: on NOTE: not necessary since `TerminalUse`?
                         // NOTE: references break chains; here we change the
                         // place we're reassigning with to the new lhs. This is
                         // stateful and bad, and impossible to understand. Also,
                         // references don't *have* to do this; figuring out how
                         // to be rid of it would be another good optimization.
-                        *place = lhs.clone();
+                        // NOTE: actually, I’m not sure they do.
+                        // *place = lhs.clone();
                     }
                 }
                 if !last {
