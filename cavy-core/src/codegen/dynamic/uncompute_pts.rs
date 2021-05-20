@@ -81,6 +81,10 @@ pub fn cfg_facts(gr: &Graph, ctx: &Context) -> CfgFacts {
 
     let shared_mem = shared_mem_borrows(gr, &regions);
 
+    // use crate::util::FmtWith;
+    // print!("{:?}\n", pts);
+    // println!("{}", gr.fmt_with(ctx));
+
     CfgFacts {
         controls,
         uncompute_pts: pts,
@@ -138,6 +142,14 @@ fn lts_at(pt: GraphPt, regions: &RegionInf) -> Lifetimes {
     for (lt, lifetime) in regions.lifetimes.idx_enumerate() {
         if lifetime.contains(&pt) {
             lts.set(lt, true);
+        }
+    }
+
+    // include the borrows whose lifetimes are actually *empty*. We want to
+    // count these as ending "instantly."
+    for loan in regions.ascriptions.loans.iter() {
+        if loan.pt == pt {
+            lts.set(loan.ascr.lt, true);
         }
     }
     lts

@@ -159,6 +159,17 @@ impl<T> PlaceStore<T> {
             this.extend(other);
         }
     }
+
+    /// Recursively do something to all the data values in every node in the
+    /// tree.
+    pub fn modify_with<F>(&mut self, f: F)
+    where
+        F: Fn(&mut T) + Copy,
+    {
+        for tree in self.store.iter_mut() {
+            tree.modify_with(f);
+        }
+    }
 }
 
 impl<T> PlaceStore<T>
@@ -234,6 +245,21 @@ impl<T> PlaceNode<T> {
             }
         }
         self.slots.extend(other);
+    }
+
+    /// Recursively modify a node
+    pub fn modify_with<F>(&mut self, f: F)
+    where
+        F: Fn(&mut T) + Copy,
+    {
+        if let Some(t) = self.this.as_mut() {
+            f(t);
+        }
+        for slot in self.slots.iter_mut() {
+            if let Some(slot) = slot.as_mut() {
+                slot.modify_with(f);
+            }
+        }
     }
 }
 

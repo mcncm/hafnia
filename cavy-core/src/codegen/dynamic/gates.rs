@@ -2,14 +2,61 @@ use crate::{arch::MeasurementMode, circuit::*, values::Value};
 
 use super::{mem::*, *};
 
-impl<'a> Drop for Destructor<'a> {
-    fn drop(&mut self) {
+impl<'a> Destructor<'a> {
+    pub fn exec(&mut self) {
+        self.ct = 0;
         let mut circ = self.circ.borrow_mut();
-        while let Some(gate) = self.gates.pop() {
-            circ.push_qgate_inner(gate.into());
+        let mut gates = self.gates.clone();
+        while let Some(gate) = gates.pop() {
+            circ.push_qgate(gate);
+        }
+        drop(circ);
+
+        // NOTE: could be a problem that/if counts are never all reset to 0. We
+        // might need to make a pass when we *clone* the tree of setting them
+        // all to 0. Expensive. Oh well.
+        for parent in self.parents.iter() {
+            let ptrs = Rc::strong_count(parent);
+            let mut parent = parent.borrow_mut();
+            debug_assert_ne!(parent.ct, ptrs, "I think this is impossible?");
+            if parent.ct == (ptrs - 1) {
+                parent.exec();
+            } else {
+                parent.ct += 1;
+            }
+        }
+    }
+
+    /// Recursively zero out the counts on all reachable nodes
+    pub fn zero_cts(&mut self) {
+        self.ct = 0;
+        for parent in self.parents.iter() {
+            parent.borrow_mut().zero_cts();
         }
     }
 }
+
+// impl<'a> Drop for Destructor<'a> {
+//     fn drop(&mut self) {
+//         let mut circ = self.circ.borrow_mut();
+//         while let Some(gate) = self.gates.pop() {
+//             circ.push_qgate_inner(gate.into());
+//         }
+//
+//         for parent in self.parents.iter() {
+//             let ptrs = Rc::strong_count(parent);
+//             let mut parent = parent.borrow_mut();
+//             debug_assert_ne!(parent.ct, ptrs, "I think this is impossible?");
+//             // never run `exec` if we are the only pointer to the parent,
+//             // because we're about to drop it!
+//             if parent.ct == (ptrs - 1) && parent.ct != 1 {
+//                 parent.exec();
+//             } else {
+//                 parent.ct += 1;
+//             }
+//         }
+//     }
+// }
 
 impl<'a> InterpreterState<'a> {
     // NOTE: this will let us add *quantum* controls to *quantum* gates.

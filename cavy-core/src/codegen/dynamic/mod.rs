@@ -10,7 +10,7 @@ use smallvec::{smallvec, SmallVec};
 
 use std::{
     cell::{Ref, RefCell},
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
     iter::FromIterator,
     ops::RangeFrom,
     rc::Rc,
@@ -52,9 +52,11 @@ pub fn translate(mir: &Mir, ctx: &Context) -> CircuitBuf {
 /// NOTE: This works because of the order in which Rust runs `drop`s: first the
 /// type's destructor, then those of its fields.
 pub struct Destructor<'a> {
-    parents: SmallVec<[Rc<Destructor<'a>>; 2]>,
+    parents: SmallVec<[Rc<RefCell<Destructor<'a>>>; 2]>,
     /// The gates to unwind on drop. Classical uncomputation not yet supported.
     gates: Vec<GateQ>,
+    /// The secondary counter for multiple-execution
+    ct: usize,
     /// This will hold a shared mutable reference to the assembler, so it can
     /// freely unwind on drop.
     circ: Rc<RefCell<CircAssembler<'a>>>,
@@ -65,6 +67,7 @@ impl<'a> Destructor<'a> {
         Self {
             parents: smallvec![],
             gates: Vec::new(),
+            ct: 0,
             circ: circ.clone(),
         }
     }
@@ -74,10 +77,12 @@ impl<'a> Destructor<'a> {
             .iter()
             .map(|parent| interp.st.destructors.get(parent).map(|dest| dest.clone()))
             .flatten()
+            .flatten()
             .collect();
         Self {
             parents,
             gates: Vec::new(),
+            ct: 0,
             circ: interp.circ.clone(),
         }
     }
@@ -112,12 +117,13 @@ pub struct InterpreterState<'a> {
     controls: &'a ControlPlaces,
     /// The points at which destructors must run
     uncompute_pts: &'a BTreeMap<GraphPt, Vec<LocalId>>,
+    shared_mem_borrows: &'a HashMap<LocalId, Place>,
 
     // stateful fields
     /// Destructors from inactive blocks, to be merged later. (TODO doesn't work for loops)
-    latent_destructors: HashMap<BlockId, PlaceStore<Rc<Destructor<'a>>>>,
+    latent_destructors: HashMap<BlockId, PlaceStore<Vec<Rc<RefCell<Destructor<'a>>>>>>,
     /// The active forest of destructors
-    destructors: PlaceStore<Rc<Destructor<'a>>>,
+    destructors: PlaceStore<Vec<Rc<RefCell<Destructor<'a>>>>>,
     /// The currently active block
     blk: BlockId,
     /// Blocks that will not get executed again (TODO this doesn't work for loops)
@@ -136,6 +142,7 @@ impl<'a> InterpreterState<'a> {
             latent_destructors: HashMap::new(),
             controls: &cfg_facts.controls,
             uncompute_pts: &cfg_facts.uncompute_pts,
+            shared_mem_borrows: &cfg_facts.shared_mem_borrows,
             bindings: Store::new(),
             destructors: PlaceStore::new(gr.locals.len()),
         }
@@ -149,9 +156,38 @@ impl<'a> InterpreterState<'a> {
         &self.controls[self.blk]
     }
 
+    fn zero_dest_cts(&mut self) {
+        self.destructors.modify_with(|dests| {
+            for dest in dests.iter() {
+                dest.borrow_mut().zero_cts();
+            }
+        })
+    }
+
+    /// Save the currently-held destructors into those latent for the given
+    /// block.
     fn save_destructors(&mut self, blk: BlockId) {
-        self.latent_destructors
-            .insert(blk, self.destructors.clone());
+        // merge routine for the vec of destructors at each `Place`.
+        let f = |fst: &mut Vec<_>, snd| fst.extend(snd);
+        match self.latent_destructors.entry(blk) {
+            Entry::Occupied(mut e) => e.get_mut().extend_with(self.destructors.clone(), f),
+            Entry::Vacant(e) => {
+                e.insert(self.destructors.clone());
+            }
+        }
+    }
+
+    fn destroy(&mut self, place: &Place) {
+        let node = self.destructors.get_node_mut(place);
+        if let Some(node) = node {
+            if let Some(dests) = node.this.as_mut() {
+                for dest in dests.iter_mut() {
+                    dest.borrow_mut().exec();
+                }
+            }
+            // drop them, (no longer executes anything)
+            std::mem::swap(node, &mut PlaceNode::default());
+        }
     }
 }
 
@@ -223,6 +259,7 @@ impl<'a> Interpreter<'a> {
         // optimized away, in fact. But to make our lives simpler, we'll run
         // a "gc pass" where we eliminate all remaining destructors.
         self.st.destructors = PlaceStore::new(0);
+        assert!(self.st.latent_destructors.is_empty());
 
         let circ = match Rc::try_unwrap(self.circ) {
             Ok(refcell) => refcell.into_inner(),
@@ -282,6 +319,10 @@ impl<'a> Interpreter<'a> {
     }
 
     fn exec_block(&mut self, blk: BlockId) {
+        if let Some(dests) = self.st.latent_destructors.remove(&blk) {
+            self.st.destructors = dests;
+        }
+
         let block = &self.st.blocks[blk];
         self.st.blk = blk;
 
@@ -304,7 +345,11 @@ impl<'a> Interpreter<'a> {
             self.exec_stmt(stmt);
         }
         self.st.visited_blocks.insert(blk);
-        self.terminate(&block.kind);
+        let pt = GraphPt {
+            blk,
+            stmt: block.stmts.len(),
+        };
+        self.terminate(&block.kind, pt);
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) {
@@ -345,7 +390,10 @@ impl<'a> Interpreter<'a> {
 
     /// After finishing with a block, we might have to do a procedure call or
     /// add more blocks to the candidates list
-    fn terminate(&mut self, kind: &BlockKind) {
+    fn terminate(&mut self, kind: &BlockKind, pt: GraphPt) {
+        // still uncompute at the beginning of this!
+        self.uncompute(pt);
+
         // TODO: procedure calls: figure out calling convention
         match kind {
             BlockKind::Goto(_) => {}
@@ -359,11 +407,16 @@ impl<'a> Interpreter<'a> {
                 return;
             }
         }
-        // TODO: conditionals: add some conditions, I guess
+
+        // Assuming only if/else: either multiple eligible, or one maybe-eligible
+        let dests = self.st.destructors.clone();
         for succ in kind.successors() {
-            // self.st.save_destructors(*succ);
             if self.dfs_eligible(*succ) {
+                self.st.zero_dest_cts();
+                self.st.destructors = dests.clone();
                 self.exec_block(*succ);
+            } else {
+                self.st.save_destructors(*succ);
             }
         }
     }

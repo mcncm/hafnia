@@ -42,16 +42,6 @@ pub struct LaTeX {
     pub package: Package,
 }
 
-impl LaTeX {
-    fn uses_nwtarg(&self) -> bool {
-        match self.package {
-            Quantikz { nwtarg: true, .. } | Qcircuit { nwtarg: true } => true,
-            // always use \nwtarg in standalone mode
-            _ => self.standalone,
-        }
-    }
-}
-
 // == Range queries ==
 
 /// An inclusive interval
@@ -211,8 +201,8 @@ impl FmtWith<LaTeX> for Elem {
             QCtrl(dist, true) => write!(f, r"\ctrl{{{}}}", dist),
             QCtrl(dist, false) => write!(f, r"\octrl{{{}}}", dist),
             Targ(liveness) => match liveness {
-                Dead if latex.has_nwtarg() => f.write_str(r"\nwtarg{}"),
-                LiveC if latex.has_nwtarg() => f.write_str(r"\nwtarg{} \cw"),
+                Dead if latex.uses_nwtarg() => f.write_str(r"\nwtarg{}"),
+                LiveC if latex.uses_nwtarg() => f.write_str(r"\nwtarg{} \cw"),
                 _ => f.write_str(r"\targ{}"),
             },
 
@@ -672,8 +662,8 @@ impl<'l> LayoutArray<'l> {
     fn insert_multiple(&mut self, mut elems: Vec<(usize, Elem)>) {
         debug_assert!(elems.len() >= 2);
         elems.sort_by_key(|wire| wire.0);
-        let min = elems[0].0;
-        let max = elems[1].0;
+        let min = elems.iter().map(|elem| elem.0).min().unwrap();
+        let max = elems.iter().map(|elem| elem.0).max().unwrap();
 
         // Find a valid range in which to insert this
         let overlaps = self.blocked.get_overlaps(min..=max);
@@ -778,17 +768,17 @@ impl FmtWith<LaTeX> for LayoutArray<'_> {
 // == Headers, etc. ==
 
 impl LaTeX {
+    fn uses_nwtarg(&self) -> bool {
+        match self.package {
+            Quantikz { nwtarg: true, .. } | Qcircuit { nwtarg: true } => true,
+            // always use \nwtarg in standalone mode
+            _ => self.standalone,
+        }
+    }
+
     /// Escapes a string by replacing underscores with `\_`
     fn escape(s: &str) -> String {
         str::replace(s, "_", r"\_")
-    }
-
-    fn has_nwtarg(&self) -> bool {
-        if let Package::Quantikz { .. } = self.package {
-            self.standalone
-        } else {
-            false
-        }
     }
 
     /// LaTeX header for standalone mode

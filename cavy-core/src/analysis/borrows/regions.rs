@@ -256,7 +256,17 @@ impl<'a> RegionInf<'a> {
                         ref ret,
                         ..
                     } = **call;
+                    // FIXME hack
+                    if self.ascriptions.place_node(ret).is_none() {
+                        return;
+                    }
                     for arg in args {
+                        // FIXME hack
+                        if let Some(arg) = arg.place() {
+                            if self.ascriptions.place_node(arg).is_none() {
+                                continue;
+                            }
+                        }
                         // Here, we *do* need to look forward into the
                         // next block(s) to get the point(s) to insert the statement.
                         for &blk in self.context.gr[pt.blk].successors() {

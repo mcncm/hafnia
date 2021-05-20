@@ -19,17 +19,11 @@ impl<'m> Interpreter<'m> {
     pub fn uncompute(&mut self, pt: GraphPt) {
         if let Some(locals) = self.st.uncompute_pts.get(&pt) {
             for local in locals {
-                let node = self.st.destructors.get_root_mut(*local);
-                // Run the destructors
-                std::mem::swap(node, &mut PlaceNode::default());
+                self.st.destroy(&(*local).into());
             }
         }
     }
 
-    // NOTE: this function is probably just wrong. We probably don't want to
-    // delegate all the `memcpy`ing to these `Rvalue`-specific methods.
-    //
-    // The deputy methods should *probably* just get a pile of bits.
     pub fn compute_assn(&mut self, place: &Place, rvalue: &Rvalue) {
         let bindings = match &rvalue.data {
             RvalueKind::BinOp(op, lhs, rhs) => self.compute_binop(place, op, lhs, rhs),
@@ -76,8 +70,10 @@ impl<'m> Interpreter<'m> {
     }
 
     pub fn compute_ref(&mut self, kind: &RefKind, lplace: &Place, rplace: &Place) {
-        // Is always safe to put a new one in here?
-        let mut dest = Destructor::from_parent(rplace, self);
+        // Ok, double-check this, but I'm *PRETTY* sure what we want is to push
+        // back any destructors from both the left *AND* right. We'll notice if
+        // things aren't uncomputing correctly.
+        let mut dest = Destructor::from_parents(&[lplace, rplace], self);
         let rhs = rplace.as_bits(&self.st);
         let lhs = lplace.as_bits(&self.st);
 
@@ -97,12 +93,20 @@ impl<'m> Interpreter<'m> {
         }
 
         drop(circ);
-        self.st.destructors.insert(lplace, Rc::new(dest));
+        self.st
+            .destructors
+            .insert(lplace, vec![Rc::new(RefCell::new(dest))]);
     }
 
     pub fn compute_drop(&mut self, place: &Place) {
         // Execute any destructors
-        self.st.destructors.get_mut(place).take();
+        self.st.destroy(place);
+
+        // FIXME this is just to make the hack work
+        // If this is shared memory, don't write `Free` instructions
+        if self.st.shared_mem_borrows.contains_key(&place.root) {
+            return;
+        }
 
         // Correctness: the destructor is done using the circuit assembler, so
         // we can borrow it here.
@@ -166,7 +170,7 @@ impl<'m> Interpreter<'m> {
         // a binop.
         let mut circ = self.circ.borrow_mut();
 
-        let mut destructor = Destructor::from_parents(&[fst_place, snd_place], self);
+        let mut destructor = Destructor::from_parents(&[place, fst_place, snd_place], self);
         let sink = &mut destructor.gates;
 
         let lhs = &place.as_bits(&self.st);
@@ -229,10 +233,15 @@ impl<'m> Interpreter<'m> {
         // We're still holding this borrow. Relinquish it before possibly
         // executing a destructor.
         drop(circ);
-        // Is there *not* an std method for this?
-        self.st.destructors.get_mut(place).map(|dest| {
-            *dest = Rc::new(destructor);
-        });
+        // create the node if there is none yet
+        let dest = self
+            .st
+            .destructors
+            .create_node(place)
+            .this
+            .get_or_insert_with(|| vec![]);
+        dest.clear();
+        dest.push(Rc::new(RefCell::new(destructor)));
     }
 
     fn compute_place_const_binop(
@@ -286,7 +295,10 @@ impl<'m> Interpreter<'m> {
              * certain optimizations?
              */
             Operand::Copy(rplace) => {
-                let mut dest = Destructor::from_parent(rplace, &self);
+                // DESTRUCTORS: Ok, but do we want the parent on the lhs, too?
+                // Because, we might be overwriting something in there. I think
+                // we might. Let's see.
+                let mut dest = Destructor::from_parents(&[lplace, rplace], &self);
                 let rhs = rplace.as_bits(&self.st);
 
                 // Control first if necessary. Note that this will control
@@ -295,7 +307,8 @@ impl<'m> Interpreter<'m> {
                     debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
                     debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
 
-                    circ.map_cnot(lhs, &rhs, Some(&mut dest.gates));
+                    // This is actually the right order
+                    circ.map_cnot(&rhs, &lhs, Some(&mut dest.gates));
                 }
 
                 (rhs, Some(dest))
@@ -372,7 +385,9 @@ impl<'m> Interpreter<'m> {
         */
         drop(circ);
         if let Some(destructor) = destructor {
-            self.st.destructors.insert(lplace, Rc::new(destructor));
+            self.st
+                .destructors
+                .insert(lplace, vec![Rc::new(RefCell::new(destructor))]);
         }
     }
 }

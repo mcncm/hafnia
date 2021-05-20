@@ -179,6 +179,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
                         ascr,
                         span: *span,
                         place: rhs.clone(),
+                        pt: loc,
                     };
                     let id = self.ascriptions.loans.insert(loan);
                     let key = self.ascriptions.refs.insert(loc, id);
@@ -262,6 +263,7 @@ pub struct Loan {
     pub ascr: Ascr,
     pub place: Place,
     pub span: Span,
+    pub pt: GraphPt,
 }
 
 impl Loan {
