@@ -161,8 +161,11 @@ impl BaseGateQ {
     pub fn conj(self) -> BaseGateQ {
         use BaseGateQ::*;
         match self {
-            T(u) => T(u),
+            T(u) => TDag(u),
             TDag(u) => T(u),
+            S(u) => SDag(u),
+            SDag(u) => S(u),
+            Phase(u, phase) => Phase(u, -phase),
             _ => self,
         }
     }
@@ -176,8 +179,9 @@ impl BaseGateQ {
 }
 
 impl GateQ {
-    pub fn conj(&mut self) {
+    pub fn conj(mut self) -> GateQ {
         self.base = self.base.conj();
+        self
     }
 
     pub fn is_cx(&self) -> bool {

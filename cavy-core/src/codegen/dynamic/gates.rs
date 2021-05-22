@@ -83,7 +83,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
         // This check happens *every* time we push a gate, which is a little
         // wasteful when mapping over a large object.
         if let Some(sink) = &mut self.qsink {
-            sink.push(gate.clone());
+            sink.push(gate.clone().conj());
         }
         gate.ctrls.extend(self.controls.clone());
 

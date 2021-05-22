@@ -1342,7 +1342,7 @@ mod typing {
                     match (lty, rty) {
                         (Type::Ref(Shrd, _), Type::Ref(Shrd, _)) => {
                             if left == right && !left.is_classical(self.ctx) {
-                                return Ok(left);
+                                return Ok(self.ctx.common.shrd_q_bool);
                             }
                         }
                         _ => {

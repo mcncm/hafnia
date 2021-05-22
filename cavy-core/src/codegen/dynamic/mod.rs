@@ -56,6 +56,8 @@ pub struct Destructor<'a> {
     parents: SmallVec<[Rc<RefCell<Destructor<'a>>>; 2]>,
     /// The gates to unwind on drop. Classical uncomputation not yet supported.
     gates: Vec<GateQ>,
+    /// Extra ancillas that have been allocated to compute this temporary value.
+    ancillas: Vec<Qbit>,
     /// The secondary counter for multiple-execution
     ct: usize,
 }
@@ -64,7 +66,8 @@ impl<'a> Destructor<'a> {
     fn new() -> Self {
         Self {
             parents: smallvec![],
-            gates: Vec::new(),
+            gates: vec![],
+            ancillas: vec![],
             ct: 0,
         }
     }
@@ -78,7 +81,8 @@ impl<'a> Destructor<'a> {
             .collect();
         Self {
             parents,
-            gates: Vec::new(),
+            gates: vec![],
+            ancillas: vec![],
             ct: 0,
         }
     }

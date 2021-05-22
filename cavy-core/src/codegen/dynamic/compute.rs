@@ -157,16 +157,18 @@ impl<'m> Interpreter<'m> {
 
         match op {
             Equal => {
-                if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
-                    // for larger types, we have to take the AND of the XNORs,
-                    // which means allocating intermediates. This isn't
-                    // something we're going to be able to tackle in five
-                    // minutes.
-                    unimplemented!();
-                }
-                circ.map_cnot(fst, lhs);
-                circ.map_cnot(snd, lhs);
-                circ.map_not(lhs);
+                let xnors = circ
+                    .allocators
+                    .alloc_for_ty(self.st.type_of(fst_place), self.ctx);
+                circ.map_cnot(fst, &xnors.as_slice());
+                circ.map_cnot(snd, &xnors.as_slice());
+                circ.map_not(&xnors.as_slice());
+                // Should have a generalized AND.
+                let mut and_gate: GateQ = BaseGateQ::X(lhs.qbits[0]).into();
+                and_gate.ctrls = xnors.qbits.iter().map(|q| (*q, true)).collect();
+                circ.push_qgate(and_gate);
+                // FIXME classical case
+                destructor.ancillas = xnors.qbits;
             }
             Nequal => {
                 if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
@@ -303,8 +305,7 @@ impl<'m> Interpreter<'m> {
              */
             Operand::Move(rplace) => {
                 let rhs = rplace.as_bits(&self.st);
-                let mut dest = Destructor::from_parents(&[lplace, rplace], &self.st);
-                let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
+                let mut circ = self.circ.with_sinks(None, None);
                 // Swap first if necessary. Note that this will swap clasical
                 // bits with classical bits and qubits with qubits.
 
@@ -323,7 +324,7 @@ impl<'m> Interpreter<'m> {
                     );
                 }
 
-                (rhs, Some(dest))
+                (rhs, None)
             }
         };
 
