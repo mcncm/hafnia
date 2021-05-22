@@ -32,6 +32,8 @@ pub enum BaseGateQ {
     H(Qbit),
     Z(Qbit),
     T(Qbit),
+    /// An arbitrary-phase gate
+    Phase(Qbit, u32),
     TDag(Qbit),
     /// Ok, this isn't *great* in that there are *two representations* of the
     /// *same gate*. But it seems to make code generation easier. We could call
@@ -161,6 +163,13 @@ impl BaseGateQ {
             _ => self,
         }
     }
+
+    pub fn control(self, ctrl: Qbit) -> GateQ {
+        GateQ {
+            ctrls: vec![(ctrl, true)],
+            base: self,
+        }
+    }
 }
 
 impl GateQ {
@@ -245,6 +254,7 @@ impl MaxBits for BaseGateQ {
             BaseGateQ::Z(u) => u,
             BaseGateQ::T(u) => u,
             BaseGateQ::TDag(u) => u,
+            BaseGateQ::Phase(u, _) => u,
             BaseGateQ::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
             BaseGateQ::Swap(u, v) => std::cmp::max(u, v),
         };
@@ -438,6 +448,7 @@ impl std::fmt::Display for BaseGateQ {
             Z(q) => write!(f, "Z {}", q),
             T(q) => write!(f, "T {}", q),
             TDag(q) => write!(f, "T* {}", q),
+            Phase(q, phase) => write!(f, "@ {} {}", phase, q),
             Cnot { ctrl, tgt } => write!(f, "CNOT {} {}", ctrl, tgt),
             Swap(fst, snd) => write!(f, "SWAP {} {}", fst, snd),
         }

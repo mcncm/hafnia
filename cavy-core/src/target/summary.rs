@@ -27,7 +27,7 @@ impl Target for Summary {
 
         zero! [
             sqgates
-                xgates tgates hgates zgates
+                xgates tgates hgates zgates arbphase_gates
             mqgates
                 swapgates cxgates czgates cswapgates
 
@@ -68,6 +68,7 @@ impl Target for Summary {
                         Z(_) => zgates += 1,
                         T(_) => tgates += 1,
                         TDag(_) => tgates += 1,
+                        Phase(_, _) => arbphase_gates += 1,
                         // multiqubit base gates covered by the multiqubit gate
                         // checks above
                         Swap(_, _) => unreachable!(),
@@ -92,6 +93,7 @@ impl Target for Summary {
                     "t": tgates,
                     "h": hgates,
                     "z": zgates,
+                    "arb_phase": arbphase_gates,
                     "total": sqgates,
                 },
                 "mqgates": {

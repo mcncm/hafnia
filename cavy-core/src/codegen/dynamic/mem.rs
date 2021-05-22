@@ -84,7 +84,7 @@ impl BitAllocators {
     }
 }
 
-impl<'a> MemFree<Qbit> for CircAssembler<'a> {
+impl<'a, 'c> MemFree<Qbit> for CircAssembler<'a, 'c> {
     fn free<S>(&mut self, items: S, state: FreeState)
     where
         S: Iterator<Item = Qbit>,
@@ -93,7 +93,7 @@ impl<'a> MemFree<Qbit> for CircAssembler<'a> {
     }
 }
 
-impl<'a> MemFree<Cbit> for CircAssembler<'a> {
+impl<'a, 'c> MemFree<Cbit> for CircAssembler<'a, 'c> {
     fn free<S>(&mut self, items: S, state: FreeState)
     where
         S: Iterator<Item = Cbit>,

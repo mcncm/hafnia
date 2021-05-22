@@ -1,3 +1,4 @@
+mod algorithm;
 mod compute;
 mod gates;
 mod mem;
@@ -19,7 +20,7 @@ use std::{
 use crate::{
     analysis::controls::{ControlPlaces, CtrlCond},
     ast::FnId,
-    circuit::{BaseGateQ, CircuitBuf, GateQ, Qbit},
+    circuit::{BaseGateQ, CircuitBuf, GateC, GateQ, Qbit},
     context::Context,
     mir::*,
     place_tree::{PlaceNode, PlaceStore},
@@ -57,25 +58,21 @@ pub struct Destructor<'a> {
     gates: Vec<GateQ>,
     /// The secondary counter for multiple-execution
     ct: usize,
-    /// This will hold a shared mutable reference to the assembler, so it can
-    /// freely unwind on drop.
-    circ: Rc<RefCell<CircAssembler<'a>>>,
 }
 
 impl<'a> Destructor<'a> {
-    fn new(circ: &Rc<RefCell<CircAssembler<'a>>>) -> Self {
+    fn new() -> Self {
         Self {
             parents: smallvec![],
             gates: Vec::new(),
             ct: 0,
-            circ: circ.clone(),
         }
     }
 
-    fn from_parents(parents: &[&Place], interp: &Interpreter<'a>) -> Self {
+    fn from_parents(parents: &[&Place], st: &InterpreterState<'a>) -> Self {
         let parents = parents
             .iter()
-            .map(|parent| interp.st.destructors.get(parent).map(|dest| dest.clone()))
+            .map(|parent| st.destructors.get(parent).map(|dest| dest.clone()))
             .flatten()
             .flatten()
             .collect();
@@ -83,12 +80,11 @@ impl<'a> Destructor<'a> {
             parents,
             gates: Vec::new(),
             ct: 0,
-            circ: interp.circ.clone(),
         }
     }
 
-    fn from_parent(parent: &Place, interp: &Interpreter<'a>) -> Self {
-        Self::from_parents(&[parent], interp)
+    fn from_parent(parent: &Place, st: &InterpreterState<'a>) -> Self {
+        Self::from_parents(&[parent], st)
     }
 }
 
@@ -176,22 +172,9 @@ impl<'a> InterpreterState<'a> {
             }
         }
     }
-
-    fn destroy(&mut self, place: &Place) {
-        let node = self.destructors.get_node_mut(place);
-        if let Some(node) = node {
-            if let Some(dests) = node.this.as_mut() {
-                for dest in dests.iter_mut() {
-                    dest.borrow_mut().exec();
-                }
-            }
-            // drop them, (no longer executes anything)
-            std::mem::swap(node, &mut PlaceNode::default());
-        }
-    }
 }
 
-struct CircAssembler<'a> {
+struct Circ<'a> {
     // NOTE: I'm no longer sure that this comment is true. I think that we can
     // statically allocate everything, including temporaries used when
     // inserting/expanding gates.
@@ -207,7 +190,7 @@ struct CircAssembler<'a> {
     controls: Vec<(Qbit, bool)>,
 }
 
-impl<'a> CircAssembler<'a> {
+impl<'a> Circ<'a> {
     fn new(ctx: &'a Context<'a>) -> Self {
         Self {
             ctx,
@@ -216,12 +199,55 @@ impl<'a> CircAssembler<'a> {
             controls: vec![],
         }
     }
+
+    pub fn borrow_mut<'c>(&'c mut self) -> CircAssembler<'a, 'c>
+    where
+        'a: 'c,
+    {
+        CircAssembler {
+            allocators: &mut self.allocators,
+            ctx: &self.ctx,
+            gate_buf: &mut self.gate_buf,
+            controls: &self.controls,
+            qsink: None,
+            csink: None,
+        }
+    }
+
+    pub fn with_sinks<'c>(
+        &'c mut self,
+        qsink: Option<&'c mut Vec<GateQ>>,
+        csink: Option<&'c mut Vec<GateC>>,
+    ) -> CircAssembler<'a, 'c>
+    where
+        'a: 'c,
+    {
+        CircAssembler {
+            allocators: &mut self.allocators,
+            ctx: &self.ctx,
+            gate_buf: &mut self.gate_buf,
+            controls: &self.controls,
+            qsink,
+            csink,
+        }
+    }
+}
+
+pub struct CircAssembler<'a, 'c> {
+    allocators: &'c mut BitAllocators,
+    ctx: &'c Context<'a>,
+    gate_buf: &'c mut CircuitBuf,
+    controls: &'c [(Qbit, bool)],
+    /// And a sink for teed-off gates
+    qsink: Option<&'c mut Vec<GateQ>>,
+    /// (classical ones, too)
+    csink: Option<&'c mut Vec<GateC>>,
 }
 
 pub struct Interpreter<'a> {
     mir: &'a Mir,
     st: InterpreterState<'a>,
-    circ: Rc<RefCell<CircAssembler<'a>>>,
+    circ: Circ<'a>,
     mir_facts: &'a Store<FnId, CfgFacts>,
     ctx: &'a Context<'a>,
 }
@@ -232,12 +258,12 @@ impl<'a> Interpreter<'a> {
         let gr = &mir.graphs[entry_point];
         let cfg_facts = &mir_facts[entry_point];
         let mut st = InterpreterState::new(gr, cfg_facts, ctx);
-        let circ = Rc::new(RefCell::new(CircAssembler::new(ctx)));
+        let mut circ = Circ::new(ctx);
 
         // Initialize the environment
         st.mem_init(
             std::iter::empty(),
-            &mut circ.borrow_mut().allocators,
+            &mut circ.allocators,
             &mir_facts[entry_point].shared_mem_borrows,
         );
         Self {
@@ -261,14 +287,7 @@ impl<'a> Interpreter<'a> {
         self.st.destructors = PlaceStore::new(0);
         assert!(self.st.latent_destructors.is_empty());
 
-        let circ = match Rc::try_unwrap(self.circ) {
-            Ok(refcell) => refcell.into_inner(),
-            Err(_) => {
-                dbg!(self.st.destructors);
-                panic!("dangling pointer to circuit assembler")
-            }
-        };
-        circ.gate_buf
+        self.circ.gate_buf
     }
 
     fn funcall(&mut self, call: &FnCall) {
@@ -281,12 +300,13 @@ impl<'a> Interpreter<'a> {
 
         // Calling conventions
         let caller_ret_adr = ret.as_bits(&self.st);
+        let caller_st = &self.st; // need to capture individual field
         let caller_arg_adrs = args.iter().map(|caller_arg| {
             let caller_arg = match caller_arg {
                 Operand::Const(_) => unreachable!(),
                 Operand::Copy(place) | Operand::Move(place) => place,
             };
-            caller_arg.as_bits(&self.st)
+            caller_arg.as_bits(caller_st)
         });
         // Copy the parameter locations
         let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
@@ -335,10 +355,7 @@ impl<'a> Interpreter<'a> {
                 controls.push((*bit, *value));
             }
         }
-
-        let mut circ = self.circ.borrow_mut();
-        circ.controls = controls;
-        drop(circ);
+        self.circ.controls = controls;
 
         for (loc, stmt) in block.stmts.iter().enumerate() {
             self.uncompute(GraphPt { blk, stmt: loc });

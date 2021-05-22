@@ -19,7 +19,7 @@ impl<'m> Interpreter<'m> {
     pub fn uncompute(&mut self, pt: GraphPt) {
         if let Some(locals) = self.st.uncompute_pts.get(&pt) {
             for local in locals {
-                self.st.destroy(&(*local).into());
+                self.destroy(&(*local).into());
             }
         }
     }
@@ -73,7 +73,7 @@ impl<'m> Interpreter<'m> {
         // Ok, double-check this, but I'm *PRETTY* sure what we want is to push
         // back any destructors from both the left *AND* right. We'll notice if
         // things aren't uncomputing correctly.
-        let mut dest = Destructor::from_parents(&[lplace, rplace], self);
+        let mut dest = Destructor::from_parents(&[lplace, rplace], &self.st);
         let rhs = rplace.as_bits(&self.st);
         let lhs = lplace.as_bits(&self.st);
 
@@ -100,7 +100,7 @@ impl<'m> Interpreter<'m> {
 
     pub fn compute_drop(&mut self, place: &Place) {
         // Execute any destructors
-        self.st.destroy(place);
+        self.destroy(place);
 
         // FIXME this is just to make the hack work
         // If this is shared memory, don't write `Free` instructions
@@ -152,7 +152,7 @@ impl<'m> Interpreter<'m> {
     // this module.
     fn destructor_for(&mut self, place: &Place, parents: &[&Place]) -> Option<Destructor<'m>> {
         if let Some(RefKind::Uniq) = self.st.type_of(place).ref_kind(self.ctx) {
-            Some(Destructor::from_parents(parents, self))
+            Some(Destructor::from_parents(parents, &self.st))
         } else {
             None
         }
@@ -166,12 +166,9 @@ impl<'m> Interpreter<'m> {
         snd_place: &Place,
     ) {
         use BinOpKind::*;
-        // Correctness: this is safe because we can't destroy a reference during
-        // a binop.
-        let mut circ = self.circ.borrow_mut();
-
-        let mut destructor = Destructor::from_parents(&[place, fst_place, snd_place], self);
+        let mut destructor = Destructor::from_parents(&[place, fst_place, snd_place], &self.st);
         let sink = &mut destructor.gates;
+        let mut circ = self.circ.with_sinks(Some(sink), None);
 
         let lhs = &place.as_bits(&self.st);
         let fst = &fst_place.as_bits(&self.st);
@@ -186,9 +183,9 @@ impl<'m> Interpreter<'m> {
                     // minutes.
                     unimplemented!();
                 }
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
-                circ.map_not(lhs, Some(sink));
+                circ.map_cnot(fst, lhs);
+                circ.map_cnot(snd, lhs);
+                circ.map_not(lhs);
             }
             Nequal => {
                 if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
@@ -199,34 +196,42 @@ impl<'m> Interpreter<'m> {
                     unimplemented!();
                 }
                 // For `&?bool`s, though, NEQUAL == XOR.
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_cnot(fst, lhs);
+                circ.map_cnot(snd, lhs);
             }
             DotDot => {}
-            Plus => {}
+            Plus => {
+                // FIXME quantum case only for now
+                assert_eq!(fst.cbits.len(), 0);
+                let fst = fst.qbits;
+                let snd = snd.qbits;
+
+                let sz = fst.len();
+                let phase = 1 / sz;
+            }
             Minus => {}
             Times => {}
             Mod => {}
             Less => {}
             Greater => {}
             Swap => {
-                circ.map_swap(fst, snd, Some(sink));
+                circ.map_swap(fst, snd);
             }
 
             And => {
-                circ.map_ccnot(lhs, fst, true, snd, true, Some(sink));
+                circ.map_ccnot(lhs, fst, true, snd, true);
             }
 
             Or => {
-                circ.map_ccnot(lhs, fst, false, snd, false, Some(sink));
-                circ.map_not(lhs, Some(sink));
+                circ.map_ccnot(lhs, fst, false, snd, false);
+                circ.map_not(lhs);
             }
 
             Xor => {
                 // NOTE: the control and target arguments here are in the
                 // *correct* order, they're just confusing. You can refactor later.
-                circ.map_cnot(fst, lhs, Some(sink));
-                circ.map_cnot(snd, lhs, Some(sink));
+                circ.map_cnot(fst, lhs);
+                circ.map_cnot(snd, lhs);
             }
         }
 
@@ -265,9 +270,6 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_unop(&mut self, lplace: &Place, op: &UnOpKind, right: &Operand) {
-        // Correctness: this is safe because we can't drop any ancillas here
-        let mut circ = self.circ.borrow_mut();
-
         let lhs = &lplace.as_bits(&self.st);
         let (rhs, mut destructor) = match right {
             /*
@@ -277,6 +279,7 @@ impl<'m> Interpreter<'m> {
                 return match op {
                     UnOpKind::Minus => todo!(),
                     UnOpKind::Linear => {
+                        let mut circ = self.circ.borrow_mut();
                         circ.map_init(&lhs);
                         circ.cnot_const(&lhs, value);
                     }
@@ -298,8 +301,9 @@ impl<'m> Interpreter<'m> {
                 // DESTRUCTORS: Ok, but do we want the parent on the lhs, too?
                 // Because, we might be overwriting something in there. I think
                 // we might. Let's see.
-                let mut dest = Destructor::from_parents(&[lplace, rplace], &self);
+                let mut dest = Destructor::from_parents(&[lplace, rplace], &self.st);
                 let rhs = rplace.as_bits(&self.st);
+                let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
 
                 // Control first if necessary. Note that this will control
                 // classical bits on classical bits and qubits on qubits.
@@ -308,7 +312,7 @@ impl<'m> Interpreter<'m> {
                     debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
 
                     // This is actually the right order
-                    circ.map_cnot(&rhs, &lhs, Some(&mut dest.gates));
+                    circ.map_cnot(&rhs, &lhs);
                 }
 
                 (rhs, Some(dest))
@@ -320,6 +324,8 @@ impl<'m> Interpreter<'m> {
              */
             Operand::Move(rplace) => {
                 let rhs = rplace.as_bits(&self.st);
+                let mut dest = Destructor::from_parents(&[lplace, rplace], &self.st);
+                let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
                 // Swap first if necessary. Note that this will swap clasical
                 // bits with classical bits and qubits with qubits.
 
@@ -333,17 +339,18 @@ impl<'m> Interpreter<'m> {
                     circ.mapgate_pair(
                         lhs,
                         &rhs,
-                        Some(|(_, u, v)| self.st.control(BaseGateQ::Swap(u, v))),
+                        Some(|(_, u, v)| BaseGateQ::Swap(u, v)),
                         Some(|(_, u, v)| BaseGateC::Swap(u, v)),
                     );
                 }
 
-                (rhs, None)
+                (rhs, Some(dest))
             }
         };
 
         // Take a handle to the gate sink, if there is one.
         let sink = destructor.as_mut().map(|dest| &mut dest.gates);
+        let mut circ = self.circ.with_sinks(sink, None);
 
         /*
          Now we should be able to operate in-place on the left-hand side.
@@ -357,11 +364,11 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                circ.map_not(&lhs, sink);
+                circ.map_not(&lhs);
             }
 
             UnOpKind::Split => {
-                circ.map_hadamard(&lhs, None);
+                circ.map_hadamard(&lhs);
             }
 
             UnOpKind::Linear => {
@@ -383,7 +390,6 @@ impl<'m> Interpreter<'m> {
         Finally, insert the destructor, if there is one, and make it immutable
         for all time.
         */
-        drop(circ);
         if let Some(destructor) = destructor {
             self.st
                 .destructors

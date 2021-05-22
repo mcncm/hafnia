@@ -5,8 +5,6 @@ use cavy_core::circuit::BaseGateQ;
 
 use BaseGateQ::*;
 
-use std::io::{self, Write};
-
 test_unitary! {
     x_gate {
         fn main() {
@@ -15,6 +13,13 @@ test_unitary! {
     } => [
         X(0.into())
     ]
+
+    invert_borrow_null {
+        fn main() {
+            let x = ?false;
+            let ref = ~&x;
+        }
+    } => []
 
     simple_cnot_if {
         fn main() {

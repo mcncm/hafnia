@@ -148,7 +148,7 @@ enum Elem {
     // Ket state vectors
     Ket(&'static str),
     // Quantum gates
-    X, Z, H, T, TDag,
+    X, Z, H, T, TDag, Phase(u32),
     // A quantum control label with a distance to its target
     QCtrl(isize, bool),
     // A swap label with a distance to its target
@@ -198,6 +198,13 @@ impl FmtWith<LaTeX> for Elem {
             H => f.write_str(r"\gate{H}"),
             T => f.write_str(r"\gate{T}"),
             TDag => f.write_str(r"\gate{T^\dag}"),
+            Phase(phase) => {
+                if let Quantikz { .. } = latex.package {
+                    write!(f, r"\phase{{{}}}", phase)
+                } else {
+                    unimplemented!("Can't format this gate yet for this package");
+                }
+            }
             QCtrl(dist, true) => write!(f, r"\ctrl{{{}}}", dist),
             QCtrl(dist, false) => write!(f, r"\octrl{{{}}}", dist),
             Targ(liveness) => match liveness {
@@ -550,6 +557,7 @@ impl<'l> LayoutArray<'l> {
             Z(u) => (self.qwire(u), Elem::Z),
             T(u) => (self.qwire(u), Elem::T),
             TDag(u) => (self.qwire(u), Elem::TDag),
+            Phase(u, phase) => (self.qwire(u), Elem::Phase(phase)),
             Cnot { ctrl, tgt } => {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);

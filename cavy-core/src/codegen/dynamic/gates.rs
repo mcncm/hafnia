@@ -3,14 +3,12 @@ use crate::{arch::MeasurementMode, circuit::*, values::Value};
 use super::{mem::*, *};
 
 impl<'a> Destructor<'a> {
-    pub fn exec(&mut self) {
+    pub fn exec<'c>(&mut self, circ: &mut CircAssembler<'a, 'c>) {
         self.ct = 0;
-        let mut circ = self.circ.borrow_mut();
         let mut gates = self.gates.clone();
         while let Some(gate) = gates.pop() {
             circ.push_qgate(gate);
         }
-        drop(circ);
 
         // NOTE: could be a problem that/if counts are never all reset to 0. We
         // might need to make a pass when we *clone* the tree of setting them
@@ -20,7 +18,7 @@ impl<'a> Destructor<'a> {
             let mut parent = parent.borrow_mut();
             debug_assert_ne!(parent.ct, ptrs, "I think this is impossible?");
             if parent.ct == (ptrs - 1) {
-                parent.exec();
+                parent.exec(circ);
             } else {
                 parent.ct += 1;
             }
@@ -36,27 +34,21 @@ impl<'a> Destructor<'a> {
     }
 }
 
-// impl<'a> Drop for Destructor<'a> {
-//     fn drop(&mut self) {
-//         let mut circ = self.circ.borrow_mut();
-//         while let Some(gate) = self.gates.pop() {
-//             circ.push_qgate_inner(gate.into());
-//         }
-//
-//         for parent in self.parents.iter() {
-//             let ptrs = Rc::strong_count(parent);
-//             let mut parent = parent.borrow_mut();
-//             debug_assert_ne!(parent.ct, ptrs, "I think this is impossible?");
-//             // never run `exec` if we are the only pointer to the parent,
-//             // because we're about to drop it!
-//             if parent.ct == (ptrs - 1) && parent.ct != 1 {
-//                 parent.exec();
-//             } else {
-//                 parent.ct += 1;
-//             }
-//         }
-//     }
-// }
+impl<'a> Interpreter<'a> {
+    pub fn destroy(&mut self, place: &Place) {
+        let node = self.st.destructors.get_node_mut(place);
+        if let Some(node) = node {
+            let mut circ = self.circ.borrow_mut();
+            if let Some(dests) = node.this.as_mut() {
+                for dest in dests.iter_mut() {
+                    dest.borrow_mut().exec(&mut circ);
+                }
+            }
+            // drop them, (no longer executes anything)
+            std::mem::swap(node, &mut PlaceNode::default());
+        }
+    }
+}
 
 impl<'a> InterpreterState<'a> {
     // NOTE: this will let us add *quantum* controls to *quantum* gates.
@@ -82,28 +74,35 @@ impl<'a> InterpreterState<'a> {
 }
 
 // This impl should deal with received *bits*.
-impl<'m> CircAssembler<'m> {
-    // This method needs mutable access to the selfuit as well as the allocator.
-    fn push_qgate<G>(&mut self, gate: G)
+impl<'a, 'c> CircAssembler<'a, 'c> {
+    pub fn push_qgate<G>(&mut self, gate: G)
     where
         GateQ: From<G>,
     {
         let mut gate = GateQ::from(gate);
+        // This check happens *every* time we push a gate, which is a little
+        // wasteful when mapping over a large object.
+        if let Some(sink) = &mut self.qsink {
+            sink.push(gate.clone());
+        }
         gate.ctrls.extend(self.controls.clone());
         self.push_qgate_inner(gate);
     }
 
-    /// The inner function should *not* use the interpreter state, making it
-    /// possible to call this from a reference destructor.
     fn push_qgate_inner(&mut self, gate: GateQ) {
         self.gate_buf.push(gate);
     }
 
-    fn push_cgate<G>(&mut self, gate: G)
+    pub fn push_cgate<G>(&mut self, gate: G)
     where
         GateC: From<G>,
     {
         let gate = GateC::from(gate);
+        // This check happens *every* time we push a gate, which is a little
+        // wasteful when mapping over a large object.
+        if let Some(sink) = &mut self.csink {
+            sink.push(gate.clone());
+        }
         // I don't want to add a "classical swap" to any of the backends, so
         // simply expand this gate.
         if let BaseGate::C(BaseGateC::Swap(fst, snd)) = gate.base {
@@ -238,56 +237,38 @@ impl<'m> CircAssembler<'m> {
     */
 
     /// Apply a Z gate to all the qubits
-    pub fn map_phase(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+    pub fn map_phase(&mut self, obj: &BitSlice) {
         let phase = |u| BaseGateQ::Z(u);
-        self.mapgate_sq(obj, phase, sink);
+        self.mapgate_sq(obj, phase);
     }
 
     /// Apply an H gate to all the qubits
-    pub fn map_hadamard(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+    pub fn map_hadamard(&mut self, obj: &BitSlice) {
         let split = |u| BaseGateQ::H(u);
-        self.mapgate_sq(obj, split, sink)
+        self.mapgate_sq(obj, split);
     }
 
     /// NOT all the bits--classical and quantum--in one place
-    pub fn map_not(&mut self, obj: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+    pub fn map_not(&mut self, obj: &BitSlice) {
         let notq = |(_, u)| BaseGateQ::X(u);
         let notc = |(_, u)| BaseGateC::Not(u);
-        // no `mapgate_sq` for both cbits and qbits yet
-        if let Some(sink) = sink {
-            let notq = util::tee(notq, sink);
-            self.mapgate_single(obj, Some(notq), Some(notc));
-        } else {
-            self.mapgate_single(obj, Some(notq), Some(notc));
-        }
+        self.mapgate_single(obj, Some(notq), Some(notc));
     }
 
     /// CNOT all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+    pub fn map_cnot(&mut self, ctrl: &BitSlice, tgt: &BitSlice) {
         let ctrlq = |(_, ctrl, tgt)| BaseGateQ::Cnot { ctrl, tgt };
         let ctrlc = |(_, ctrl, tgt)| BaseGateC::Cnot { ctrl, tgt };
-
-        if let Some(sink) = sink {
-            let ctrlq = util::tee(ctrlq, sink);
-            self.mapgate_pair(ctrl, tgt, Some(ctrlq), Some(ctrlc));
-        } else {
-            self.mapgate_pair(ctrl, tgt, Some(ctrlq), Some(ctrlc));
-        }
+        self.mapgate_pair(ctrl, tgt, Some(ctrlq), Some(ctrlc));
     }
 
     /// SWAP all the bits--classical and quantum--in two places, which should be
     /// of the same size.
-    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice, sink: Option<&mut Vec<GateQ>>) {
+    pub fn map_swap(&mut self, fst: &BitSlice, snd: &BitSlice) {
         let swapq = |(_, q1, q2)| BaseGateQ::Swap(q1, q2);
         let swapc = |(_, c1, c2)| BaseGateC::Swap(c1, c2);
-
-        if let Some(sink) = sink {
-            let swapq = util::tee(swapq, sink);
-            self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
-        } else {
-            self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
-        }
+        self.mapgate_pair(fst, snd, Some(swapq), Some(swapc));
     }
 
     pub fn map_ccnot(
@@ -297,7 +278,6 @@ impl<'m> CircAssembler<'m> {
         fst_sign: bool,
         snd: &BitSlice,
         snd_sign: bool,
-        sink: Option<&mut Vec<GateQ>>,
     ) {
         let quant = |(idx, fst, snd)| {
             let lhs = tgt.qbits[idx];
@@ -316,73 +296,47 @@ impl<'m> CircAssembler<'m> {
             }
         };
 
-        if let Some(sink) = sink {
-            let quant = util::tee(quant, sink);
-            self.mapgate_pair(fst, snd, Some(quant), Some(class));
-        } else {
-            self.mapgate_pair(fst, snd, Some(quant), Some(class));
-        }
+        self.mapgate_pair(fst, snd, Some(quant), Some(class));
     }
     // == teed gate mappers
 
     /// The main optionally-teed mapping function for the common use case of
     /// single-qubit gates
-    pub fn mapgate_sq<F, G>(&mut self, obj: &BitSlice, f: F, sink: Option<&mut Vec<GateQ>>)
+    pub fn mapgate_sq<F, G>(&mut self, obj: &BitSlice, f: F)
     where
         F: Fn(Qbit) -> G,
         G: Clone,
         GateQ: From<G>,
     {
         let fp = |(_, q)| f(q);
-
-        match sink {
-            Some(sink) => {
-                let tee_f = util::tee(fp, sink);
-                self.mapgate_single::<_, _, _, GateC>(obj, Some(tee_f), None::<fn(_) -> _>);
-            }
-            None => {
-                self.mapgate_single::<_, _, _, GateC>(obj, Some(fp), None::<fn(_) -> _>);
-            }
-        }
+        self.mapgate_single::<_, _, _, GateC>(obj, Some(fp), None::<fn(_) -> _>);
     }
 
     /// The main optionally-teed mapping function for the common use case of
     /// two-qubit gates
-    pub fn mapgate_tq<F>(
-        &mut self,
-        fst: &BitSlice,
-        snd: &BitSlice,
-        f: F,
-        sink: Option<&mut Vec<GateQ>>,
-    ) where
+    pub fn mapgate_tq<F>(&mut self, fst: &BitSlice, snd: &BitSlice, f: F)
+    where
         F: Fn(Qbit, Qbit) -> GateQ,
     {
         let fp = |(_, q1, q2)| f(q1, q2);
-
-        match sink {
-            Some(sink) => {
-                let tee_f = util::tee(fp, sink);
-                self.mapgate_pair::<_, _, _, GateC>(fst, snd, Some(tee_f), None::<fn(_) -> GateC>);
-            }
-            None => {
-                self.mapgate_pair::<_, _, _, GateC>(fst, snd, Some(fp), None::<fn(_) -> GateC>);
-            }
-        }
+        self.mapgate_pair::<_, _, _, GateC>(fst, snd, Some(fp), None::<fn(_) -> GateC>);
     }
 
     /// Map single-bit classical and quantum gates over an allocation
-    pub fn mapgate_single<'a, Q, C, GQ, GC>(
-        &'a mut self,
+    pub fn mapgate_single<'m, Q, C, GQ, GC>(
+        &'m mut self,
         obj: &BitSlice,
         quant: Option<Q>,
         class: Option<C>,
     ) where
-        Q: FnMut((usize, Qbit)) -> GQ,
-        C: FnMut((usize, Cbit)) -> GC,
+        Q: Fn((usize, Qbit)) -> GQ,
+        C: Fn((usize, Cbit)) -> GC,
         GateQ: From<GQ>,
         GateC: From<GC>,
+        GQ: Clone,
+        GC: Clone,
     {
-        if let Some(mut f) = quant {
+        if let Some(f) = quant {
             for (idx, qbit) in obj.qbits.iter().enumerate() {
                 // NOTE: these copies shouldn't be necessary--this will be fixed
                 // when arrays become iterable in Rust 2021.
@@ -391,7 +345,7 @@ impl<'m> CircAssembler<'m> {
             }
         }
 
-        if let Some(mut g) = class {
+        if let Some(g) = class {
             for (idx, cbit) in obj.cbits.iter().enumerate() {
                 let gate = g((idx, *cbit));
                 self.push_cgate(gate);
@@ -400,8 +354,8 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Map two-bit classical and quantum gates over an allocation
-    pub fn mapgate_pair<'a, Q, C, GQ, GC>(
-        &'a mut self,
+    pub fn mapgate_pair<'m, Q, C, GQ, GC>(
+        &'m mut self,
         fst: &BitSlice,
         snd: &BitSlice,
         quant: Option<Q>,
@@ -430,7 +384,7 @@ impl<'m> CircAssembler<'m> {
     /// Map two-bit classical-quantum gates over a pair of allocations. Unlike
     /// the previous two-allocation mapping function, this one has a definite
     /// direction: `ctrl` controls `snd`.
-    pub fn mapgate_class_ctrl<'a, F>(&'a mut self, ctrl: &BitSlice, tgt: &BitSlice, f: Option<F>)
+    pub fn mapgate_class_ctrl<'m, F>(&'m mut self, ctrl: &BitSlice, tgt: &BitSlice, f: Option<F>)
     where
         F: FnMut((usize, Cbit, Qbit)) -> BaseGateQ,
     {
@@ -447,7 +401,7 @@ impl<'m> CircAssembler<'m> {
     }
 
     /// Free an allocation, calling a closure to determine how to free each bit.
-    pub fn map_free<'a, Q, C>(&'a mut self, obj: &BitSlice, mut quant: Q, mut class: C)
+    pub fn map_free<'m, Q, C>(&'m mut self, obj: &BitSlice, mut quant: Q, mut class: C)
     where
         Q: FnMut((usize, Qbit)) -> FreeState,
         C: FnMut((usize, Cbit)) -> FreeState,
