@@ -57,6 +57,9 @@ args:
       short: d
       long: debug
       about: Runs the compiler in debug mode
+  - no_rerep:
+      long: "--no-rerep"
+      about: Do not canonicalize gate representations
   - phase:
       long: phase
       required: false

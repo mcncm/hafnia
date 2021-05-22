@@ -26,15 +26,18 @@ pub struct IoOutGate {
 }
 
 /// The base gates from which we will build circuits
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BaseGateQ {
     X(Qbit),
     H(Qbit),
     Z(Qbit),
     T(Qbit),
-    /// An arbitrary-phase gate
-    Phase(Qbit, u32),
     TDag(Qbit),
+    S(Qbit),
+    SDag(Qbit),
+    /// An arbitrary-phase gate, in units of pi, with the convention that a
+    /// phase of +/- 1 is a Z gate.
+    Phase(Qbit, f32),
     /// Ok, this isn't *great* in that there are *two representations* of the
     /// *same gate*. But it seems to make code generation easier. We could call
     /// it an optimization: A CX as a `GateQ` with a single control costs a heap
@@ -49,13 +52,13 @@ pub enum BaseGateQ {
 }
 
 /// These are gates that might decompose into more primitive base gates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GateQ {
     pub ctrls: Vec<(Qbit, bool)>,
     pub base: BaseGateQ,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BaseGateC {
     Not(Cbit),
     /// Ibid the `BaseGateQ` `Cnot` gate
@@ -70,7 +73,7 @@ pub enum BaseGateC {
 
 /// For classical-controlled gates, the target can be either a classical or
 /// quantum bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BaseGate {
     C(BaseGateC),
     Q(BaseGateQ),
@@ -88,7 +91,7 @@ impl From<BaseGateC> for BaseGate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GateC {
     pub ctrls: Vec<(Cbit, bool)>,
     pub base: BaseGate,
@@ -254,6 +257,8 @@ impl MaxBits for BaseGateQ {
             BaseGateQ::Z(u) => u,
             BaseGateQ::T(u) => u,
             BaseGateQ::TDag(u) => u,
+            BaseGateQ::S(u) => u,
+            BaseGateQ::SDag(u) => u,
             BaseGateQ::Phase(u, _) => u,
             BaseGateQ::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
             BaseGateQ::Swap(u, v) => std::cmp::max(u, v),
@@ -448,6 +453,8 @@ impl std::fmt::Display for BaseGateQ {
             Z(q) => write!(f, "Z {}", q),
             T(q) => write!(f, "T {}", q),
             TDag(q) => write!(f, "T* {}", q),
+            S(q) => write!(f, "S {}", q),
+            SDag(q) => write!(f, "S* {}", q),
             Phase(q, phase) => write!(f, "@ {} {}", phase, q),
             Cnot { ctrl, tgt } => write!(f, "CNOT {} {}", ctrl, tgt),
             Swap(fst, snd) => write!(f, "SWAP {} {}", fst, snd),

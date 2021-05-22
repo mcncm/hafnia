@@ -88,6 +88,10 @@ impl TyId {
         matches!(ctx.types[*self], Type::Uint(_))
     }
 
+    pub fn is_quint(&self, ctx: &Context) -> bool {
+        matches!(ctx.types[*self], Type::Q_Uint(_))
+    }
+
     pub fn is_owned(&self, ctx: &Context) -> bool {
         self.is_owned_inner(&ctx.types)
     }
@@ -102,6 +106,13 @@ impl TyId {
 
     pub fn ref_kind_inner(&self, interner: &CachedTypeInterner) -> Option<RefKind> {
         interner.cache[self].ref_kind
+    }
+
+    pub fn referent(&self, ctx: &Context) -> Option<TyId> {
+        match &ctx.types[*self] {
+            Type::Ref(_, ty) => Some(*ty),
+            _ => None,
+        }
     }
 
     /// A type will be said to be "classical" if none of the data it contains

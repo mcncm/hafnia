@@ -64,17 +64,32 @@ impl Default for OptConfig {
 }
 
 /// Configuration data for the operation of the compiler
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Config {
     /// Whether or not to run in debug mode. In this mode, the default panic
     /// handler will be used.
     pub debug: bool,
+    /// Whether to use alternative, more-canonical gate representations when
+    /// possible.
+    pub rerep: bool,
     /// Architecture data
     pub arch: Arch,
     /// Optimization settings.
     pub opt: OptConfig,
     /// Which compilation phases to run
     pub phase_config: PhaseConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            debug: false,
+            rerep: true,
+            arch: Arch::default(),
+            opt: OptConfig::default(),
+            phase_config: PhaseConfig::default(),
+        }
+    }
 }
 
 // == Compiler statistics

@@ -49,8 +49,8 @@ impl<'m> Interpreter<'m> {
                 circ.cnot_const(&lhs, value);
             }
             Operand::Copy(rplace) => {
-                // a no-op. These *should* be optimized out, but it turns out
-                // they are not.
+                let rhs = rplace.as_bits(&self.st);
+                circ.copy_into(&lhs, &rhs);
             }
             // ASSUMPTION: we're always going to copy shared references, and
             // their destructors will never mutate.
@@ -59,12 +59,7 @@ impl<'m> Interpreter<'m> {
             // and this is not real documentation.
             Operand::Move(rplace) => {
                 let rhs = rplace.as_bits(&self.st);
-                // swap unconditionally
-                if lplace != rplace {
-                    let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
-                    let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
-                    circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
-                }
+                circ.move_into(&lhs, &rhs);
             }
         }
     }
@@ -77,22 +72,8 @@ impl<'m> Interpreter<'m> {
         let rhs = rplace.as_bits(&self.st);
         let lhs = lplace.as_bits(&self.st);
 
-        let mut circ = self.circ.borrow_mut();
-
-        // Control first if necessary. Note that this will control
-        // classical bits on classical bits and qubits on qubits.
-        if lhs != rhs {
-            debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
-            debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
-
-            let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
-            let quant = util::tee(quant, &mut dest.gates);
-            // FIXME no classical sink because no classical invertibility yet.
-            let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
-            circ.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
-        }
-
-        drop(circ);
+        let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
+        circ.copy_into(&rhs, &lhs);
         self.st
             .destructors
             .insert(lplace, vec![Rc::new(RefCell::new(dest))]);
@@ -203,11 +184,9 @@ impl<'m> Interpreter<'m> {
             Plus => {
                 // FIXME quantum case only for now
                 assert_eq!(fst.cbits.len(), 0);
-                let fst = fst.qbits;
                 let snd = snd.qbits;
-
-                let sz = fst.len();
-                let phase = 1 / sz;
+                circ.map_cnot(fst, lhs);
+                circ.draper_addition(&lhs.qbits, snd);
             }
             Minus => {}
             Times => {}

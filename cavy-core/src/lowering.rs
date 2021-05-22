@@ -1356,8 +1356,14 @@ mod typing {
                 }
                 DotDot => todo!(),
                 Plus | Times => {
-                    if (left == right) & left.is_uint(&self.ctx) {
-                        return Ok(left);
+                    if left == right {
+                        if left.is_uint(&self.ctx) {
+                            return Ok(left);
+                        } else if let Some(ty) = left.referent(&self.ctx) {
+                            if ty.is_quint(&self.ctx) {
+                                return Ok(left);
+                            }
+                        }
                     }
                 }
                 Minus => todo!(),

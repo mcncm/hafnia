@@ -101,6 +101,7 @@ fn get_arch(argmatches: &ArgMatches) -> Result<arch::Arch, Box<dyn std::error::E
 fn get_config(argmatches: &ArgMatches) -> Config {
     // Should we provide debug information?
     let debug = argmatches.is_present("debug");
+    let rerep = !argmatches.is_present("no-rerep");
     let opt = get_opt(argmatches);
     let phase_config = get_phase(argmatches);
     let arch = match get_arch(argmatches) {
@@ -113,6 +114,7 @@ fn get_config(argmatches: &ArgMatches) -> Config {
 
     Config {
         debug,
+        rerep,
         arch,
         opt,
         phase_config,

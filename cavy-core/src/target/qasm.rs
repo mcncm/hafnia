@@ -67,6 +67,8 @@ impl FmtWith<Qasm> for BaseGateQ {
             Z(tgt) => write!(f, "z q[{}]", tgt),
             T(tgt) => write!(f, "t q[{}]", tgt),
             TDag(tgt) => write!(f, "tdg q[{}]", tgt),
+            S(tgt) => write!(f, "s q[{}]", tgt),
+            SDag(tgt) => write!(f, "sdg q[{}]", tgt),
             Phase(_tgt, _phase) => todo!(),
             Cnot { ctrl, tgt } => write!(f, "cx q[{}], q[{}]", ctrl, tgt),
             Swap { .. } => unimplemented!("OpenQASM 2.0 doesn't support SWAP"),

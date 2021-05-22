@@ -148,7 +148,7 @@ enum Elem {
     // Ket state vectors
     Ket(&'static str),
     // Quantum gates
-    X, Z, H, T, TDag, Phase(u32),
+    X, Z, H, T, TDag, S, SDag, Phase(Option<f32>),
     // A quantum control label with a distance to its target
     QCtrl(isize, bool),
     // A swap label with a distance to its target
@@ -198,9 +198,15 @@ impl FmtWith<LaTeX> for Elem {
             H => f.write_str(r"\gate{H}"),
             T => f.write_str(r"\gate{T}"),
             TDag => f.write_str(r"\gate{T^\dag}"),
+            S => f.write_str(r"\gate{S}"),
+            SDag => f.write_str(r"\gate{S^\dag}"),
             Phase(phase) => {
                 if let Quantikz { .. } = latex.package {
-                    write!(f, r"\phase{{{}}}", phase)
+                    if let Some(phase) = phase {
+                        write!(f, r"\phase{{{}}}", phase)
+                    } else {
+                        write!(f, r"\phase{{}}")
+                    }
                 } else {
                     unimplemented!("Can't format this gate yet for this package");
                 }
@@ -521,7 +527,7 @@ impl<'l> LayoutArray<'l> {
     // TODO: clean up where and how wires are made live; eliminate some of these
     // unnecessary clones.
     fn push_qgate(&mut self, gate: GateQ) {
-        let (base, mut ctrls) = self.qgate_elems(gate);
+        let (mut base, mut ctrls) = self.qgate_elems(gate);
 
         if ctrls.is_empty() {
             // We can do this unconditionally instead of inserting: if there’s
@@ -536,6 +542,12 @@ impl<'l> LayoutArray<'l> {
             self.insert_single(base.0, base.1);
             self.wires[base.0].liveness = LiveQ;
             return;
+        }
+
+        // Special-case multi-controlled CZ gates: if no controls, we have
+        // already returned.
+        if let Elem::Z = base.1 {
+            base.1 = Elem::Phase(None);
         }
 
         ctrls.push(base);
@@ -557,7 +569,9 @@ impl<'l> LayoutArray<'l> {
             Z(u) => (self.qwire(u), Elem::Z),
             T(u) => (self.qwire(u), Elem::T),
             TDag(u) => (self.qwire(u), Elem::TDag),
-            Phase(u, phase) => (self.qwire(u), Elem::Phase(phase)),
+            S(u) => (self.qwire(u), Elem::S),
+            SDag(u) => (self.qwire(u), Elem::SDag),
+            Phase(u, phase) => (self.qwire(u), Elem::Phase(Some(phase))),
             Cnot { ctrl, tgt } => {
                 let (ctrl, tgt) = (self.qwire(ctrl), self.qwire(tgt));
                 let dist = self.dist(ctrl, tgt);

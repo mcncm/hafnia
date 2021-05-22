@@ -86,7 +86,12 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
             sink.push(gate.clone());
         }
         gate.ctrls.extend(self.controls.clone());
-        self.push_qgate_inner(gate);
+
+        if self.ctx.conf.rerep {
+            self.rerep_qgate(gate);
+        } else {
+            self.push_qgate_inner(gate);
+        }
     }
 
     fn push_qgate_inner(&mut self, gate: GateQ) {
@@ -103,6 +108,8 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
         if let Some(sink) = &mut self.csink {
             sink.push(gate.clone());
         }
+        // Use a `rerep_cgate` function here, too.
+        //
         // I don't want to add a "classical swap" to any of the backends, so
         // simply expand this gate.
         if let BaseGate::C(BaseGateC::Swap(fst, snd)) = gate.base {
@@ -134,6 +141,33 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
     /// possible to call this from a reference destructor.
     fn push_cgate_inner(&mut self, gate: GateC) {
         self.gate_buf.push(gate);
+    }
+
+    /// Rewrite a `GateQ` using more "canonical" gates, where possible, and insert
+    /// them in the circuit buffer.
+    ///
+    /// NOTE: This is separate from gate *expansion*, in which (for example)
+    /// multi-controlled gates are replaced with elements of the
+    /// physically-realizable gate set.
+    fn rerep_qgate(&mut self, mut gate: GateQ) {
+        use BaseGateQ::*;
+        match gate.base {
+            Phase(u, phase) => {
+                if phase == 1.0 || phase == -1.0 {
+                    gate.base = Z(u);
+                } else if phase == 0.5 {
+                    gate.base = S(u);
+                } else if phase == -0.5 {
+                    gate.base = SDag(u);
+                } else if phase == 0.25 {
+                    gate.base = T(u);
+                } else if phase == 0.25 {
+                    gate.base = TDag(u);
+                }
+            }
+            _ => {}
+        }
+        self.push_qgate_inner(gate);
     }
 
     // NOTE: maybe this method shouldn't be in this module, given that it's
@@ -298,6 +332,31 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
 
         self.mapgate_pair(fst, snd, Some(quant), Some(class));
     }
+
+    /// Copy one `BitSlice` into another, if necessary.
+    pub fn copy_into(&mut self, lhs: &BitSlice, rhs: &BitSlice) {
+        // Control first if necessary. Note that this will control
+        // classical bits on classical bits and qubits on qubits.
+        if lhs != rhs {
+            debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
+            debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
+            let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
+            let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
+            self.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
+        }
+    }
+
+    /// Move one `BitSlice` into another, by swapping, if necessary.
+    pub fn move_into(&mut self, lhs: &BitSlice, rhs: &BitSlice) {
+        if lhs != rhs {
+            debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
+            debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
+            let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
+            let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
+            self.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
+        }
+    }
+
     // == teed gate mappers
 
     /// The main optionally-teed mapping function for the common use case of
