@@ -19,7 +19,6 @@ summary = ["serde", "serde_json"]
 [dependencies.cavy-macros]
 path = "../cavy-macros"
 
-[dev-dependencies]
 [dev-dependencies.cargo-husky]
 default-features = false
 features = ["user-hooks"]

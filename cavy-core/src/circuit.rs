@@ -366,11 +366,23 @@ impl From<GateC> for Inst {
     }
 }
 
+impl From<BaseGateQ> for Inst {
+    fn from(g: BaseGateQ) -> Self {
+        Self::QGate(g.into())
+    }
+}
+
+impl From<BaseGateC> for Inst {
+    fn from(g: BaseGateC) -> Self {
+        Self::CGate(g.into())
+    }
+}
+
 /// A simple circuit struct. This backend data structure keeps changing, but it
 #[derive(Debug)]
 pub struct CircuitBuf {
     insts: Vec<Inst>,
-    max_qbit: Option<Qbit>,
+    pub max_qbit: Option<Qbit>,
     max_cbit: Option<Cbit>,
 }
 
