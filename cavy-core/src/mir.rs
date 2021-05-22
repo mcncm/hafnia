@@ -120,8 +120,10 @@ impl PredGraph {
             elem.clear();
         }
 
-        // Extend the graph if it isn't yet large enough. Is this slow?
-        let diff = blocks.len() - preds.len();
+        // Extend the graph if it isn't yet large enough. (Is this slow?)
+        // `saturating_sub`: if we ever remove blocks, `preds` will be longer
+        // than the number of blocks.
+        let diff = blocks.len().saturating_sub(preds.len());
         for _ in 0..diff {
             preds.insert(Vec::new());
         }
@@ -215,6 +217,10 @@ impl Graph {
 
     pub fn get_blocks(&self) -> &BlockStore {
         &self.blocks
+    }
+
+    pub fn get_blocks_mut(&mut self) -> &mut BlockStore {
+        &mut self.blocks
     }
 
     pub fn get_preds(&self) -> Ref<Predecessors> {

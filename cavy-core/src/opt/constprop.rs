@@ -26,7 +26,7 @@
 
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::{context::Context, mir::*, place_tree::PlaceStore, values::Value};
+use crate::{analysis::graph, context::Context, mir::*, place_tree::PlaceStore, values::Value};
 
 /// Main entry point for compile-time evaluation. This takes the form of a Mir
 /// optimization, which is currently a function taking a mutable reference to
@@ -43,6 +43,9 @@ pub fn optimize(mir: &mut Mir, _ctx: &Context) {
 fn simpl_graph(gr: &mut Graph) {
     let mut interp = Interpreter::new(&gr.locals);
     simpl_block(gr.entry_block, gr, &mut interp);
+    // Must eliminate blocks that have become unreachable
+    let reachable = graph::algorithm::reachable_blocks(gr);
+    super::util::retain_blocks(gr, |idx, _| reachable.contains(&idx));
 }
 
 fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {

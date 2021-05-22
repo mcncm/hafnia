@@ -33,6 +33,10 @@ pub fn traversals(gr: &Graph) -> (Preorder<BlockId>, Postorder<BlockId>) {
     gr.traversals()
 }
 
+pub fn reachable_blocks(gr: &Graph) -> HashSet<BlockId> {
+    gr.reachable()
+}
+
 /// A (currently uniquely) rooted directed graph
 pub trait Digraph<T>
 where
@@ -56,6 +60,17 @@ where
         drop(walker);
         // Now our orders are full!
         (Preorder(pre), Postorder(post))
+    }
+
+    /// Compute nodes reachable from the root
+    fn reachable(&self) -> HashSet<T> {
+        let mut nodes = HashSet::new();
+        let pre = |node| nodes.insert(node);
+        let post = |_node| false;
+        let mut walker = self.dfs_walker(self.root(), Box::new(pre), Box::new(post));
+        while walker().is_some() {}
+        drop(walker);
+        nodes
     }
 
     /*

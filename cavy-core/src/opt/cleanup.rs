@@ -14,6 +14,8 @@ use crate::{
     store::{BitSet, Store},
 };
 
+use super::util::foreach_place;
+
 use crate::analysis::{SummaryAnalysis, SummaryRunner};
 
 pub fn optimize(mir: &mut Mir, ctx: &Context) {
@@ -128,51 +130,6 @@ impl SummaryAnalysis for LocalsUsed {
                 self.insert(call.ret.root);
                 for arg in &call.args {
                     arg.place().map(|pl| self.insert(pl.root));
-                }
-            }
-            BlockKind::Ret => {}
-        }
-    }
-}
-
-/// Do something for every `Place` in the graph
-fn foreach_place<F>(gr: &mut Graph, mut f: F)
-where
-    F: FnMut(&mut Place),
-{
-    for block in gr.iter_mut() {
-        // Everything in all the statements
-        for stmt in block.stmts.iter_mut() {
-            match &mut stmt.kind {
-                StmtKind::Assn(lhs, rv) => {
-                    f(lhs);
-                    for place in rv.places_mut() {
-                        f(place);
-                    }
-                }
-                StmtKind::Assert(place) | StmtKind::Drop(place) => {
-                    f(place);
-                }
-                StmtKind::Io(io) => match io {
-                    IoStmtKind::In => {}
-                    IoStmtKind::Out { place, .. } => f(place),
-                },
-                StmtKind::Nop => {}
-            }
-        }
-
-        // ...And everything in all the block tails
-        match &mut block.kind {
-            BlockKind::Goto(_) => {}
-            BlockKind::Switch(switch) => {
-                f(&mut switch.cond);
-            }
-            BlockKind::Call(call) => {
-                f(&mut call.ret);
-                for arg in call.args.iter_mut() {
-                    if let Some(place) = arg.place_mut() {
-                        f(place);
-                    }
                 }
             }
             BlockKind::Ret => {}

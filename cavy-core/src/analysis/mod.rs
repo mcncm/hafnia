@@ -35,7 +35,7 @@ mod dataflow;
 pub mod borrows;
 mod feedback;
 mod fmt;
-mod graph;
+pub mod graph;
 mod linearity;
 mod subconditional;
 mod unsafety;

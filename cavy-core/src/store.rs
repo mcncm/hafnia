@@ -98,6 +98,14 @@ impl<I: Index> BitSet<I> {
     pub fn set(&mut self, idx: I, val: bool) {
         *self.get_mut(idx).unwrap() = val;
     }
+
+    pub fn insert(&mut self, idx: I) {
+        *self.get_mut(idx).unwrap() = true;
+    }
+
+    pub fn remove(&mut self, idx: I) {
+        *self.get_mut(idx).unwrap() = false;
+    }
 }
 
 impl<I: Index> From<BitVec> for BitSet<I> {
@@ -359,6 +367,24 @@ impl<Idx: Index, V> Store<Idx, V> {
         It: Iterator<Item = V>,
     {
         self.backing_store.extend(iter)
+    }
+
+    pub fn idx_retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(Idx, &V) -> bool,
+    {
+        self.backing_store = self
+            .backing_store
+            .drain(0..)
+            .enumerate()
+            .filter_map(|(idx, elem)| {
+                if f(Idx::from(idx as u32), &elem) {
+                    Some(elem)
+                } else {
+                    None
+                }
+            })
+            .collect();
     }
 
     // Safety: `idx` out of bounds is undefined behavior

@@ -8,7 +8,7 @@ use super::dataflow::*;
 use bitvec::prelude::*;
 
 /// Graph algorithms
-mod algorithm;
+pub(crate) mod algorithm;
 pub mod dominators;
 
 pub use algorithm::{traversals, Digraph, Postorder, Preorder};
