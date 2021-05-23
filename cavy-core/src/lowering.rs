@@ -613,16 +613,23 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
 
     /// Lower an expression, possibly generating new temp variables to store it in.
     fn lower_expr(&mut self, expr: &Expr) -> Maybe<Place> {
-        // We don't want to generate new temp variables for (lexical)
-        // variables--they'll get lost! Otherwise, this would be a problem when
-        // we take references.
-        if let ExprKind::Ident(ref ident) = expr.data {
-            return self.resolve_ident(ident);
+        match &expr.data {
+            // We don't want to generate new temp variables for (lexical)
+            // variables--they'll get lost! Otherwise, this would be a problem when
+            // we take references.
+            ExprKind::Ident(ident) => self.resolve_ident(ident),
+            // Similarly for field accesses...
+            ExprKind::Field(head, field) => self.resolve_fields(head, field),
+            // ...and derefs.
+            ExprKind::Deref(expr) => self.resolve_deref(expr),
+            // Otherwise, create a new `Place` and lower into it.
+            _ => {
+                let ty = self.type_expr(expr)?;
+                let place = self.auto_place(ty);
+                self.lower_into(&place, expr)?;
+                Ok(place)
+            }
         }
-        let ty = self.type_expr(expr)?;
-        let place = self.auto_place(ty);
-        self.lower_into(&place, expr)?;
-        Ok(place)
     }
 
     /// Convert a place to an operand, basing the choice to move or copy on its
@@ -813,6 +820,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 (*id).into()
             }
             ExprKind::Field(head, field) => self.resolve_fields(head, &field)?,
+            ExprKind::Deref(expr) => self.resolve_deref(expr)?,
             _ => {
                 let head_place = self.auto_place(head_ty);
                 self.lower_into(&head_place, head)?;

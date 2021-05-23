@@ -316,7 +316,7 @@ impl<'a> RegionInf<'a> {
 
     /// Insert a constraint from a borrow statement. This method is analogous to
     /// `Self::sub_constr`, except that the sides are "unbalanced", so we have
-    /// to manually insert one level of constraint before entering the
+    /// to manually insert one level before entering the
     /// `Constraints::insert_sub_constr_{..}` recursive pair.
     fn sub_constr_loan(&mut self, pt: GraphPt, lhs: &Place, ascr: Ascr, rhs_inner: &Place) {
         let ltree = self
@@ -336,14 +336,16 @@ impl<'a> RegionInf<'a> {
         debug_assert_eq!(ltree.slots.len(), 1);
         match (
             ltree.slots[0].as_ref(),
-            self.ascriptions.locals[rhs_inner.root].as_ref(),
+            self.ascriptions.place_node(rhs_inner).as_ref(),
         ) {
             (Some(ltree), Some(rtree)) => {
                 self.constraints
                     .insert_sub_constr_inner(Some(ascr.kind), pt, rtree, ltree);
             }
             (None, None) => {}
-            _ => unreachable!("lhs and rhs ascription trees differ"),
+            _ => {
+                unreachable!("lhs and rhs ascription trees differ");
+            }
         }
     }
 

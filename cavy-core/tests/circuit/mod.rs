@@ -95,6 +95,8 @@ pub fn gate_to_qutip(g: GateQ) -> String {
         Z(u) => format!("qc.add_gate(\"Z\", targets={})\n", u),
         T(u) => format!("qc.add_gate(\"T\", targets={})\n", u),
         TDag(_u) => todo!(),
+        S(u) => format!("qc.add_gate(\"S\", targets={})\n", u),
+        SDag(_u) => todo!(),
         Phase(u, phase) => format!(
             "qc.add_gate(\"PHASEGATE\", targets={}, arg_phase=pi * {})\n",
             u, phase

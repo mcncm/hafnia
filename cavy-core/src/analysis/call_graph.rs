@@ -16,7 +16,7 @@ use crate::source::Span;
 use crate::{ast::FnId, mir::BlockKind};
 use crate::{cavy_errors::ErrorBuf, context::Context, store::Store};
 
-use super::dataflow::SummaryAnalysis;
+use super::{dataflow::SummaryAnalysis, graph::Digraph};
 
 // == Procedure-local analysis ==
 
@@ -246,5 +246,15 @@ mod errors {
                 secondaries: rest,
             }
         }
+    }
+}
+
+impl Digraph<FnId> for Store<FnId, HashMap<FnId, CallSites>> {
+    fn root(&self) -> FnId {
+        todo!()
+    }
+
+    fn successors(&self, node: &FnId) -> &[FnId] {
+        todo!()
     }
 }

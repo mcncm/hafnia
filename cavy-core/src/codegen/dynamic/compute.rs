@@ -79,7 +79,12 @@ impl<'m> Interpreter<'m> {
         let lhs = lplace.as_bits(&self.st);
 
         let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
-        circ.copy_into(&rhs, &lhs);
+        match kind {
+            RefKind::Shrd => circ.copy_into(&rhs, &lhs),
+            RefKind::Uniq => {
+                circ.move_into(&rhs, &lhs);
+            }
+        };
         self.st
             .destructors
             .insert(lplace, vec![Rc::new(RefCell::new(dest))]);
@@ -321,7 +326,6 @@ impl<'m> Interpreter<'m> {
                     // swap exactly the bits that differ.
                     debug_assert!(!lhs.qbits.iter().zip(rhs.qbits.iter()).any(|(l, r)| l == r));
                     debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
-
                     circ.mapgate_pair(
                         lhs,
                         &rhs,
