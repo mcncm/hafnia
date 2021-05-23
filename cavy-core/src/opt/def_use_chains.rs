@@ -289,6 +289,7 @@ fn collect_uses(gr: &Graph, ctx: &Context) -> PlaceStore<UseData> {
 }
 
 fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt) {
+    use crate::ast::UnOpKind;
     use RvalueKind::*;
     match stmt {
         StmtKind::Assn(lhs, rhs) => {
@@ -298,6 +299,7 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
                     use_operand(use_data, fst, pt, Terminal);
                     use_operand(use_data, snd, pt, Terminal);
                 }
+                UnOp(UnOpKind::Delin, op) => use_operand(use_data, op, pt, Terminal),
                 UnOp(_, op) | Use(op) => use_operand(use_data, op, pt, Nonterminal),
                 Ref(_, place) => {
                     insert_action(use_data, place, pt, Action::Use(Terminal));

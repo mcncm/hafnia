@@ -7,8 +7,10 @@ impl<'a> Destructor<'a> {
         self.ct = 0;
         let mut gates = self.gates.clone();
         while let Some(gate) = gates.pop() {
-            circ.push_qgate(gate);
+            circ.push_qgate(gate.conj());
         }
+
+        circ.free(self.ancillas.iter().cloned(), FreeState::Clean);
 
         // NOTE: could be a problem that/if counts are never all reset to 0. We
         // might need to make a pass when we *clone* the tree of setting them
@@ -83,7 +85,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
         // This check happens *every* time we push a gate, which is a little
         // wasteful when mapping over a large object.
         if let Some(sink) = &mut self.qsink {
-            sink.push(gate.clone().conj());
+            sink.push(gate.clone());
         }
         gate.ctrls.extend(self.controls.clone());
 

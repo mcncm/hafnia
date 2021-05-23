@@ -42,15 +42,20 @@ impl<'m> Interpreter<'m> {
     }
 
     fn compute_use(&mut self, lplace: &Place, op: &Operand) {
-        let mut circ = self.circ.borrow_mut();
         let lhs = lplace.as_bits(&self.st);
         match op {
             Operand::Const(value) => {
+                let mut circ = self.circ.borrow_mut();
                 circ.cnot_const(&lhs, value);
             }
             Operand::Copy(rplace) => {
+                let mut dest = Destructor::from_parent(rplace, &self.st);
+                let mut circ = self.circ.with_sinks(Some(&mut dest.gates), None);
                 let rhs = rplace.as_bits(&self.st);
                 circ.copy_into(&lhs, &rhs);
+                self.st
+                    .destructors
+                    .insert(lplace, vec![Rc::new(RefCell::new(dest))]);
             }
             // ASSUMPTION: we're always going to copy shared references, and
             // their destructors will never mutate.
@@ -58,6 +63,7 @@ impl<'m> Interpreter<'m> {
             // FIXME: all kinds of assumptions won't hold after optimizations,
             // and this is not real documentation.
             Operand::Move(rplace) => {
+                let mut circ = self.circ.borrow_mut();
                 let rhs = rplace.as_bits(&self.st);
                 circ.move_into(&lhs, &rhs);
             }

@@ -42,7 +42,10 @@ pub fn optimize(mir: &mut Mir, _ctx: &Context) {
 
 fn simpl_graph(gr: &mut Graph) {
     let mut interp = Interpreter::new(&gr.locals);
-    simpl_block(gr.entry_block, gr, &mut interp);
+    let (pre, _) = graph::algorithm::traversals(gr);
+    for block in pre.iter() {
+        simpl_block(*block, gr, &mut interp);
+    }
     // Must eliminate blocks that have become unreachable
     let reachable = graph::algorithm::reachable_blocks(gr);
     super::util::retain_blocks(gr, |idx, _| reachable.contains(&idx));
