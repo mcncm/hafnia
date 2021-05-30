@@ -14,7 +14,5 @@ optional = true
 path = "../cavy-inline"
 
 [features]
-default = ["inline"]
-inline = ["cavy-inline"]
-nightly-features = ["cavy-inline/nightly-features"]
+inline = ["cavy-inline", "cavy-core/serde", "cavy-core/serde_json"]
 summary = ["cavy-core/summary"]

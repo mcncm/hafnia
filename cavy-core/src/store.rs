@@ -268,6 +268,7 @@ pub trait Index: Default + Clone + Copy + Eq + From<u32> + Into<u32> {}
 macro_rules! index_type {
     ($index:ident) => {
         #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub struct $index(u32);
 
         impl $crate::store::Index for $index {}

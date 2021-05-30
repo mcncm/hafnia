@@ -84,6 +84,7 @@ version = "0.1.0"
 dependencies = [
  "cavy-core",
  "quote",
+ "serde_json",
  "syn",
 ]
 

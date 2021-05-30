@@ -5,28 +5,36 @@ use crate::{
     types::TypeSize,
 };
 use std::{
+    cmp,
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     vec::IntoIter,
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 index_type! { Qbit }
 index_type! { Cbit }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IoOutGate {
-    /// Classical address to read from
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct IoUse {
+    /// Classical address to read from or write to
     pub addr: Cbit,
     /// Name of the ext location. Maybe this could be a `SymbolId`--but that
     /// would necessitate refactoring the `target` api, and I really don't want
     /// to go there.
-    pub name: String,
+    pub channel: SymbolId,
+    /// Direction of the channel
+    pub dir: crate::ast::IoDirection,
     /// Bit of the ext location
     pub elem: usize,
 }
 
 /// The base gates from which we will build circuits
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BaseGateQ {
     X(Qbit),
     H(Qbit),
@@ -53,12 +61,14 @@ pub enum BaseGateQ {
 
 /// These are gates that might decompose into more primitive base gates.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GateQ {
     pub ctrls: Vec<(Qbit, bool)>,
     pub base: BaseGateQ,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BaseGateC {
     Not(Cbit),
     /// Ibid the `BaseGateQ` `Cnot` gate
@@ -74,6 +84,7 @@ pub enum BaseGateC {
 /// For classical-controlled gates, the target can be either a classical or
 /// quantum bit.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BaseGate {
     C(BaseGateC),
     Q(BaseGateQ),
@@ -92,6 +103,7 @@ impl From<BaseGateC> for BaseGate {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GateC {
     pub ctrls: Vec<(Cbit, bool)>,
     pub base: BaseGate,
@@ -127,6 +139,7 @@ impl From<BaseGateC> for GateC {
 /// Is a freed bit clean (known pure state) or dirty (unknown, possibly
 /// entangled [if qubit]?)
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FreeState {
     /// Known pure state
     Clean,
@@ -137,6 +150,7 @@ pub enum FreeState {
 /// The simple instructions that make up the low-level circuit stream
 /// representation
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Inst {
     /// Bring up a bit rail
     CInit(Cbit),
@@ -153,8 +167,8 @@ pub enum Inst {
     /// Measurement: the first address is the qubit measured; the second is the
     /// target classical bit
     Meas(Qbit, Cbit),
-    /// IO out
-    Out(Box<IoOutGate>),
+    /// IO use
+    Io(Box<IoUse>),
 }
 
 impl BaseGateQ {
@@ -264,8 +278,8 @@ impl MaxBits for BaseGateQ {
             BaseGateQ::S(u) => u,
             BaseGateQ::SDag(u) => u,
             BaseGateQ::Phase(u, _) => u,
-            BaseGateQ::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
-            BaseGateQ::Swap(u, v) => std::cmp::max(u, v),
+            BaseGateQ::Cnot { ctrl, tgt } => cmp::max(ctrl, tgt),
+            BaseGateQ::Swap(u, v) => cmp::max(u, v),
         };
         Some(max)
     }
@@ -277,7 +291,7 @@ impl MaxBits for BaseGateQ {
 
 impl MaxBits for GateQ {
     fn max_qbit(&self) -> Option<Qbit> {
-        std::cmp::max(
+        cmp::max(
             self.ctrls.iter().map(|(u, _)| u).max().cloned(),
             self.base.max_qbit(),
         )
@@ -296,9 +310,9 @@ impl MaxBits for BaseGateC {
     fn max_cbit(&self) -> Option<Cbit> {
         let max = *match self {
             BaseGateC::Not(u) => u,
-            BaseGateC::Cnot { ctrl, tgt } => std::cmp::max(ctrl, tgt),
-            BaseGateC::Swap(fst, snd) => std::cmp::max(fst, snd),
-            BaseGateC::Copy(u, v) => std::cmp::max(u, v),
+            BaseGateC::Cnot { ctrl, tgt } => cmp::max(ctrl, tgt),
+            BaseGateC::Swap(fst, snd) => cmp::max(fst, snd),
+            BaseGateC::Copy(u, v) => cmp::max(u, v),
         };
         Some(max)
     }
@@ -326,7 +340,7 @@ impl MaxBits for GateC {
     }
 
     fn max_cbit(&self) -> Option<Cbit> {
-        std::cmp::max(
+        cmp::max(
             self.ctrls.iter().map(|(u, _)| u).max().cloned(),
             self.base.max_cbit(),
         )
@@ -355,7 +369,7 @@ impl MaxBits for Inst {
             Inst::QGate(g) => g.max_qbit(),
             Inst::CGate(g) => g.max_qbit(),
             Inst::Meas(u, _) => Some(*u),
-            Inst::Out(_) => None,
+            Inst::Io(_) => None,
         }
     }
 
@@ -368,7 +382,7 @@ impl MaxBits for Inst {
             Inst::QGate(g) => g.max_cbit(),
             Inst::CGate(g) => g.max_cbit(),
             Inst::Meas(_, u) => Some(*u),
-            Inst::Out(io) => Some(io.addr),
+            Inst::Io(io) => Some(io.addr),
         }
     }
 }
@@ -399,10 +413,11 @@ impl From<BaseGateC> for Inst {
 
 /// A simple circuit struct. This backend data structure keeps changing, but it
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CircuitBuf {
     insts: Vec<Inst>,
     pub max_qbit: Option<Qbit>,
-    max_cbit: Option<Cbit>,
+    pub max_cbit: Option<Cbit>,
 }
 
 impl CircuitBuf {
@@ -446,7 +461,30 @@ impl CircuitBuf {
     }
 }
 
-// === Implementations
+impl std::iter::FromIterator<Inst> for CircuitBuf {
+    fn from_iter<T: IntoIterator<Item = Inst>>(iter: T) -> Self {
+        let mut circ = Self::new();
+        for inst in iter {
+            circ.push(inst);
+        }
+        circ
+    }
+}
+
+impl From<Vec<Inst>> for CircuitBuf {
+    fn from(insts: Vec<Inst>) -> Self {
+        let (max_qbit, max_cbit) = insts.iter().fold((None, None), |(q, c), inst| {
+            (cmp::max(q, inst.max_qbit()), cmp::max(c, inst.max_cbit()))
+        });
+        Self {
+            max_qbit,
+            max_cbit,
+            insts,
+        }
+    }
+}
+
+// === Implementations ===
 
 impl std::fmt::Display for BaseGateQ {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
