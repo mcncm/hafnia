@@ -27,6 +27,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use smallvec::SmallVec;
 
 use crate::{
+    ast::IoDirection,
     context::Context,
     mir::*,
     place_tree::{PlaceNode, PlaceStore},
@@ -143,10 +144,10 @@ fn replace_places_at(
             Assert(pl) => *pl = place.clone(),
             // Unused drops will get cleaned up later
             Drop(_) => {}
-            Io(io) => match io {
-                IoStmtKind::In => todo!(),
-                IoStmtKind::Out { place: pl, .. } => {
-                    *pl = place.clone();
+            Io(io) => match &io.dir {
+                IoDirection::In => todo!(),
+                IoDirection::Out => {
+                    io.place = place.clone();
                 }
             },
             Nop => unreachable!(),
@@ -313,9 +314,9 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
             insert_action(use_data, place, pt, Action::Drop);
         }
         StmtKind::Io(io) => {
-            let place = match io {
-                IoStmtKind::In => todo!(),
-                IoStmtKind::Out { place, .. } => place,
+            let place = match &io.dir {
+                IoDirection::In => todo!(),
+                IoDirection::Out => &io.place,
             };
             insert_action(use_data, place, pt, Action::Use(Terminal));
         }

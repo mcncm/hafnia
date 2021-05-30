@@ -20,6 +20,7 @@ use std::marker::PhantomData;
 
 use crate::{
     analysis::controls::{ControlPlaces, CtrlCond},
+    ast::IoDirection,
     bitset,
     context::Context,
     mir::*,
@@ -157,9 +158,9 @@ impl<'a> DataflowAnalysis<Backward, Statementwise> for LivenessAnalysis<'a> {
                 // TODO: add `may_dangle` check to lifetimes?
                 // For now, assume that all references can dangle.
             }
-            StmtKind::Io(io) => match io {
-                IoStmtKind::In => {}
-                IoStmtKind::Out { place, .. } => self.gen(state, place),
+            StmtKind::Io(io) => match &io.dir {
+                IoDirection::In => self.kill(state, &io.place),
+                IoDirection::Out => self.gen(state, &io.place),
             },
             StmtKind::Nop => {}
         }

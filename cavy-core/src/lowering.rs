@@ -1097,10 +1097,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
     }
 
-    fn lower_io_stmt(&mut self, io: &ast::IoStmtKind, span: Span) -> Maybe<()> {
+    fn lower_io_stmt(&mut self, io: &ast::IoStmt, span: Span) -> Maybe<()> {
         match io {
-            ast::IoStmtKind::In => unimplemented!(),
-            ast::IoStmtKind::Out { lhs, name } => {
+            ast::IoStmt { lhs, name, dir } => {
                 // ...Make something up, for now? But in fact, you'll have to do
                 // some kind of "weak"/"ad hoc" type inference to get this type.
                 let ty = match self.type_expr(lhs) {
@@ -1112,9 +1111,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 };
                 let place = self.auto_place(ty);
                 self.lower_into(&place, lhs)?;
-                let stmt = mir::IoStmtKind::Out {
+                let stmt = mir::IoStmt {
+                    dir: *dir,
                     place,
-                    symb: name.data,
+                    channel: name.data,
                 };
                 self.push_stmt(span, mir::StmtKind::Io(stmt));
                 Ok(())

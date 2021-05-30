@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::circuit::*;
+use crate::context::SymbolId;
 
 use super::*;
 
@@ -32,14 +33,14 @@ impl Default for Package {
 }
 
 /// This backend emits a circuit in quantikz format
-#[derive(Debug)]
-pub struct LaTeX {
+pub struct LaTeX<'a> {
     /// Include preamble and `\begin{document}...\end{document}`?
     pub standalone: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
     pub initial_kets: bool,
     /// The quantum circuit package to use for rendering
     pub package: Package,
+    pub ctx: &'a Context<'a>,
 }
 
 // == Range queries ==
@@ -176,12 +177,12 @@ enum Elem {
 #[derive(Debug, Clone)]
 struct IoLabelData {
     /// The name of the IO object being written to
-    name: String,
+    name: SymbolId,
     /// The index within the IO object being output to
     elem: usize,
 }
 
-impl FmtWith<LaTeX> for Elem {
+impl<'a> FmtWith<LaTeX<'a>> for Elem {
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Elem::*;
         match self {
@@ -254,7 +255,7 @@ impl FmtWith<LaTeX> for Elem {
             // Maybe "ought" to use `\rstick` here, but then we'd need to figure
             // out the bounding box for Qcircuit.
             IoLabel(io) => {
-                let name = LaTeX::escape(&io.name);
+                let name = LaTeX::escape(&format!("{}", io.name.fmt_with(latex.ctx)));
                 match latex.package {
                     Qcircuit { .. } => {
                         write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", name, io.elem)
@@ -413,7 +414,7 @@ struct LayoutArray<'l> {
     /// LaTeX circuit libraries like qcircuit. If they have different
     /// features, this might affect the layout process itself, not just the
     /// string representation of gates.
-    latex: &'l LaTeX,
+    latex: &'l LaTeX<'l>,
     /// The wire array itself
     wires: Vec<Wire>,
     /// Blocked intervals of the array
@@ -495,7 +496,7 @@ impl<'l> LayoutArray<'l> {
             Inst::QGate(g) => self.push_qgate(g),
             Inst::CGate(g) => self.push_cgate(g),
             Inst::Meas(s, t) => self.push_meas(self.qwire(s), self.cwire(t)),
-            Inst::Out(io) => self.push_io_out(&io),
+            Inst::Io(io) => self.push_io_out(&io),
         }
     }
 
@@ -659,11 +660,11 @@ impl<'l> LayoutArray<'l> {
         self.wires[src_wire].liveness = Dead;
     }
 
-    fn push_io_out(&mut self, io: &IoOutGate) {
+    fn push_io_out(&mut self, io: &IoUse) {
         let wire = self.cwire(io.addr);
         let io = IoLabelData {
             // Nice, I get to clone it *again*! (See `dynamic/gates.rs`)
-            name: io.name.clone(),
+            name: io.channel.clone(),
             elem: io.elem,
         };
         let elem = Elem::IoLabel(Box::new(io));
@@ -750,7 +751,7 @@ impl<'l> LayoutArray<'l> {
 
 // == Formatting of layout arrays for quantikz and qcircuit ==
 
-impl FmtWith<LaTeX> for LayoutState<Elem> {
+impl<'a> FmtWith<LaTeX<'a>> for LayoutState<Elem> {
     #[rustfmt::skip]
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -762,7 +763,7 @@ impl FmtWith<LaTeX> for LayoutState<Elem> {
     }
 }
 
-impl FmtWith<LaTeX> for Wire {
+impl<'a> FmtWith<LaTeX<'a>> for Wire {
     #[rustfmt::skip]
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((last, head)) = &self.cells.split_last() {
@@ -776,7 +777,7 @@ impl FmtWith<LaTeX> for Wire {
     }
 }
 
-impl FmtWith<LaTeX> for LayoutArray<'_> {
+impl<'a> FmtWith<LaTeX<'a>> for LayoutArray<'_> {
     fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((last, head)) = &self.wires.split_last() {
             for wire in head.iter() {
@@ -790,7 +791,7 @@ impl FmtWith<LaTeX> for LayoutArray<'_> {
 
 // == Headers, etc. ==
 
-impl LaTeX {
+impl<'a> LaTeX<'a> {
     fn uses_nwtarg(&self) -> bool {
         match self.package {
             Quantikz { nwtarg: true, .. } | Qcircuit { nwtarg: true } => true,
@@ -900,7 +901,7 @@ impl LaTeX {
     }
 }
 
-impl FmtWith<LayoutArray<'_>> for LaTeX {
+impl<'a> FmtWith<LayoutArray<'_>> for LaTeX<'a> {
     fn fmt(&self, array: &LayoutArray, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_header(f)?;
         self.fmt_circuit_begin(f)?;
@@ -910,7 +911,7 @@ impl FmtWith<LayoutArray<'_>> for LaTeX {
     }
 }
 
-impl Target for LaTeX {
+impl<'a> Target for LaTeX<'a> {
     #[rustfmt::skip]
     fn from(&self, circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
         let qbits = circ.qbit_size();

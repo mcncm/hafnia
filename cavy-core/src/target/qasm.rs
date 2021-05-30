@@ -11,10 +11,11 @@ use std::fmt;
 pub const QASM_VERSION: &str = "2.0";
 
 /// The Qasm object code type is just a wrapper around a String.
-#[derive(Debug)]
-pub struct Qasm;
+pub struct Qasm<'a> {
+    ctx: &'a Context<'a>,
+}
 
-impl Qasm {
+impl<'a> Qasm<'a> {
     fn headers(&self) -> String {
         format!("OPENQASM {};\ninclude \"qelib1.inc\";", QASM_VERSION)
     }
@@ -58,7 +59,7 @@ impl Qasm {
     }
 }
 
-impl FmtWith<Qasm> for BaseGateQ {
+impl<'a> FmtWith<Qasm<'a>> for BaseGateQ {
     fn fmt(&self, _qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use BaseGateQ::*;
         match self {
@@ -76,7 +77,7 @@ impl FmtWith<Qasm> for BaseGateQ {
     }
 }
 
-impl FmtWith<Qasm> for GateQ {
+impl<'a> FmtWith<Qasm<'a>> for GateQ {
     fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use BaseGateQ::*;
         match (self.ctrls.len(), self.base) {
@@ -93,22 +94,28 @@ impl FmtWith<Qasm> for GateQ {
     }
 }
 
-impl FmtWith<Qasm> for Inst {
+impl<'a> FmtWith<Qasm<'a>> for Inst {
     fn fmt(&self, qasm: &Qasm, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Inst::QGate(g) => writeln!(f, "{};", g.fmt_with(qasm)),
             Inst::Meas(src, tgt) => writeln!(f, "measure q[{}] -> c[{}];", src, tgt),
-            Inst::Out(io) => {
+            Inst::Io(io) => {
                 // TODO OpenQASM doesn't support this kind of operation, does it? What
                 // should we do here?
-                writeln!(f, "// copy c[{}] __out_{}[{}]; ", io.addr, io.name, io.elem)
+                writeln!(
+                    f,
+                    "// copy c[{}] __out_{}[{}]; ",
+                    io.addr,
+                    io.channel.fmt_with(&qasm.ctx),
+                    io.elem
+                )
             }
             _ => Ok(()),
         }
     }
 }
 
-impl FmtWith<Qasm> for CircuitBuf {
+impl<'a> FmtWith<Qasm<'a>> for CircuitBuf {
     // It's too bad that this doesn't consume the circuit. I should find a
     // way to do that, by calling `circ.into_iter()` instead of implementing
     // `FmtWith<Qasm>` for CircuitBuf. Plus, the headers logically "belong

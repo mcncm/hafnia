@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use smallvec::SmallVec;
 
 use crate::{
+    ast::IoDirection,
     context::Context,
     mir::*,
     place_tree::{PlaceNode, PlaceStore},
@@ -110,10 +111,10 @@ impl SummaryAnalysis for LocalsUsed {
                 self.insert(pl.root);
             }
             Drop(_) => {}
-            Io(io) => match io {
-                IoStmtKind::In => todo!(),
-                IoStmtKind::Out { place, .. } => {
-                    self.insert(place.root);
+            Io(io) => match &io.dir {
+                IoDirection::In => todo!(),
+                IoDirection::Out => {
+                    self.insert(io.place.root);
                 }
             },
             Nop => {}

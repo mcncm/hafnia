@@ -79,7 +79,7 @@ pub fn inst_to_qutip(inst: Inst) -> String {
         Inst::QGate(g) => gate_to_qutip(g),
         Inst::CGate(_g) => "".to_owned(),
         Inst::Meas(_u, _) => "".to_owned(),
-        Inst::Out(_) => "".to_owned(),
+        Inst::Io(_) => "".to_owned(),
     }
 }
 

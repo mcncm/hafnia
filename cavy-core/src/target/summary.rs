@@ -79,7 +79,7 @@ impl Target for Summary {
                 }
                 Inst::CGate(_) => {}
                 Inst::Meas(_, _) => {}
-                Inst::Out(_) => {}
+                Inst::Io(_) => {}
             }
         }
 

@@ -662,10 +662,18 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn io_stmt(&mut self) -> Maybe<Stmt> {
         let span = self.next().unwrap().span;
         let lhs = Box::new(self.expression()?);
-        self.consume(MinusRAngle)?;
+        let out = self.match_lexeme(&MinusRAngle);
+        if !out {
+            self.consume(LAngleMinus)?;
+        }
         let name = self.consume_ident()?;
         let span = span.join(&self.consume(Lexeme::Semicolon)?.span).unwrap();
-        let stmt = IoStmtKind::Out { lhs, name };
+        let dir = if out {
+            IoDirection::Out
+        } else {
+            IoDirection::In
+        };
+        let stmt = IoStmt { lhs, name, dir };
         let stmt = Stmt {
             span,
             data: StmtKind::Io(Box::new(stmt)),

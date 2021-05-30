@@ -1,4 +1,4 @@
-use crate::{arch::MeasurementMode, circuit::*, values::Value};
+use crate::{arch::MeasurementMode, ast::IoDirection, circuit::*, values::Value};
 
 use super::{mem::*, *};
 
@@ -174,22 +174,17 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
 
     // NOTE: maybe this method shouldn't be in this module, given that it's
     // translating from a place?
-    pub fn push_io(&mut self, io: &IoStmtKind, st: &InterpreterState) {
-        match io {
-            IoStmtKind::In => todo!(),
-            IoStmtKind::Out { place, symb } => {
-                let bits = st.bits_at(place);
-                for (i, &bit) in bits.cbits.iter().enumerate() {
-                    let name = self.ctx.symbols[*symb].clone(); // blegh
-                    let io = crate::circuit::IoOutGate {
-                        addr: bit,
-                        name,
-                        elem: i,
-                    };
-                    self.gate_buf.push(Inst::Out(Box::new(io)));
-                }
-            }
-        };
+    pub fn push_io(&mut self, stmt: &IoStmt, st: &InterpreterState) {
+        let bits = st.bits_at(&stmt.place);
+        for (i, &bit) in bits.cbits.iter().enumerate() {
+            let io = crate::circuit::IoUse {
+                addr: bit,
+                channel: stmt.channel,
+                dir: stmt.dir,
+                elem: i,
+            };
+            self.gate_buf.push(Inst::Io(Box::new(io)));
+        }
     }
 
     pub fn free_qbit(&mut self, addr: Qbit, free_state: FreeState) {

@@ -26,7 +26,7 @@ pub enum Lexeme {
     Nat(Unsigned, Option<Uint>),
 
     // two-character token types
-    DotDot, EqualEqual, TildeEqual, MinusRAngle, EqualRAngle,
+    DotDot, EqualEqual, TildeEqual, MinusRAngle, LAngleMinus, EqualRAngle,
     ColonColon, VertVert, AmpAmp, VertEqual, AmpEqual, CarotEqual,
 
     // single-character token types
@@ -90,6 +90,7 @@ impl fmt::Display for Lexeme {
             Carot => "^",
             TildeEqual => "~=",
             MinusRAngle => "->",
+            LAngleMinus => "<-",
             EqualRAngle => "=>",
             ColonColon => "::",
             Equal => "=",

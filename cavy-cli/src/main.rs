@@ -197,9 +197,9 @@ fn main() {
     }
 
     if let Some(path) = get_entry_point(&argmatches) {
-        let target = get_target(&argmatches);
         let object_path = get_object_path(&argmatches);
         let id = ctx.srcs.insert_path(path).unwrap();
+        let target = get_target(&argmatches);
         let object_code = compile::compile_target(id, &mut ctx, target).unwrap_or_else(|errs| {
             eprintln!("{}", errs.fmt_with(&ctx));
             sys::exit(1);

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, iter::Enumerate};
 
-use crate::{mir::*, store::BitSet};
+use crate::{ast::IoDirection, mir::*, store::BitSet};
 
 pub trait Interleave<T>
 where
@@ -97,9 +97,9 @@ where
                 StmtKind::Assert(place) | StmtKind::Drop(place) => {
                     f(place);
                 }
-                StmtKind::Io(io) => match io {
-                    IoStmtKind::In => {}
-                    IoStmtKind::Out { place, .. } => f(place),
+                StmtKind::Io(io) => match &io.dir {
+                    IoDirection::In => {}
+                    IoDirection::Out => f(&mut io.place),
                 },
                 StmtKind::Nop => {}
             }

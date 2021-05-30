@@ -15,7 +15,7 @@ pub type ObjectCode = String;
 
 /// This is a marker trait for compile targets. Must be `Send` in order to use
 /// `Box<dyn Target>` in FFI.
-pub trait Target: std::fmt::Debug + Send {
+pub trait Target: Send {
     fn from(&self, circ: CircuitBuf, ctx: &Context) -> ObjectCode;
 }
 

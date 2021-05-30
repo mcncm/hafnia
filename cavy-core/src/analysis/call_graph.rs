@@ -254,7 +254,7 @@ impl Digraph<FnId> for Store<FnId, HashMap<FnId, CallSites>> {
         todo!()
     }
 
-    fn successors(&self, node: &FnId) -> &[FnId] {
+    fn successors(&self, _node: &FnId) -> &[FnId] {
         todo!()
     }
 }

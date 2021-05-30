@@ -212,7 +212,7 @@ impl<'c> FmtWith<Context<'c>> for Box<dyn Diagnostic> {
 mod util {
     /// Count the decimal digits in a number; useful for formatting lines of
     /// source code.
-    pub fn count_digits(n: usize) -> usize {
+    pub const fn count_digits(n: usize) -> usize {
         match n {
             0 => 1,
             mut n => {

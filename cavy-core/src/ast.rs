@@ -626,7 +626,7 @@ impl From<StmtKind> for Stmt {
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     /// An input/output statement
-    Io(Box<IoStmtKind>),
+    Io(Box<IoStmt>),
     /// An assertion
     Assert(Box<Expr>),
     /// A drop statement,
@@ -652,14 +652,17 @@ pub enum StmtKind {
 #[derive(Debug, Clone)]
 /// There are two kinds of runtime I/O, corresponding to sending messages in
 /// (from the perspective of the coprocessor) and out (same).
-pub enum IoStmtKind {
-    /// in-I/O currently does nothing; there's no way for the parser to even
-    /// construct it.
+pub struct IoStmt {
+    pub lhs: Box<Expr>,
+    pub name: Ident,
+    pub dir: IoDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum IoDirection {
     In,
-    Out {
-        lhs: Box<Expr>,
-        name: Ident,
-    },
+    Out,
 }
 
 /// Something that can be assigned to

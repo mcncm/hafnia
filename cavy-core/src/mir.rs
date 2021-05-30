@@ -11,6 +11,7 @@
 //! To compare these data structures with with the analogous ones in rustc, take
 //! a look at the module in `rustc_middle/src/mir/mod.rs`.
 
+use ast::IoDirection;
 use smallvec::SmallVec;
 
 use crate::store_type;
@@ -535,24 +536,17 @@ pub enum StmtKind {
     /// Drop a named variable
     Drop(Place),
     /// Read from or return a value to the host machine
-    Io(IoStmtKind),
+    Io(IoStmt),
     /// Handy for deleting statements in O(1) time.
     Nop,
 }
 
 /// This exactly mirrors the same-named struct in the AST
 #[derive(Debug)]
-pub enum IoStmtKind {
-    /// Input is not yet implemented
-    In,
-    Out {
-        // Must be a place: can't meaningfully do I/O with a value known at
-        // compile time. There's a reasonable case that someone could use the
-        // `io` statement with a constant to test their setup, so this really
-        // needs to work as expected.
-        place: Place,
-        symb: SymbolId,
-    },
+pub struct IoStmt {
+    pub place: Place,
+    pub channel: SymbolId,
+    pub dir: ast::IoDirection,
 }
 
 #[derive(Debug)]
@@ -751,11 +745,11 @@ impl fmt::Display for Stmt {
             StmtKind::Assert(place) => write!(f, "assert {};", place),
             StmtKind::Drop(place) => write!(f, "drop {};", place),
             StmtKind::Io(io) => {
-                match io {
-                    IoStmtKind::In => unimplemented!(),
+                match &io.dir {
+                    IoDirection::In => unimplemented!(),
                     // Can't actually be formatted without Ctx
-                    IoStmtKind::Out { place, symb } => {
-                        write!(f, "io {:?}: {:?};", place, symb)
+                    IoDirection::Out => {
+                        write!(f, "io {:?}: {:?};", &io.place, io.channel)
                     }
                 }
             }
