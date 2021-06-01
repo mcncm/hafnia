@@ -206,7 +206,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
 
         match ty {
             Type::Tuple(tys) => self.node_from_inners(None, tys, is_end),
-            Type::Array(ty) => self.node_from_inners(None, &[*ty], is_end),
+            Type::Array(ty, _) => self.node_from_inners(None, &[*ty], is_end),
             // FIXME
             Type::Func(_, _) => todo!(),
             // FIXME

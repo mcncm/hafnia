@@ -1008,11 +1008,33 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     /// Finish parsing an array type.
     fn finish_array_type(&mut self, opening: Span) -> Maybe<Annot> {
         let ty = Box::new(self.type_annotation()?);
+        self.consume(Semicolon)?;
+
+        /*
+        Check at parsing-time if the array size is a literal: this is a lexical
+        property.
+
+        Ideally, we should have some form of classical pi-types, or "const
+        generics", as Rust does; but this would require significant
+        reengineering of the compiler, moving (some of) const propagation to a
+        much earlier phase.
+        */
+        let sz = self.primary()?;
+        let sz = match sz.data {
+            ExprKind::Literal(Literal {
+                data: LiteralKind::Nat(u, None),
+                ..
+            }) => Ok(u as usize),
+            _ => Err(self
+                .errors
+                .push(errors::NonLiteralArraySize { span: sz.span })),
+        }?;
+
         let closing = self.rdelim(Bracket)?;
         let span = opening.join(&closing.span).unwrap();
         Ok(Annot {
             span,
-            data: AnnotKind::Array(ty),
+            data: AnnotKind::Array(ty, sz),
         })
     }
 
@@ -1323,6 +1345,13 @@ mod errors {
     #[derive(Diagnostic)]
     #[msg = "entry point `main` must not take parameters or return"]
     pub struct InvalidMainSignature {
+        #[span]
+        pub span: Span,
+    }
+
+    #[derive(Diagnostic)]
+    #[msg = "expected integer literal for array size"]
+    pub struct NonLiteralArraySize {
         #[span]
         pub span: Span,
     }

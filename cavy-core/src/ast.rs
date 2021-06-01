@@ -714,7 +714,7 @@ pub enum AnnotKind {
     Uint(Uint),
 
     Tuple(Vec<Annot>),
-    Array(Box<Annot>),
+    Array(Box<Annot>, usize),
 
     /// Linearization of a type annotation: e.g. `?u8`
     Question(Box<Annot>),

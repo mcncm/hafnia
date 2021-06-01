@@ -285,17 +285,17 @@ impl TypeSize {
             csize: std::cmp::max(self.csize, other.qsize),
         }
     }
-}
 
-/// A memory location offset for a type slot
-#[derive(Debug, Clone, Copy)]
-pub struct Offset {
-    pub quant: usize,
-    pub class: usize,
+    fn mul_scalar(self, rhs: usize) -> Self {
+        Self {
+            qsize: self.qsize * rhs,
+            csize: self.csize * rhs,
+        }
+    }
 }
 
 impl std::ops::Add for TypeSize {
-    type Output = TypeSize;
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
         Self {
@@ -303,6 +303,13 @@ impl std::ops::Add for TypeSize {
             csize: self.csize + rhs.csize,
         }
     }
+}
+
+/// A memory location offset for a type slot
+#[derive(Debug, Clone, Copy)]
+pub struct Offset {
+    pub quant: usize,
+    pub class: usize,
 }
 
 impl std::ops::Add<TypeSize> for Offset {
@@ -377,7 +384,7 @@ pub enum Type {
     Tuple(Vec<TyId>),
 
     /// Arrays
-    Array(TyId),
+    Array(TyId, usize),
 
     /// A function type
     Func(Vec<TyId>, TyId),
@@ -437,7 +444,7 @@ impl Type {
                     .collect();
                 offsets
             }
-            Type::Array(_) => todo!(),
+            Type::Array(_, _) => vec![],
             Type::Func(_, _) => vec![],
             Type::UserType(udt) => {
                 if let Some(tag) = &udt.tag {
@@ -477,7 +484,7 @@ impl Type {
                 .map(|ty| ty.size_inner(interner))
                 .copied()
                 .sum(),
-            Type::Array(_) => todo!(),
+            Type::Array(ty, sz) => ty.size_inner(interner).mul_scalar(*sz),
             Type::Func(_, _) => todo!(),
             Type::UserType(udt) => match &udt.tag {
                 // The enum case is special, and we'll treat it separately with an early return
@@ -507,7 +514,7 @@ impl Type {
     pub fn is_owned(&self, interner: &CachedTypeInterner) -> bool {
         match self {
             Type::Tuple(tys) => tys.iter().all(|ty| ty.is_owned_inner(interner)),
-            Type::Array(_ty) => todo!(),
+            Type::Array(ty, _) => ty.is_owned_inner(interner),
             Type::Func(_, _) => todo!(),
             Type::UserType(ty) => ty.as_tuple().is_owned(interner),
             Type::Ref(_, _) => false,
@@ -522,7 +529,7 @@ impl Type {
             Type::Q_Bool => true,
             Type::Q_Uint(_) => true,
             Type::Tuple(tys) => tys.iter().any(|ty| ty.is_affine_inner(interner)),
-            Type::Array(ty) => ty.is_affine_inner(interner),
+            Type::Array(_, _) => true,
             // This will become more nuanced when closures are introduced
             Type::Func(_, _) => false,
             Type::UserType(ty) => {
@@ -581,7 +588,7 @@ impl<'c> FmtWith<Context<'c>> for TyId {
                 }
                 f.write_str(")")
             }
-            Type::Array(ty) => write!(f, "[{}]", ctx.types[*ty]),
+            Type::Array(ty, sz) => write!(f, "[{}; {}]", ctx.types[*ty], sz),
             Type::Func(tys, ret) => {
                 f.write_str("Fn(")?;
                 for (n, ty) in tys.iter().enumerate() {

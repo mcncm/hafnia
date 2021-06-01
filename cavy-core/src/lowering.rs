@@ -1692,9 +1692,9 @@ mod typing {
                     .collect::<Maybe<Vec<TyId>>>()?;
                 ctx.intern_ty(Type::Tuple(inner_types))
             }
-            AnnotKind::Array(inner) => {
+            AnnotKind::Array(inner, sz) => {
                 let inner = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
-                ctx.intern_ty(Type::Array(inner))
+                ctx.intern_ty(Type::Array(inner, *sz))
             }
             AnnotKind::Question(inner) => {
                 let ty = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
