@@ -83,6 +83,9 @@ impl<'a> LivenessAnalysis<'a> {
             RvalueKind::UnOp(_, arg) => self.gen_operand(state, arg),
             RvalueKind::Ref(_, arg) => self.gen(state, arg),
             RvalueKind::Use(arg) => self.gen_operand(state, arg),
+            RvalueKind::Array(items) => {
+                items.iter().for_each(|item| self.gen_operand(state, item));
+            }
         }
     }
 

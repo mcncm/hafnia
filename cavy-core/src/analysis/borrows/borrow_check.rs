@@ -244,6 +244,11 @@ impl<'a> ActionStream<'a> {
             RvalueKind::Use(op) => {
                 self.consume_operand(op, span);
             }
+            RvalueKind::Array(items) => {
+                for item in items.iter() {
+                    self.consume_operand(item, span);
+                }
+            }
         }
     }
 

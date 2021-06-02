@@ -580,12 +580,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             ExprKind::Field(root, field) => self.lower_into_field(place, root, field),
             ExprKind::Tuple(elems) => self.lower_into_tuple(place, elems),
             ExprKind::Struct { ty, fields } => self.lower_into_struct(place, ty, fields),
-            ExprKind::IntArr { item, reps } => {
-                todo!()
-            }
-            ExprKind::ExtArr(_) => {
-                todo!()
-            }
+            ExprKind::ExtArr(items) => self.lower_into_ext_arr(place, items),
+            ExprKind::IntArr { item, reps } => self.lower_into_int_arr(place, item, *reps),
             ExprKind::Block(block) => self.lower_into_block(place, block),
             ExprKind::If { cond, tru, fls } => self.lower_into_if(place, cond, tru, fls),
             ExprKind::Match { .. } => todo!(),
@@ -890,6 +886,40 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
             place.path.push(Proj::Field(n));
             self.lower_into(&place, expr)?;
         }
+        Ok(())
+    }
+
+    fn lower_into_ext_arr(&mut self, place: Place, items: &[Expr]) -> Maybe<()> {
+        let items: Vec<_> = items
+            .iter()
+            .map(|item| {
+                let pl = self.lower_expr(item)?;
+                Ok(self.operand_of(pl))
+            })
+            .collect::<Maybe<_>>()?;
+        let rhs = Rvalue {
+            data: RvalueKind::Array(items),
+            span: Span::default(), // FIXME manifestly incorrect
+        };
+        self.assn_stmt(place, rhs);
+        Ok(())
+    }
+
+    fn lower_into_int_arr(&mut self, place: Place, item: &Expr, reps: usize) -> Maybe<()> {
+        // We can spare the memory to desugar intensional arrays to the same
+        // representation as extensional ones. This is a fairly profligate thing
+        // to do, but we don't mind.
+        let items = std::iter::repeat({
+            let pl = self.lower_expr(item)?;
+            self.operand_of(pl)
+        })
+        .take(reps)
+        .collect();
+        let rhs = Rvalue {
+            data: RvalueKind::Array(items),
+            span: Span::default(), // FIXME manifestly incorrect
+        };
+        self.assn_stmt(place, rhs);
         Ok(())
     }
 
@@ -1249,7 +1279,7 @@ mod typing {
                 ExprKind::Field(root, field) => self.type_field(root, field)?,
                 ExprKind::Tuple(elems) => self.type_tuple(elems)?,
                 ExprKind::Struct { ty, fields } => self.type_struct(ty, fields)?,
-                ExprKind::IntArr { item, reps } => self.type_int_arr(item, reps)?,
+                ExprKind::IntArr { item, reps } => self.type_int_arr(item, *reps)?,
                 ExprKind::ExtArr(elems) => self.type_ext_arr(elems)?,
                 ExprKind::Block(block) => self.type_block(block)?,
                 ExprKind::If {
@@ -1627,12 +1657,13 @@ mod typing {
             Ok(ty)
         }
 
-        fn type_int_arr(&mut self, _item: &Expr, _reps: &Expr) -> Maybe<TyId> {
-            todo!()
+        fn type_int_arr(&mut self, item: &Expr, reps: usize) -> Maybe<TyId> {
+            let ty = self.type_expr(item)?;
+            Ok(self.ctx.intern_ty(Type::Array(ty, reps)))
         }
 
-        fn type_ext_arr(&mut self, elems: &[Expr]) -> Maybe<TyId> {
-            let mut elems = elems.iter();
+        fn type_ext_arr(&mut self, items: &[Expr]) -> Maybe<TyId> {
+            let mut elems = items.iter();
             let fst = match elems.next().and_then(|head| Some(self.type_expr(head))) {
                 Some(ty) => ty?,
                 None => todo!(),
@@ -1646,7 +1677,8 @@ mod typing {
                 todo!();
             }
 
-            Ok(fst)
+            let ty = self.ctx.intern_ty(Type::Array(fst, items.len()));
+            Ok(ty)
         }
     }
 

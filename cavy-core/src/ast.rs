@@ -517,13 +517,16 @@ pub enum ExprKind {
         ty: Ident,
         fields: Vec<(Ident, Expr)>,
     },
+    /// A field access, like `x.a` or `y.0`
+    Field(Box<Expr>, Field),
     /// Intensional arrays of the form `[1; 4]`
     IntArr {
         item: Box<Expr>,
-        reps: Box<Expr>,
+        /// It would be so great if we could use "const generics", but let's
+        /// start out with sizes known already at parsing, which could only have
+        /// come from a literal integer.
+        reps: usize,
     },
-    /// A field access, like `x.a` or `y.0`
-    Field(Box<Expr>, Field),
     /// Extensional arrays of the form `[1, 2, 3]`
     ExtArr(Vec<Expr>),
     Block(Box<Block>),

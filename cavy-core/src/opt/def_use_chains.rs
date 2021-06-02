@@ -136,6 +136,9 @@ fn replace_places_at(
                         // NOTE: actually, I’m not sure they do.
                         // *place = lhs.clone();
                     }
+                    Array(items) => items
+                        .iter_mut()
+                        .for_each(|item| replace_place_op(item, place, prev)),
                 }
                 if !last {
                     return Some(std::mem::replace(lhs, place.clone()));
@@ -305,6 +308,10 @@ fn collect_stmt(use_data: &mut PlaceStore<UseData>, stmt: &StmtKind, pt: GraphPt
                 Ref(_, place) => {
                     insert_action(use_data, place, pt, Action::Use(Terminal));
                 }
+                Array(items) => items
+                    .iter()
+                    // Could be nonterminal for array of size 1
+                    .for_each(|item| use_operand(use_data, item, pt, Terminal)),
             }
         }
         StmtKind::Assert(place) => {

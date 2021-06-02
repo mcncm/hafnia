@@ -91,6 +91,13 @@ impl DataflowAnalysis<Forward, Statementwise> for FeedbackAnalysis {
                     state.delin.insert(place.root, span);
                 }
             }
+            Array(items) => {
+                for item in items.iter() {
+                    if let Some(&span) = state.upstream_delin(item) {
+                        state.delin.insert(place.root, span);
+                    }
+                }
+            }
             // I *think* refs should do nothing here! They are merely taking a
             // reference, not actually "doing" anything
             Ref(_, _) => {}

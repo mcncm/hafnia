@@ -30,6 +30,7 @@ impl<'m> Interpreter<'m> {
             RvalueKind::UnOp(op, rhs) => self.compute_unop(place, op, rhs),
             RvalueKind::Ref(kind, rplace) => self.compute_ref(kind, place, rplace),
             RvalueKind::Use(op) => self.compute_use(place, op),
+            RvalueKind::Array(items) => items.iter().for_each(|item| self.compute_use(place, item)),
         };
     }
 

@@ -235,6 +235,8 @@ impl StrandChecker {
                 self.kill_at_place(Some(rhs));
                 return;
             }
+            // Let's wimp out here
+            Array(_items) => return,
         };
 
         // Take the strand out of its old place

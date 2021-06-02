@@ -233,6 +233,11 @@ impl<'a> RegionInf<'a> {
                     debug_assert_eq!(&ascr.kind, refr);
                     self.sub_constr_loan(nxt, lhs, ascr, place);
                 }
+                RvalueKind::Array(items) => {
+                    items
+                        .iter()
+                        .for_each(|item| self.sub_constr_oper(nxt, lhs, item));
+                }
             };
         }
 

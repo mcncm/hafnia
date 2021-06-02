@@ -213,6 +213,12 @@ impl DataflowAnalysis<Forward, Blockwise> for LinearityAnalysis {
                 // references move around freely.
                 state.borrow_from(*kind, place, rhs.span);
             }
+            RvalueKind::Array(items) => {
+                // FIXME this span is non-ideal
+                items
+                    .iter()
+                    .for_each(|item| state.move_from(item, rhs.span));
+            }
         }
         state.move_into(&place);
     }

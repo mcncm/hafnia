@@ -200,6 +200,34 @@ impl Interpreter {
                     Evaluated::Yes
                 }
             },
+
+            // TODO
+            RvalueKind::Array(_items) => {
+                // // Should propagate through the array only if *all* elements are
+                // // computable at compile-time.
+                // let elems = items
+                //     .iter()
+                //     .map(|item| match item {
+                //         Copy(place) | Move(place) => {
+                //             if let Some(c) = self.env.get(place).cloned() {
+                //                 Ok(c)
+                //             } else {
+                //                 Err(())
+                //             }
+                //         }
+                //         Const(c) => Ok(c.clone()),
+                //     })
+                //     .collect::<Result<Vec<_>, ()>>();
+
+                // match elems {
+                //     Ok(elems) => {
+                //         self.env.insert(place, elems)
+                //     }
+                //     Err(()) => Evaluated::No,
+                // }
+                Evaluated::No
+            }
+
             // NOTE: is this always correct?
             RvalueKind::Ref(_, rplace) => {
                 if let Some(c) = self.env.get(rplace).cloned() {

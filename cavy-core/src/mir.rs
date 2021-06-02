@@ -563,7 +563,7 @@ impl Rvalue {
         }
     }
 
-    /// Get all the read by the Rvalue
+    /// Get all the places read by the Rvalue
     pub fn places<'a>(&'a self) -> SmallVec<[&Place; 2]> {
         use RvalueKind::*;
         let mut places = SmallVec::new();
@@ -581,6 +581,9 @@ impl Rvalue {
             Use(op) => {
                 f(op);
             }
+            Array(items) => items.iter().for_each(|item| {
+                f(item);
+            }),
         };
         places
     }
@@ -603,12 +606,15 @@ impl Rvalue {
             Use(op) => {
                 f(op);
             }
+            Array(items) => items.iter_mut().for_each(|item| {
+                f(item);
+            }),
         };
         places
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Operand {
     Const(Value),
     Copy(Place),
@@ -645,6 +651,11 @@ pub enum RvalueKind {
     UnOp(UnOp, Operand),
     Ref(RefKind, Place),
     Use(Operand),
+    /// The `rustc` mir has separate rvalue kinds for extensional and
+    /// extensional arrays (`Aggregate`s and `Repeat`s, respectively). But we
+    /// want to keep things nice and simple: we can spare the memory to desugar
+    /// intensional arrays.
+    Array(Vec<Operand>),
 }
 
 // Consider if you really want this alias, of if you ought to either lower the
@@ -788,6 +799,17 @@ impl fmt::Display for RvalueKind {
             Self::UnOp(op, right) => write!(f, "{} {}", op, right),
             Self::Use(arg) => write!(f, "{}", arg),
             Self::Ref(ref_kind, place) => write!(f, "{}{}", ref_kind, place),
+            Self::Array(items) => {
+                f.write_str("[")?;
+                let mut items = items.iter();
+                if let Some(head) = items.next() {
+                    write!(f, "{}", head)?;
+                }
+                for item in items {
+                    write!(f, ", {}", item)?;
+                }
+                f.write_str("]")
+            }
         }
     }
 }

@@ -895,7 +895,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         let item = self.expression()?;
         let arr = if self.match_lexeme(&Semicolon) {
             let item = Box::new(item);
-            let reps = Box::new(self.expression()?);
+            let reps = self.int_array_repeator()?;
             ExprKind::IntArr { item, reps }
         } else {
             let mut items = vec![item];
@@ -1009,7 +1009,17 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn finish_array_type(&mut self, opening: Span) -> Maybe<Annot> {
         let ty = Box::new(self.type_annotation()?);
         self.consume(Semicolon)?;
+        let sz = self.int_array_repeator()?;
+        let closing = self.rdelim(Bracket)?;
+        let span = opening.join(&closing.span).unwrap();
+        Ok(Annot {
+            span,
+            data: AnnotKind::Array(ty, sz),
+        })
+    }
 
+    /// Get the repeator of an intensional array
+    fn int_array_repeator(&mut self) -> Maybe<usize> {
         /*
         Check at parsing-time if the array size is a literal: this is a lexical
         property.
@@ -1020,7 +1030,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         much earlier phase.
         */
         let sz = self.primary()?;
-        let sz = match sz.data {
+        match sz.data {
             ExprKind::Literal(Literal {
                 data: LiteralKind::Nat(u, None),
                 ..
@@ -1028,14 +1038,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             _ => Err(self
                 .errors
                 .push(errors::NonLiteralArraySize { span: sz.span })),
-        }?;
-
-        let closing = self.rdelim(Bracket)?;
-        let span = opening.join(&closing.span).unwrap();
-        Ok(Annot {
-            span,
-            data: AnnotKind::Array(ty, sz),
-        })
+        }
     }
 
     /// Finish parsing a type that may be either a tuple or the unit type.
