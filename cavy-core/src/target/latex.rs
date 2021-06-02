@@ -33,14 +33,13 @@ impl Default for Package {
 }
 
 /// This backend emits a circuit in quantikz format
-pub struct LaTeX<'a> {
+pub struct LaTeX {
     /// Include preamble and `\begin{document}...\end{document}`?
     pub standalone: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
     pub initial_kets: bool,
     /// The quantum circuit package to use for rendering
     pub package: Package,
-    pub ctx: &'a Context<'a>,
 }
 
 // == Range queries ==
@@ -182,8 +181,8 @@ struct IoLabelData {
     elem: usize,
 }
 
-impl<'a> FmtWith<LaTeX<'a>> for Elem {
-    fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<'c> FmtWith<(&LaTeX, &Context<'c>)> for Elem {
+    fn fmt(&self, (latex, ctx): &(&LaTeX, &Context), f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Elem::*;
         match self {
             Ket(s) => {
@@ -255,7 +254,7 @@ impl<'a> FmtWith<LaTeX<'a>> for Elem {
             // Maybe "ought" to use `\rstick` here, but then we'd need to figure
             // out the bounding box for Qcircuit.
             IoLabel(io) => {
-                let name = LaTeX::escape(&format!("{}", io.name.fmt_with(latex.ctx)));
+                let name = LaTeX::escape(&format!("{}", io.name.fmt_with(ctx)));
                 match latex.package {
                     Qcircuit { .. } => {
                         write!(f, r"\push{{\tt \enspace {}[{}] }} \cw", name, io.elem)
@@ -414,7 +413,7 @@ struct LayoutArray<'l> {
     /// LaTeX circuit libraries like qcircuit. If they have different
     /// features, this might affect the layout process itself, not just the
     /// string representation of gates.
-    latex: &'l LaTeX<'l>,
+    latex: &'l LaTeX,
     /// The wire array itself
     wires: Vec<Wire>,
     /// Blocked intervals of the array
@@ -751,11 +750,11 @@ impl<'l> LayoutArray<'l> {
 
 // == Formatting of layout arrays for quantikz and qcircuit ==
 
-impl<'a> FmtWith<LaTeX<'a>> for LayoutState<Elem> {
+impl<'c> FmtWith<(&LaTeX, &Context<'c>)> for LayoutState<Elem> {
     #[rustfmt::skip]
-    fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, fmt_data: &(&LaTeX, &Context), f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Occupied(elem) => write!(f, "{}", elem.fmt_with(latex)),
+            Occupied(elem) => write!(f, "{}", elem.fmt_with(fmt_data)),
             Free(Dead)  => f.write_str(" "),
             Free(LiveQ) => f.write_str(r"\qw"),
             Free(LiveC) => f.write_str(r"\cw"),
@@ -763,35 +762,39 @@ impl<'a> FmtWith<LaTeX<'a>> for LayoutState<Elem> {
     }
 }
 
-impl<'a> FmtWith<LaTeX<'a>> for Wire {
+impl<'c> FmtWith<(&LaTeX, &Context<'c>)> for Wire {
     #[rustfmt::skip]
-    fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, fmt_data: &(&LaTeX, &Context), f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((last, head)) = &self.cells.split_last() {
             for cell in head.iter() {
                 // Prev comment: "must not be a raw string"; why?
-                write!(f, "{} & ", cell.fmt_with(latex))?;
+                write!(f, "{} & ", cell.fmt_with(fmt_data))?;
             }
-            write!(f, "{} ", last.fmt_with(latex))?;
+            write!(f, "{} ", last.fmt_with(fmt_data))?;
         }
         Ok(())
     }
 }
 
-impl<'a> FmtWith<LaTeX<'a>> for LayoutArray<'_> {
-    fn fmt(&self, latex: &LaTeX, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<'c> FmtWith<(&LaTeX, &Context<'c>)> for LayoutArray<'_> {
+    fn fmt(&self, fmt_data: &(&LaTeX, &Context), f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let latex = self.latex;
+        latex.fmt_header(f)?;
+        latex.fmt_circuit_begin(f)?;
         if let Some((last, head)) = &self.wires.split_last() {
             for wire in head.iter() {
-                writeln!(f, r"{}\\", wire.fmt_with(latex))?;
+                writeln!(f, r"{}\\", wire.fmt_with(fmt_data))?;
             }
-            writeln!(f, "{}", last.fmt_with(latex))?;
+            writeln!(f, "{}", last.fmt_with(fmt_data))?;
         }
-        Ok(())
+        latex.fmt_circuit_end(f)?;
+        latex.fmt_footer(f)
     }
 }
 
 // == Headers, etc. ==
 
-impl<'a> LaTeX<'a> {
+impl LaTeX {
     fn uses_nwtarg(&self) -> bool {
         match self.package {
             Quantikz { nwtarg: true, .. } | Qcircuit { nwtarg: true } => true,
@@ -901,19 +904,9 @@ impl<'a> LaTeX<'a> {
     }
 }
 
-impl<'a> FmtWith<LayoutArray<'_>> for LaTeX<'a> {
-    fn fmt(&self, array: &LayoutArray, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_header(f)?;
-        self.fmt_circuit_begin(f)?;
-        write!(f, "{}", array.fmt_with(self))?;
-        self.fmt_circuit_end(f)?;
-        self.fmt_footer(f)
-    }
-}
-
-impl<'a> Target for LaTeX<'a> {
+impl Target for LaTeX {
     #[rustfmt::skip]
-    fn from(&self, circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
+    fn from(&self, circ: CircuitBuf, ctx: &Context) -> ObjectCode {
         let qbits = circ.qbit_size();
         let cbits = circ.cbit_size();
         let mut layout_array = LayoutArray::new(self, qbits, cbits);
@@ -923,7 +916,7 @@ impl<'a> Target for LaTeX<'a> {
         }
         layout_array.finish();
 
-        format!("{}", self.fmt_with(&layout_array))
+        format!("{}", layout_array.fmt_with(&(self, ctx)))
     }
 }
 

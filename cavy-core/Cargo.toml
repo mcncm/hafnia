@@ -6,7 +6,10 @@ name = "cavy-core"
 version = "0.1.0"
 
 [dependencies]
-serde = { version = "1.0", optional = true }
+# We don't actually need `derive` for *all* uses of serde. It's currently used
+# by `cavy-inline`, but doesn't need to be, in principle. It's not used at all
+# by the `summary` target.
+serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", features = ["preserve_order"], optional = true }
 bitvec = "0.22"
 smallvec = "1.6"

@@ -22,7 +22,7 @@ pub trait Target: Send {
 impl<T> Target for T
 where
     CircuitBuf: FmtWith<T>,
-    T: std::fmt::Debug + Send,
+    T: Send,
 {
     fn from(&self, circ: CircuitBuf, _ctx: &Context) -> ObjectCode {
         format!("{}", circ.fmt_with(self))

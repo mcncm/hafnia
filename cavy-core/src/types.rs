@@ -588,7 +588,7 @@ impl<'c> FmtWith<Context<'c>> for TyId {
                 }
                 f.write_str(")")
             }
-            Type::Array(ty, sz) => write!(f, "[{}; {}]", ctx.types[*ty], sz),
+            Type::Array(ty, sz) => write!(f, "[{}; {}]", ty.fmt_with(ctx), sz),
             Type::Func(tys, ret) => {
                 f.write_str("Fn(")?;
                 for (n, ty) in tys.iter().enumerate() {
