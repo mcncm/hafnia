@@ -4,7 +4,7 @@ use cavy_core::circuit::{BaseGateQ, GateQ, Inst};
 
 use std::io::{self, Write};
 
-/// Test that a circuit implements the right unitary. This uses `qutip` to
+/// Test that a circuit implements the right unitary. This uses Numpy to
 /// simulate the circuit, but shouldn't depend on `inline_python` or even
 /// `pycavy`; It will instead do the "most naive" thing possible.
 macro_rules! test_unitary {
@@ -35,11 +35,11 @@ pub fn test_unitary_inner(src: &'static str, exp_gates: Vec<Inst>) -> io::Result
         .unwrap();
 
     let max_qubit: u32 = circ.max_qbit.unwrap().into();
-    let true_gates: String = circ.into_iter().map(|inst| inst_to_qutip(inst)).collect();
+    let true_gates: String = circ.into_iter().map(|inst| inst_to_circ(inst)).collect();
 
     let exp_gates: String = exp_gates
         .into_iter()
-        .map(|inst| inst_to_qutip(inst))
+        .map(|inst| inst_to_circ(inst))
         .collect();
 
     let script = format!(
@@ -70,41 +70,45 @@ pub fn test_unitary_inner(src: &'static str, exp_gates: Vec<Inst>) -> io::Result
     Ok(())
 }
 
-pub fn inst_to_qutip(inst: Inst) -> String {
+pub fn inst_to_circ(inst: Inst) -> String {
     match inst {
         Inst::CInit(_) => "".to_owned(),
         Inst::CFree(_, _) => "".to_owned(),
         Inst::QInit(_u) => "".to_owned(),
         Inst::QFree(_u, _) => "".to_owned(),
-        Inst::QGate(g) => gate_to_qutip(g),
+        Inst::QGate(g) => gate_to_circ(g),
         Inst::CGate(_g) => "".to_owned(),
         Inst::Meas(_u, _) => "".to_owned(),
         Inst::Io(_) => "".to_owned(),
     }
 }
 
-pub fn gate_to_qutip(g: GateQ) -> String {
+pub fn gate_to_circ(g: GateQ) -> String {
     use BaseGateQ::*;
-    if g.ctrls.len() > 0 {
-        todo!();
+    if !g.ctrls.is_empty() {
+        // FIXME hideous special casing
+        if g.ctrls.len() == 1 {
+            let ctrl = g.ctrls[0];
+            return match g.base {
+                X(u) if ctrl.1 => format!("circ.append(Gate.CNOT, ({}, {}))\n", ctrl.0, u),
+                Z(u) if ctrl.1 => format!("circ.append(Gate.CZ, ({}, {}))\n", ctrl.0, u),
+                _ => todo!(),
+            };
+        } else {
+            todo!();
+        }
     }
 
     match g.base {
-        X(u) => format!("qc.add_gate(\"X\", targets={})\n", u),
-        H(u) => format!("qc.add_gate(\"H\", targets={})\n", u),
-        Z(u) => format!("qc.add_gate(\"Z\", targets={})\n", u),
-        T(u) => format!("qc.add_gate(\"T\", targets={})\n", u),
+        X(u) => format!("circ.append(Gate.X, ({},))\n", u),
+        H(u) => format!("circ.append(Gate.Y, ({},))\n", u),
+        Z(u) => format!("circ.append(Gate.Z, ({},))\n", u),
+        T(u) => format!("circ.append(Gate.T, ({},))\n", u),
         TDag(_u) => todo!(),
-        S(u) => format!("qc.add_gate(\"S\", targets={})\n", u),
+        S(u) => format!("circ.append(Gate.S, ({},))\n", u),
         SDag(_u) => todo!(),
-        Phase(u, phase) => format!(
-            "qc.add_gate(\"PHASEGATE\", targets={}, arg_phase=pi * {})\n",
-            u, phase
-        ),
-        Cnot { ctrl, tgt } => format!(
-            "qc.add_gate(\"CNOT\", controls={}, targets={})\n",
-            ctrl, tgt
-        ),
-        Swap(fst, snd) => format!("qc.add_gate(\"SWAP\", targets=[{}, {}])\n", fst, snd),
+        Phase(_u, _phase) => todo!(),
+        Cnot { ctrl, tgt } => format!("circ.append(Gate.CNOT, ({}, {}))\n", ctrl, tgt),
+        Swap(fst, snd) => format!("circ.append(Gate.SWAP, ({}, {}))\n", fst, snd),
     }
 }

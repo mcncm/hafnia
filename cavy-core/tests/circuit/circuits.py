@@ -1,4 +1,4 @@
-"""This little Python script provides some very primitive circuit simulation
+"""This little Python module provides some very primitive circuit simulation
 utilities in pure numpy. We could instead write these tests in Rust, using a
 suitable linear algebra library, but I'd rather use a lightweight scripting
 language for the time being. It's perhaps a little bit regrettable to depend on
@@ -12,7 +12,6 @@ assumed to have numpy already on their system; finally, I don't want to show
 "favoritism" to one or another circuit simulation package.
 
 Anyway, rest assured that this is not supposed to be fast or sophisticated.
-Also, the first bit really should be a module separate from the script bit.
 Despite the simplicity of this thing, I admit it's cribbed (though not verbatim)
 from this (this nice blog post)[http://kattemolle.com/other/QCinPY.html] by
 Joris Kattemölle. Go ahead, revoke my programming license.
@@ -96,40 +95,20 @@ class Circuit:
 
     def __init__(self, qubits: int):
         self.qubits = qubits
-        self.gates: List[Tuple[np.ndarray, Tuple[int, ...], List[int]]] = []
+        self.gates: List[Tuple[np.ndarray, Tuple[int, ...]]] = []
 
-    def append(self, gate: np.ndarray, targets: Tuple[int, ...], controls: List[int] = []):
-        self.gates.append((gate, targets, controls))
+    def append(self, gate: np.ndarray, targets: Tuple[int, ...]):
+        self.gates.append((gate, targets))
 
     def run(self) -> np.ndarray:
         """Simulate the action of the circuit on an input |00...0> state.
         """
         state = np.zeros([2] * self.qubits)
         state[(0,) * self.qubits] = 1
-        for (gate, targets, controls) in self.gates:
+        for (gate, targets) in self.gates:
             shape_len = len(gate.shape)
             in_legs = tuple(range(shape_len // 2, shape_len))
             out_legs = tuple(range(shape_len // 2))
             state = np.tensordot(gate, state, (in_legs, targets))
             state = np.moveaxis(state, targets, out_legs)
         return state
-
-
-# minimum acceptable purity of the output state
-purity = {purity}
-# number of qubits in the circuit
-qubits = {qubits}
-
-# no classical bits, for now
-circ = Circuit(qubits)
-{true_gates}
-# The true output state
-true_out = circ.run()
-
-circ = Circuit(qubits)
-{exp_gates}
-# The test output state
-test_out = circ.run()
-
-# the two unitaries should be equal within tolerance
-assert np.isclose(true_out, test_out).all()
