@@ -44,7 +44,7 @@ impl Qasm {
                                     tgt: *snd,
                                 },
                             ] {
-                                write!(f, "{}", gate.fmt_with(self))?;
+                                writeln!(f, "{};", gate.fmt_with(self))?;
                             }
                             Ok(())
                         }

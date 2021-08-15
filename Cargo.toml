@@ -6,6 +6,7 @@ members = [
     "cavy-cli",
     "cavy-inline",
 ]
+default-members = ["cavy-cli"]
 
 [profile.release]
 lto = "fat"

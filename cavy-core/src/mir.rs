@@ -83,17 +83,16 @@ pub struct TypedSig {
 
 pub type Predecessors = Store<BlockId, Vec<BlockId>>;
 
-/// A lazily-computed CFG predecessor graph. Like many other parts of the Mir,
+/// A lazily-computed CFG predecessor graph. Like many other parts of the MIR,
 /// this is basically the same as the data structure used by `rustc`. The
-/// rationale for using an outside store, rather than maintaining predecessors in
+/// rationale for using an outside `Store`, rather than maintaining predecessors in
 /// the blocks themselves, is that the effects of changing the out-pointers of a
 /// block are essentially as nonlocal as possible. Any other blocks could have
 /// their predecessors invalidated, but recomputing them from purely local data
 /// is *also* finicky. This is just easier.
 ///
 /// The only way it's really different from the `rustc` implementation is that it never
-/// reallocates; this will use a little more space, but probably not too much,
-/// and should be (slightly) faster.
+/// reallocates; this will use a little more space, but probably not enough to matter.
 struct PredGraph {
     /// The current predecessors graph.
     preds: RefCell<Predecessors>,
