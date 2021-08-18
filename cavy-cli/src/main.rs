@@ -11,7 +11,7 @@ use cavy_core::{
     util::FmtWith,
 };
 
-use clap::{load_yaml, App, ArgMatches};
+use clap::{App, Arg, ArgMatches};
 use fs::File;
 
 /// Get the optimization level
@@ -172,10 +172,162 @@ fn main() {
     // performance of every part of the process.
     let mut stats = Statistics::new();
     // FIXME: This line is literally the slowest thing in the program
-    let yaml = load_yaml!("cli.yml");
-    let app = App::from(yaml).version(sys::VERSION_STRING);
-    let argmatches = app.get_matches();
+    let argmatches = App::new("Cavyc")
+        .version(sys::VERSION_STRING)
+        .author("mcncm <cavy-lang-support@mit.edu")
+        .about("A small, imperative quantum programming language")
+        .arg(
+            Arg::new("input")
+                .about("The source file to compile")
+                .required(false)
+                .index(1),
+        )
+        .arg(
+            Arg::new("object")
+                .about("Write the compiler output into <OBJECT>.")
+                .short('o')
+                .value_name("OBJECT")
+                .required(false),
+        )
+        // Target options
+        .arg(
+            Arg::new("target")
+                .about("Object language to target.")
+                .long("target")
+                .short('t')
+                .required(false)
+                .possible_values(&["summary", "qasm", "latex", "debug", "null"])
+                .default_value("qasm"),
+        )
+        .arg(
+            Arg::new("standalone")
+                .about("Compiles LaTeX output as a standalone document.")
+                .long("standalone"),
+        )
+        .arg(
+            Arg::new("nwtarg")
+                .about("Use nice `\nwtarg` macros in LaTeX output. Always on if `standalone`.")
+                .long("nwtarg"),
+        )
+        .arg(
+            Arg::new("wave")
+                .about(r#"Separate classical and quantum bits with the quantikz `\wave`."#)
+                .long("wave"),
+        )
+        .arg(
+            Arg::new("initial_kets")
+                .about("Represent initial `X` gates with ket states.")
+                .long("initial-kets"),
+        )
+        .arg(
+            Arg::new("package")
+                .about("<PACKAGE> is the LaTeX package used for circuit output.")
+                .long("package")
+                .value_name("PACKAGE")
+                .required(false)
+                .possible_values(&["qcircuit", "quantikz", "yquant"])
+                .default_value("quantikz"),
+        )
+        .arg(
+            Arg::new("perf")
+                .about("Include profiling data in summary statistics.")
+                .long("perf"),
+        )
+        // Compile phase options
+        .arg(
+            Arg::new("debug")
+                .about("Runs the compiler in debug mode")
+                .long("debug")
+                .short('d'),
+        )
+        .arg(
+            Arg::new("no_rerep")
+                .about("Do not canonicalize gate representations")
+                .long("no-rerep"),
+        )
+        .arg(
+            Arg::new("phase")
+                .about("<PHASE> is the last phase of the compiler to run.")
+                .value_name("PHASE")
+                .required(false)
+                .long("phase")
+                .possible_values(&[
+                    "tokenize",
+                    "parse",
+                    "typecheck",
+                    "analysis",
+                    "optimization",
+                    "translation",
+                    "codegen",
+                ])
+                .default_value("codegen"),
+        )
+        .arg(
+            Arg::new("typecheck")
+                .about("Run the static type checking pass (override).")
+                .long("typecheck"),
+        )
+        // Optimization options
+        .arg(
+            Arg::new("opt")
+                .about("Set the optimization level.")
+                .long("opt-level")
+                .short('O')
+                .possible_values(&["0", "1", "2", "3"])
+                .default_value("3")
+                .required(false),
+        )
+        .arg(
+            Arg::new("enable_opt")
+                .about(
+                    "Enable a specific optimization, regardless of optimization level.",
+                )
+                .long("enable-opt")
+                .short('E')
+                .possible_values(&["constprop", "unipotence"])
+                .multiple_values(true),
+        )
+        .arg(
+            Arg::new("disable_opt")
+                .about(
+                    "Disable a specific optimization, regardless of optimization level.",
+                )
+                .long("disable-opt")
+                .short('D')
+                .possible_values(&["constprop", "unipotence"])
+                .multiple_values(true),
+        )
+        // Architectural options
+        .arg(
+            Arg::new("qubit_count")
+                .about("<QBCOUNT> is the number of physical qubits.")
+                .long("qubit-count")
+                .short('q')
+                .value_name("QBCOUNT")
+                .required(false),
+        )
+        .arg(
+            Arg::new("qram_size")
+                .about("<QRAM_SIZE> is the number of addressable random access qubits.")
+                .long("qram-size")
+                .value_name("QRAM_SIZE"),
+        )
+        .arg(Arg::new("feedback").about("Enables classical feedback.").long("feedback"))
+        .arg(
+            Arg::new("meas_mode")
+                .about(
+                    "<MODE> determines the state of a hardware qubit after a projective measurement.",
+                )
+                .value_name("MODE")
+                .long("meas-mode")
+                .short('m')
+                .possible_values(&["demolition", "nondemolition", "dirty"])
+                .default_value("demolition")
+        )
+        .get_matches();
+
     stats.tick("argparsing");
+
     let conf = get_config(&argmatches);
     let mut ctx = Context::new(&conf, &mut stats);
 

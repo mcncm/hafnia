@@ -4,3 +4,4 @@
 /std
 /cavy/target
 *.qasm
+__pycache__
