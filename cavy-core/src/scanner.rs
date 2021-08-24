@@ -175,6 +175,27 @@ impl<'src> ScanHead<'src> {
     fn peek(&mut self) -> Option<&char> {
         self.src.peek()
     }
+
+    fn finish_block_comment(&mut self) {
+        loop {
+            match self.next_raw_char() {
+                Some('/') => {
+                    if let Some('*') = self.peek() {
+                        self.next_raw_char();
+                        self.finish_block_comment();
+                    }
+                }
+                Some('*') => {
+                    if let Some('/') = self.peek() {
+                        self.next_raw_char();
+                        break;
+                    }
+                }
+                None => break,
+                _ => {}
+            }
+        }
+    }
 }
 
 impl<'src> Iterator for ScanHead<'src> {
@@ -349,8 +370,13 @@ impl<'s, 'c> Scanner<'s> {
                     continue;
                 } else if (ch, following) == ('/', '/') {
                     // In a comment: proceed to the next line
-                    self.token_buf.clear(); // The buffer has a '/' in it.
                     self.scan_head.advance_to_newline();
+                    self.token_buf.clear();
+                    continue;
+                } else if (ch, following) == ('/', '*') {
+                    self.scan_head.next_raw_char();
+                    self.token_buf.clear();
+                    self.scan_head.finish_block_comment();
                     continue;
                 } else if ch == '\'' && is_ident_char(following) {
                     // Or this could be a lifetime token!
