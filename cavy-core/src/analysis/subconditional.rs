@@ -8,7 +8,10 @@
 //! interprocedural: you have to ensure that no delinearization occurs anywhere
 //! in the call graph downstream of a location within a linear conditional.
 
-use super::dataflow::{Backward, DataflowAnalysis, Lattice, SummaryAnalysis};
+use super::{
+    controls::ControlPlaces,
+    dataflow::{Backward, DataflowAnalysis, Lattice, SummaryAnalysis},
+};
 use crate::{
     ast::{FnId, UnOpKind},
     cavy_errors::ErrorBuf,
@@ -34,7 +37,7 @@ pub struct MeasUnderCond {
 /// operators and callsites that have appeared under a linear conditional.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubCondData {
-    /// Does this procedure feature any delinearization operators,
+    /// Does this procedure contain any delinearization operators,
     /// subconditional or otherwise? We'll use this data when we're traversing
     /// the call graph to identify interprocedurally subconditional
     /// delinearizations.
@@ -50,12 +53,15 @@ pub struct SubCondData {
 
 pub struct SubCondAnalysis<'a> {
     sub_cond_data: &'a mut Store<FnId, SubCondData>,
-    controls: &'a (),
+    controls: &'a ControlPlaces,
     state: SubCondData,
 }
 
 impl<'a> SubCondAnalysis<'a> {
-    pub fn new(sub_cond_data: &'a mut Store<FnId, SubCondData>, controls: &'a ()) -> Self {
+    pub fn new(
+        sub_cond_data: &'a mut Store<FnId, SubCondData>,
+        controls: &'a ControlPlaces,
+    ) -> Self {
         Self {
             sub_cond_data,
             controls,
@@ -66,21 +72,27 @@ impl<'a> SubCondAnalysis<'a> {
 
 impl<'a> SummaryAnalysis for SubCondAnalysis<'a> {
     /// If we encounter a delinearization operator, add that.
-    fn trans_stmt(&mut self, _stmt: &mir::Stmt, _loc: &GraphPt) {
-        // let (_place, rhs) = match &stmt.kind {
-        //     mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
-        //     _ => return,
-        // };
+    fn trans_stmt(&mut self, stmt: &mir::Stmt, loc: &GraphPt) {
+        let (_place, rhs) = match &stmt.kind {
+            mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
+            _ => return,
+        };
 
-        // if let RvalueKind::UnOp(UnOpKind::Delin, _) = rhs.data {
-        //     self.state.has_delin = true;
-        //     if let Some(blk) = data.sup_lin_branch {
-        //         self.state.delins.insert(MeasUnderCond {
-        //             cond: blk,
-        //             span: rhs.span,
-        //         });
-        //     }
-        // }
+        if let RvalueKind::UnOp(UnOpKind::Delin, _) = rhs.data {
+            // Whether or not this is a *subconditional* measurement, record
+            // that there is *some* measurement in this function.
+            self.state.has_delin = true;
+
+            // compile_error!("Finish me!");
+            // let ctrls = self.controls[loc.blk];
+
+            // if let Some(blk) = self.state.sup_lin_branch {
+            //     self.state.delins.insert(MeasUnderCond {
+            //         cond: blk,
+            //         span: rhs.span,
+            //     });
+            // }
+        }
     }
 
     fn trans_block(&mut self, _block: &BlockKind, _loc: &BlockId) {

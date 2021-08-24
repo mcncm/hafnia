@@ -128,6 +128,7 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
     let nwtarg = argmatches.is_present("nwtarg");
     let wave = argmatches.is_present("wave");
     let standalone = argmatches.is_present("standalone");
+    let no_environment = argmatches.is_present("no_environment");
     let initial_kets = argmatches.is_present("initial_kets");
     let package = match argmatches.value_of("package") {
         Some("qcircuit") => latex::Package::Qcircuit { nwtarg },
@@ -143,6 +144,7 @@ fn get_target(argmatches: &ArgMatches) -> Box<dyn target::Target> {
             standalone,
             initial_kets,
             package,
+            no_environment,
         }),
         Some("summary") => Box::new(summary::Summary { perf }),
         Some("debug") => Box::new(debug::SerialDebug {}),
@@ -167,12 +169,8 @@ fn emit_object_code(object_code: target::ObjectCode, object_path: PathBuf) {
     file.write_all(object_code.as_bytes()).unwrap();
 }
 
-fn main() {
-    // Should be the very first thing that is called, in order to diagnose the
-    // performance of every part of the process.
-    let mut stats = Statistics::new();
-    // FIXME: This line is literally the slowest thing in the program
-    let argmatches = App::new("Cavyc")
+fn app() -> App<'static> {
+    App::new("Cavyc")
         .version(sys::VERSION_STRING)
         .author("mcncm <cavy-lang-support@mit.edu")
         .about("A small, imperative quantum programming language")
@@ -202,17 +200,23 @@ fn main() {
         .arg(
             Arg::new("standalone")
                 .about("Compiles LaTeX output as a standalone document.")
-                .long("standalone"),
+                .long("standalone")
         )
         .arg(
             Arg::new("nwtarg")
                 .about("Use nice `\nwtarg` macros in LaTeX output. Always on if `standalone`.")
-                .long("nwtarg"),
+                .long("nwtarg")
+        )
+        .arg(
+            Arg::new("no_environment")
+                .about(r#"Suppress `\begin{}` and `\end{}` macros in LaTeX output."#)
+                .long("no-environment")
+                .conflicts_with("standalone"),
         )
         .arg(
             Arg::new("wave")
                 .about(r#"Separate classical and quantum bits with the quantikz `\wave`."#)
-                .long("wave"),
+                .long("wave")
         )
         .arg(
             Arg::new("initial_kets")
@@ -324,7 +328,14 @@ fn main() {
                 .possible_values(&["demolition", "nondemolition", "dirty"])
                 .default_value("demolition")
         )
-        .get_matches();
+}
+
+fn main() {
+    // Should be the very first thing that is called, in order to diagnose the
+    // performance of every part of the process.
+    let mut stats = Statistics::new();
+
+    let argmatches = app().get_matches();
 
     stats.tick("argparsing");
 

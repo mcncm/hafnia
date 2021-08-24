@@ -45,7 +45,7 @@ impl Target for Summary {
                 },
                 Inst::QGate(g) => {
                     use BaseGateQ::*;
-                    if g.ctrls.len() > 0 || g.is_swap() {
+                    if g.ctrls.len() > 0 || g.is_swap() || g.is_cx() {
                         mqgates += 1;
 
                         if g.is_cx() {

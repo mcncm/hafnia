@@ -36,6 +36,8 @@ impl Default for Package {
 pub struct LaTeX {
     /// Include preamble and `\begin{document}...\end{document}`?
     pub standalone: bool,
+    /// Exclude `\begin{circuit}...\end{circuit}`?
+    pub no_environment: bool,
     /// Instead of writing initial `X` gates, write the nominal input state
     pub initial_kets: bool,
     /// The quantum circuit package to use for rendering
@@ -867,6 +869,10 @@ impl LaTeX {
 
     #[rustfmt::skip]
     fn fmt_circuit_begin(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.no_environment {
+            return Ok(())
+        }
+
         let circuit_begin = match self.package {
             Package::Qcircuit { .. } => r"\Qcircuit @C=1em @R=0.7em {
 ",
@@ -881,6 +887,10 @@ impl LaTeX {
 
     #[rustfmt::skip]
     fn fmt_circuit_end(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.no_environment {
+            return Ok(())
+        }
+
         let circuit_end = match self.package {
             Package::Qcircuit { .. } => r"}
 ",

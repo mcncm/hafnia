@@ -2,10 +2,7 @@
 //! is copied (almost) verbatim from Christian Vallentin's helpful example at
 //! https://vallentin.dev/2019/06/06/versioning.
 
-use std::env::{
-    self,
-    consts::{ARCH, OS},
-};
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -21,14 +18,13 @@ fn main() {
     let address_path = Path::new(&out_dir).join("address");
 
     let version_string = format!(
-        "{} ({}:{}{}, {} build, {} [{}])",
+        "{} ({}:{}{}, {}, {})",
         env!("CARGO_PKG_VERSION"),
         get_branch_name(),
         get_commit_hash(),
         if is_working_tree_clean() { "" } else { "+" },
         BUILD_TYPE,
-        OS,
-        ARCH
+        std::env::var("TARGET").unwrap(),
     );
 
     fs::write(version_path, version_string).unwrap();
