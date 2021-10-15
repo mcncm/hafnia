@@ -26,8 +26,8 @@ macro_rules! common_types {
 
 common_types! {
     unit, bool, u2, u4, u8, u16, u32,
-    q_bool, q_u2, q_u4, q_u8, q_u16, q_u32,
-    shrd_q_bool,
+    qbool, qu2, qu4, qu8, qu16, qu32,
+    shrd_qbool,
     // This is a provisional type not intended to stay in the compiler forever
     ord
 }
@@ -54,7 +54,7 @@ pub struct Context<'ctx> {
 impl<'ctx> Context<'ctx> {
     pub fn new(conf: &'ctx Config, stats: &'ctx mut Statistics) -> Self {
         let mut types = CachedTypeInterner::new();
-        let q_bool = types.intern(Type::Q_Bool);
+        let qbool = types.intern(Type::QBool);
         let common = CommonTypes {
             unit: types.intern(Type::unit()),
             bool: types.intern(Type::Bool),
@@ -63,13 +63,13 @@ impl<'ctx> Context<'ctx> {
             u8: types.intern(Type::Uint(Uint::U8)),
             u16: types.intern(Type::Uint(Uint::U16)),
             u32: types.intern(Type::Uint(Uint::U32)),
-            q_bool,
-            q_u2: types.intern(Type::Q_Uint(Uint::U2)),
-            q_u4: types.intern(Type::Q_Uint(Uint::U4)),
-            q_u8: types.intern(Type::Q_Uint(Uint::U8)),
-            q_u16: types.intern(Type::Q_Uint(Uint::U16)),
-            q_u32: types.intern(Type::Q_Uint(Uint::U32)),
-            shrd_q_bool: types.intern(Type::Ref(RefKind::Shrd, q_bool)),
+            qbool,
+            qu2: types.intern(Type::QUint(Uint::U2)),
+            qu4: types.intern(Type::QUint(Uint::U4)),
+            qu8: types.intern(Type::QUint(Uint::U8)),
+            qu16: types.intern(Type::QUint(Uint::U16)),
+            qu32: types.intern(Type::QUint(Uint::U32)),
+            shrd_qbool: types.intern(Type::Ref(RefKind::Shrd, qbool)),
             ord: types.intern(Type::Ord),
         };
         Self {

@@ -89,7 +89,7 @@ impl TyId {
     }
 
     pub fn is_quint(&self, ctx: &Context) -> bool {
-        matches!(ctx.types[*self], Type::Q_Uint(_))
+        matches!(ctx.types[*self], Type::QUint(_))
     }
 
     pub fn is_owned(&self, ctx: &Context) -> bool {
@@ -132,7 +132,7 @@ impl TyId {
     pub fn is_primitive(&self, ctx: &Context) -> bool {
         use Type::*;
         match &ctx.types[*self] {
-            Bool | Q_Bool | Uint(_) | Q_Uint(_) => true,
+            Bool | QBool | Uint(_) | QUint(_) => true,
             // The unit type should also be considered primitive
             Tuple(tys) if tys.is_empty() => true,
             _ => false,
@@ -150,12 +150,12 @@ impl TyId {
         let ty = &ctx.types[*self];
         matches!(
             ty,
-            Type::Bool | Type::Uint(_) | Type::Q_Bool | Type::Q_Uint(_)
+            Type::Bool | Type::Uint(_) | Type::QBool | Type::QUint(_)
         ) || if let Type::Ref(RefKind::Shrd, inner) = ty {
             let ty = &ctx.types[*inner];
             matches!(
                 ty,
-                Type::Bool | Type::Uint(_) | Type::Q_Bool | Type::Q_Uint(_)
+                Type::Bool | Type::Uint(_) | Type::QBool | Type::QUint(_)
             )
         } else {
             false
@@ -375,10 +375,10 @@ pub enum Type {
     Uint(Uint),
 
     /// A linear boolean, like `?false`
-    Q_Bool,
+    QBool,
 
     /// A linear unsigned integer, like `?7: ?u8`
-    Q_Uint(Uint),
+    QUint(Uint),
 
     /// Tuples
     Tuple(Vec<TyId>),
@@ -430,8 +430,8 @@ impl Type {
         match self {
             Type::Bool => vec![],
             Type::Uint(_) => vec![],
-            Type::Q_Bool => vec![],
-            Type::Q_Uint(_) => vec![],
+            Type::QBool => vec![],
+            Type::QUint(_) => vec![],
             Type::Tuple(elems) => {
                 let offsets: Vec<Offset> = elems
                     .iter()
@@ -474,8 +474,8 @@ impl Type {
                 qsize: 0,
                 csize: *u as usize,
             },
-            Type::Q_Bool => TypeSize { qsize: 1, csize: 0 },
-            Type::Q_Uint(u) => TypeSize {
+            Type::QBool => TypeSize { qsize: 1, csize: 0 },
+            Type::QUint(u) => TypeSize {
                 qsize: *u as usize,
                 csize: 0,
             },
@@ -526,8 +526,8 @@ impl Type {
         match self {
             Type::Bool => false,
             Type::Uint(_) => false,
-            Type::Q_Bool => true,
-            Type::Q_Uint(_) => true,
+            Type::QBool => true,
+            Type::QUint(_) => true,
             Type::Tuple(tys) => tys.iter().any(|ty| ty.is_affine_inner(interner)),
             Type::Array(_, _) => true,
             // This will become more nuanced when closures are introduced
@@ -575,8 +575,8 @@ impl<'c> FmtWith<Context<'c>> for TyId {
         match &ctx.types[*self] {
             Type::Bool => f.write_str("bool"),
             Type::Uint(u) => write!(f, "{}", u),
-            Type::Q_Bool => f.write_str("?bool"),
-            Type::Q_Uint(u) => write!(f, "?{}", u),
+            Type::QBool => f.write_str("?bool"),
+            Type::QUint(u) => write!(f, "?{}", u),
             Type::Tuple(tys) => {
                 f.write_str("(")?;
                 for (n, ty) in tys.iter().enumerate() {
@@ -629,14 +629,14 @@ mod tests {
     /// Arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_2() {
-        let qubit_array_type = Array(Box::new(Q_Bool));
+        let qubit_array_type = Array(Box::new(QBool));
         assert!(qubit_array_type.is_affine());
     }
 
     /// Arrays of arrays of linear types should be linear
     #[test]
     fn arrays_inherit_linearity_3() {
-        let qubit_array_type = Array(Box::new(Array(Box::new(Q_Bool))));
+        let qubit_array_type = Array(Box::new(Array(Box::new(QBool))));
         assert!(qubit_array_type.is_affine());
     }
 
@@ -654,7 +654,7 @@ mod tests {
     fn structs_inherit_linearity_2() {
         let mut fields = HashMap::new();
         fields.insert(String::from("foo"), U8);
-        fields.insert(String::from("bar"), Q_U8);
+        fields.insert(String::from("bar"), QU8);
         assert!(Struct(fields).is_affine());
     }
 }

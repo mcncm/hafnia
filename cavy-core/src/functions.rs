@@ -106,10 +106,10 @@ pub mod builtins {
             pub fn $name(interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
                 match args[0] {
 
-                    // Q_Bool must be handled separately--at least for the time
-                    // being--because its structure differs form the Q_UXX
+                    // QBool must be handled separately--at least for the time
+                    // being--because its structure differs form the QUXX
                     // values: rather than containing a `[usize; 1]`, it contains a `usize`.
-                    Value::Q_Bool(qb) => {
+                    Value::QBool(qb) => {
                         interp.compile_gate(Gate::$gate(qb));
 
                         // We add a special condition for the return value.
@@ -118,9 +118,9 @@ pub mod builtins {
                         if $meas {
                             // For now, the measurement operator simply returns
                             // the unit type, rather than a measured value.
-                            Ok(Value::Measured(Box::new(Value::Q_Bool(qb))))
+                            Ok(Value::Measured(Box::new(Value::QBool(qb))))
                         } else {
-                            Ok(Value::Q_Bool(qb))
+                            Ok(Value::QBool(qb))
                         }
                     }
 
@@ -143,10 +143,10 @@ pub mod builtins {
         };
     }
 
-    gate_function![not, X, false; Q_U8, Q_U16, Q_U32];
-    gate_function![flip, Z, false; Q_U8, Q_U16, Q_U32];
-    gate_function![split, H, false; Q_U8, Q_U16, Q_U32];
-    gate_function![measure, M, true; Q_U8, Q_U16, Q_U32];
+    gate_function![not, X, false; QU8, QU16, QU32];
+    gate_function![flip, Z, false; QU8, QU16, QU32];
+    gate_function![split, H, false; QU8, QU16, QU32];
+    gate_function![measure, M, true; QU8, QU16, QU32];
 
     fn len(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
         use Value::{Array, Tuple};

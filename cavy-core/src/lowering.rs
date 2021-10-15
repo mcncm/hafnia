@@ -987,7 +987,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond_ty = self.type_expr(cond)?;
         let span = cond.span;
         self.expect_type(
-            &[self.ctx.common.bool, self.ctx.common.shrd_q_bool],
+            &[self.ctx.common.bool, self.ctx.common.shrd_qbool],
             cond_ty,
             cond.span,
         )?;
@@ -1380,7 +1380,7 @@ mod typing {
                     match (lty, rty) {
                         (Type::Ref(Shrd, _), Type::Ref(Shrd, _)) => {
                             if left == right && !left.is_classical(self.ctx) {
-                                return Ok(self.ctx.common.shrd_q_bool);
+                                return Ok(self.ctx.common.shrd_qbool);
                             }
                         }
                         _ => {
@@ -1458,17 +1458,17 @@ mod typing {
                 }
                 UnOpKind::Linear => {
                     if right == self.ctx.common.bool {
-                        Ok(self.ctx.common.q_bool)
+                        Ok(self.ctx.common.qbool)
                     } else if right == self.ctx.common.u2 {
-                        Ok(self.ctx.common.q_u2)
+                        Ok(self.ctx.common.qu2)
                     } else if right == self.ctx.common.u4 {
-                        Ok(self.ctx.common.q_u4)
+                        Ok(self.ctx.common.qu4)
                     } else if right == self.ctx.common.u8 {
-                        Ok(self.ctx.common.q_u8)
+                        Ok(self.ctx.common.qu8)
                     } else if right == self.ctx.common.u16 {
-                        Ok(self.ctx.common.q_u16)
+                        Ok(self.ctx.common.qu16)
                     } else if right == self.ctx.common.u32 {
-                        Ok(self.ctx.common.q_u32)
+                        Ok(self.ctx.common.qu32)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
                             span: op.span,
@@ -1478,17 +1478,17 @@ mod typing {
                     }
                 }
                 UnOpKind::Delin => {
-                    if right == self.ctx.common.q_bool {
+                    if right == self.ctx.common.qbool {
                         Ok(self.ctx.common.bool)
-                    } else if right == self.ctx.common.q_u2 {
+                    } else if right == self.ctx.common.qu2 {
                         Ok(self.ctx.common.u2)
-                    } else if right == self.ctx.common.q_u4 {
+                    } else if right == self.ctx.common.qu4 {
                         Ok(self.ctx.common.u4)
-                    } else if right == self.ctx.common.q_u8 {
+                    } else if right == self.ctx.common.qu8 {
                         Ok(self.ctx.common.u8)
-                    } else if right == self.ctx.common.q_u16 {
+                    } else if right == self.ctx.common.qu16 {
                         Ok(self.ctx.common.u16)
-                    } else if right == self.ctx.common.q_u32 {
+                    } else if right == self.ctx.common.qu32 {
                         Ok(self.ctx.common.u32)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
@@ -1773,8 +1773,8 @@ mod typing {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
-            Bool => Q_Bool,
-            Uint(u) => Q_Uint(u),
+            Bool => QBool,
+            Uint(u) => QUint(u),
             _ => todo!(),
         };
         Ok(ctx.intern_ty(ty))
@@ -1786,8 +1786,8 @@ mod typing {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
-            Q_Bool => Bool,
-            Q_Uint(u) => Uint(u),
+            QBool => Bool,
+            QUint(u) => Uint(u),
             _ => todo!(),
         };
         Ok(ctx.intern_ty(ty))

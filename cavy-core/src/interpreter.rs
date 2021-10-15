@@ -190,7 +190,7 @@ impl Interpreter {
     ) -> Result<Value, ErrorBuf> {
         match cond_val {
             // FIXME This is less than half of an implementation!
-            Value::Q_Bool(u) => {
+            Value::QBool(u) => {
                 // FIXME This is far from a proper and complete solution to the
                 // evaluation of If expressions. For one thing, they’re
                 // dynamically typed: the return values are not guaranteed to be
@@ -423,20 +423,20 @@ impl Interpreter {
 
             // NOTE: or-patterns syntax is experimental, so we must use this
             // more verbose syntax until it is stabilized.
-            (Not, val @ Value::Q_Bool(_))
-            | (Not, val @ Value::Q_U8(_))
-            | (Not, val @ Value::Q_U16(_))
-            | (Not, val @ Value::Q_U32(_)) => crate::functions::builtins::not(self, &[val])?,
+            (Not, val @ Value::QBool(_))
+            | (Not, val @ Value::QU8(_))
+            | (Not, val @ Value::QU16(_))
+            | (Not, val @ Value::QU32(_)) => crate::functions::builtins::not(self, &[val])?,
 
-            (Delin, val @ Value::Q_Bool(_))
-            | (Delin, val @ Value::Q_U8(_))
-            | (Delin, val @ Value::Q_U16(_))
-            | (Delin, val @ Value::Q_U32(_)) => crate::functions::builtins::measure(self, &[val])?,
+            (Delin, val @ Value::QBool(_))
+            | (Delin, val @ Value::QU8(_))
+            | (Delin, val @ Value::QU16(_))
+            | (Delin, val @ Value::QU32(_)) => crate::functions::builtins::measure(self, &[val])?,
 
             (Linear, Value::Bool(x)) => {
-                let val = self.qubit_allocator.alloc_q_bool()?;
+                let val = self.qubit_allocator.alloc_qbool()?;
                 if x {
-                    if let Value::Q_Bool(u) = val {
+                    if let Value::QBool(u) = val {
                         self.compile_gate(Gate::X(u));
                     } else {
                         unreachable!();
@@ -446,8 +446,8 @@ impl Interpreter {
             }
 
             (Linear, Value::U8(x)) => {
-                let val = self.qubit_allocator.alloc_q_u8()?;
-                if let Value::Q_U8(qbs) = val {
+                let val = self.qubit_allocator.alloc_qu8()?;
+                if let Value::QU8(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
                             self.compile_gate(Gate::X(*qb))
@@ -460,8 +460,8 @@ impl Interpreter {
             }
 
             (Linear, Value::U16(x)) => {
-                let val = self.qubit_allocator.alloc_q_u16()?;
-                if let Value::Q_U16(qbs) = val {
+                let val = self.qubit_allocator.alloc_qu16()?;
+                if let Value::QU16(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
                             self.compile_gate(Gate::X(*qb))
@@ -474,8 +474,8 @@ impl Interpreter {
             }
 
             (Linear, Value::U32(x)) => {
-                let val = self.qubit_allocator.alloc_q_u32()?;
-                if let Value::Q_U32(qbs) = val {
+                let val = self.qubit_allocator.alloc_qu32()?;
+                if let Value::QU32(qbs) = val {
                     for (i, qb) in qbs.iter().enumerate() {
                         if x & (1 << i) != 0 {
                             self.compile_gate(Gate::X(*qb))

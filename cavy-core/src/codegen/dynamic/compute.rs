@@ -187,7 +187,7 @@ impl<'m> Interpreter<'m> {
                 destructor.ancillas = xnors.qbits;
             }
             Nequal => {
-                if self.st.type_of(fst_place) != self.ctx.common.shrd_q_bool {
+                if self.st.type_of(fst_place) != self.ctx.common.shrd_qbool {
                     // for larger types, we have to take the AND of the XNORs,
                     // which means allocating intermediates. This isn't
                     // something we're going to be able to tackle in five
