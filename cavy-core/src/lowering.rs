@@ -91,7 +91,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(self.ctx.intern_ty(Type::Tuple(tys)))
                 }
-                None => Ok(self.ctx.common.unit),
+                None => Ok(self.ctx.types.common.unit),
             }?;
             sz = sz.join_max(ty.size(self.ctx));
             fields.push((name, ty));
@@ -731,29 +731,35 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let ty = self.gr.type_of(&place, self.ctx);
         let constant = match &lit.data {
             LiteralKind::True => {
-                self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
+                self.expect_type(&[ty], self.ctx.types.common.bool, lit.span)?;
                 Value::Bool(true)
             }
             LiteralKind::False => {
-                self.expect_type(&[ty], self.ctx.common.bool, lit.span)?;
+                self.expect_type(&[ty], self.ctx.types.common.bool, lit.span)?;
                 Value::Bool(false)
             }
             LiteralKind::Nat(n, sz) => {
                 // FIXME These downcasts are definitely not correct! Overflowing
                 // literals should be an error, or at least a lint.
                 let (lit_ty, val) = match sz {
-                    Some(Uint::U2) => (self.ctx.common.u2, Value::U2(USmall::<2>::from(*n as u8))),
-                    Some(Uint::U4) => (self.ctx.common.u4, Value::U4(USmall::<4>::from(*n as u8))),
-                    Some(Uint::U8) => (self.ctx.common.u8, Value::U8(*n as u8)),
-                    Some(Uint::U16) => (self.ctx.common.u16, Value::U16(*n as u16)),
-                    Some(Uint::U32) => (self.ctx.common.u32, Value::U32(*n as u32)),
-                    None => (self.ctx.common.u32, Value::U32(*n as u32)),
+                    Some(Uint::U2) => (
+                        self.ctx.types.common.u2,
+                        Value::U2(USmall::<2>::from(*n as u8)),
+                    ),
+                    Some(Uint::U4) => (
+                        self.ctx.types.common.u4,
+                        Value::U4(USmall::<4>::from(*n as u8)),
+                    ),
+                    Some(Uint::U8) => (self.ctx.types.common.u8, Value::U8(*n as u8)),
+                    Some(Uint::U16) => (self.ctx.types.common.u16, Value::U16(*n as u16)),
+                    Some(Uint::U32) => (self.ctx.types.common.u32, Value::U32(*n as u32)),
+                    None => (self.ctx.types.common.u32, Value::U32(*n as u32)),
                 };
                 self.expect_type(&[ty], lit_ty, lit.span)?;
                 val
             }
             LiteralKind::Ord => {
-                self.expect_type(&[ty], self.ctx.common.ord, lit.span)?;
+                self.expect_type(&[ty], self.ctx.types.common.ord, lit.span)?;
                 Value::Ord
             }
         };
@@ -958,7 +964,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 let ty_expected = self.gr.type_of(&place, self.ctx);
                 let mut span = *span;
                 span.start = span.end; // Just get the closing bracket
-                self.expect_type(&[ty_expected], self.ctx.common.unit, span)?;
+                self.expect_type(&[ty_expected], self.ctx.types.common.unit, span)?;
                 let rhs = Rvalue {
                     data: RvalueKind::Use(Operand::Const(Value::Unit)),
                     span,
@@ -987,7 +993,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond_ty = self.type_expr(cond)?;
         let span = cond.span;
         self.expect_type(
-            &[self.ctx.common.bool, self.ctx.common.shrd_qbool],
+            &[self.ctx.types.common.bool, self.ctx.types.common.shrd_qbool],
             cond_ty,
             cond.span,
         )?;
@@ -1288,7 +1294,7 @@ mod typing {
                     fls: ind,
                 } => self.type_if(cond, dir, ind)?,
                 ExprKind::Match { scr, arms } => self.type_match(scr, arms)?,
-                ExprKind::For { bind, iter, body } => self.ctx.common.unit,
+                ExprKind::For { bind, iter, body } => self.ctx.types.common.unit,
                 // FIXME note that here we are resolving this function a *second*
                 // time (the other is in the lowering method). This suggests
                 // that we should factor out function resolution to some earlier
@@ -1380,12 +1386,12 @@ mod typing {
                     match (lty, rty) {
                         (Type::Ref(Shrd, _), Type::Ref(Shrd, _)) => {
                             if left == right && !left.is_classical(self.ctx) {
-                                return Ok(self.ctx.common.shrd_qbool);
+                                return Ok(self.ctx.types.common.shrd_qbool);
                             }
                         }
                         _ => {
                             if left == right && left.is_classical(self.ctx) {
-                                return Ok(self.ctx.common.bool);
+                                return Ok(self.ctx.types.common.bool);
                             } else {
                                 ()
                             }
@@ -1395,10 +1401,10 @@ mod typing {
                 DotDot => todo!(),
                 Plus | Times => {
                     if left == right {
-                        if left.is_uint(&self.ctx) {
+                        if left.is_uint(&self.ctx.types) {
                             return Ok(left);
                         } else if let Some(ty) = left.referent(&self.ctx) {
-                            if ty.is_quint(&self.ctx) {
+                            if ty.is_quint(&self.ctx.types) {
                                 return Ok(left);
                             }
                         }
@@ -1409,15 +1415,15 @@ mod typing {
                 Less => todo!(),
                 Greater => todo!(),
                 Swap => {
-                    if let Some(Uniq) = left.ref_kind(&self.ctx) {
+                    if let Some(Uniq) = left.ref_kind(&self.ctx.types) {
                         if left == right {
-                            return Ok(self.ctx.common.unit);
+                            return Ok(self.ctx.types.common.unit);
                         }
                     }
                 }
                 And | Or | Xor => {
                     use RefKind::*;
-                    if left == right && left.is_bitlike(self.ctx) {
+                    if left == right && left.is_bitlike(&self.ctx) {
                         return Ok(left);
                     }
                 }
@@ -1457,18 +1463,18 @@ mod typing {
                     }
                 }
                 UnOpKind::Linear => {
-                    if right == self.ctx.common.bool {
-                        Ok(self.ctx.common.qbool)
-                    } else if right == self.ctx.common.u2 {
-                        Ok(self.ctx.common.qu2)
-                    } else if right == self.ctx.common.u4 {
-                        Ok(self.ctx.common.qu4)
-                    } else if right == self.ctx.common.u8 {
-                        Ok(self.ctx.common.qu8)
-                    } else if right == self.ctx.common.u16 {
-                        Ok(self.ctx.common.qu16)
-                    } else if right == self.ctx.common.u32 {
-                        Ok(self.ctx.common.qu32)
+                    if right == self.ctx.types.common.bool {
+                        Ok(self.ctx.types.common.qbool)
+                    } else if right == self.ctx.types.common.u2 {
+                        Ok(self.ctx.types.common.qu2)
+                    } else if right == self.ctx.types.common.u4 {
+                        Ok(self.ctx.types.common.qu4)
+                    } else if right == self.ctx.types.common.u8 {
+                        Ok(self.ctx.types.common.qu8)
+                    } else if right == self.ctx.types.common.u16 {
+                        Ok(self.ctx.types.common.qu16)
+                    } else if right == self.ctx.types.common.u32 {
+                        Ok(self.ctx.types.common.qu32)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
                             span: op.span,
@@ -1478,18 +1484,18 @@ mod typing {
                     }
                 }
                 UnOpKind::Delin => {
-                    if right == self.ctx.common.qbool {
-                        Ok(self.ctx.common.bool)
-                    } else if right == self.ctx.common.qu2 {
-                        Ok(self.ctx.common.u2)
-                    } else if right == self.ctx.common.qu4 {
-                        Ok(self.ctx.common.u4)
-                    } else if right == self.ctx.common.qu8 {
-                        Ok(self.ctx.common.u8)
-                    } else if right == self.ctx.common.qu16 {
-                        Ok(self.ctx.common.u16)
-                    } else if right == self.ctx.common.qu32 {
-                        Ok(self.ctx.common.u32)
+                    if right == self.ctx.types.common.qbool {
+                        Ok(self.ctx.types.common.bool)
+                    } else if right == self.ctx.types.common.qu2 {
+                        Ok(self.ctx.types.common.u2)
+                    } else if right == self.ctx.types.common.qu4 {
+                        Ok(self.ctx.types.common.u4)
+                    } else if right == self.ctx.types.common.qu8 {
+                        Ok(self.ctx.types.common.u8)
+                    } else if right == self.ctx.types.common.qu16 {
+                        Ok(self.ctx.types.common.u16)
+                    } else if right == self.ctx.types.common.qu32 {
+                        Ok(self.ctx.types.common.u32)
                     } else {
                         Err(self.errors.push(errors::UnOpOutTypeError {
                             span: op.span,
@@ -1525,7 +1531,7 @@ mod typing {
                 }
             };
             if well_typed {
-                Ok(self.ctx.common.unit)
+                Ok(self.ctx.types.common.unit)
             } else {
                 Err(self.errors.push(errors::AssnOpTypeError {
                     span: op.span,
@@ -1538,15 +1544,15 @@ mod typing {
 
         fn type_literal(&mut self, lit: &Literal) -> TyId {
             match &lit.data {
-                LiteralKind::True => self.ctx.common.bool,
-                LiteralKind::False => self.ctx.common.bool,
-                LiteralKind::Nat(_, Some(Uint::U2)) => self.ctx.common.u2,
-                LiteralKind::Nat(_, Some(Uint::U4)) => self.ctx.common.u4,
-                LiteralKind::Nat(_, Some(Uint::U8)) => self.ctx.common.u8,
-                LiteralKind::Nat(_, Some(Uint::U16)) => self.ctx.common.u16,
-                LiteralKind::Nat(_, Some(Uint::U32)) => self.ctx.common.u32,
-                LiteralKind::Nat(_, None) => self.ctx.common.u32,
-                LiteralKind::Ord => self.ctx.common.ord,
+                LiteralKind::True => self.ctx.types.common.bool,
+                LiteralKind::False => self.ctx.types.common.bool,
+                LiteralKind::Nat(_, Some(Uint::U2)) => self.ctx.types.common.u2,
+                LiteralKind::Nat(_, Some(Uint::U4)) => self.ctx.types.common.u4,
+                LiteralKind::Nat(_, Some(Uint::U8)) => self.ctx.types.common.u8,
+                LiteralKind::Nat(_, Some(Uint::U16)) => self.ctx.types.common.u16,
+                LiteralKind::Nat(_, Some(Uint::U32)) => self.ctx.types.common.u32,
+                LiteralKind::Nat(_, None) => self.ctx.types.common.u32,
+                LiteralKind::Ord => self.ctx.types.common.ord,
             }
         }
 
@@ -1554,7 +1560,7 @@ mod typing {
             // FIXME This is manifestly incorrect.
             match &block.expr {
                 Some(expr) => self.type_inner(expr),
-                None => Ok(self.ctx.common.unit),
+                None => Ok(self.ctx.types.common.unit),
             }
         }
 
@@ -1563,7 +1569,7 @@ mod typing {
             let ty_ind = if let Some(blk) = ind {
                 self.type_block(blk)?
             } else {
-                self.ctx.common.unit
+                self.ctx.types.common.unit
             };
 
             if ty_dir == ty_ind {
@@ -1709,14 +1715,6 @@ mod typing {
         ctx: &mut Context,
     ) -> Maybe<TyId> {
         let ty = match &annot.data {
-            AnnotKind::Bool => ctx.common.bool,
-            AnnotKind::Uint(u) => match u {
-                Uint::U2 => ctx.common.u2,
-                Uint::U4 => ctx.common.u4,
-                Uint::U8 => ctx.common.u8,
-                Uint::U16 => ctx.common.u16,
-                Uint::U32 => ctx.common.u32,
-            },
             AnnotKind::Tuple(inners) => {
                 let inner_types = inners
                     .iter()
@@ -1737,12 +1735,16 @@ mod typing {
                 resolve_annot_bang(ctx, ty)?
             }
             AnnotKind::Ident(ident) => match tab.get_udt(&ident.data, tables) {
+                // Is there a user-defined type with this name?
                 Some((udt_id, _)) => *udt_tys.get(udt_id).unwrap(),
+                // If not, fall back to the prelude
                 None => {
-                    return Err(errs.push(errors::NoSuchType {
-                        span: ident.span,
-                        name: ident.data,
-                    }));
+                    return ctx.prelude.types.get(&ident.data).copied().ok_or_else(|| {
+                        errs.push(errors::NoSuchType {
+                            span: ident.span,
+                            name: ident.data,
+                        })
+                    })
                 }
             },
             AnnotKind::Func(params, ret) => {
@@ -1752,7 +1754,7 @@ mod typing {
                     .collect::<Maybe<Vec<TyId>>>()?;
                 let ret_ty = match ret {
                     Some(ret) => resolve_annot(ret, tab, tables, udt_tys, errs, ctx)?,
-                    None => ctx.common.unit,
+                    None => ctx.types.common.unit,
                 };
                 ctx.intern_ty(Type::Func(param_tys, ret_ty))
             }
@@ -1761,7 +1763,7 @@ mod typing {
                 let kind = resolve_ref_annot(annot);
                 ctx.intern_ty(Type::Ref(kind, ty))
             }
-            AnnotKind::Ord => ctx.common.ord,
+            AnnotKind::Ord => ctx.types.common.ord,
         };
 
         Ok(ty)

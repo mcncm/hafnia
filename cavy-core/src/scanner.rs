@@ -42,13 +42,6 @@ fn keyword(kw: &str) -> Option<Lexeme> {
         "io" => Lexeme::Io,
         "true" => Lexeme::True,
         "false" => Lexeme::False,
-        "bool" => Lexeme::Bool,
-        "u2" => Lexeme::U2,
-        "u4" => Lexeme::U4,
-        "u8" => Lexeme::U8,
-        "u16" => Lexeme::U16,
-        "u32" => Lexeme::U32,
-        "ord" => Lexeme::Ord,
         "unsafe" => Lexeme::Unsafe,
         "assert" => Lexeme::Assert,
         "drop" => Lexeme::Drop,
@@ -412,39 +405,17 @@ impl<'s, 'c> Scanner<'s> {
     /// vector, or adds an error. `Nat`s must consist solely of ascii digits
     /// followed by an optional size specifier.
     fn consume_nat(&mut self) {
-        let mut sz = None;
+        let sz = None;
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
                 self.next_char();
-            } else if is_ident_char(*ch) {
-                // Get a size specifier, if you can. This solution, in which
-                // push a temporary to the token buffer, isn't easily compatible
-                // with turning the Scanner into an iterator. Also requires some
-                // awkward pointer juggling. This is by far the most awkward chunk of
-                // code in the scanner, in obvious need of reform.
-                let mut buf = TokenBuf::new();
-                std::mem::swap(&mut self.token_buf, &mut buf);
-                self.consume_ident();
-                let spec = self.tokens.pop().unwrap().lexeme;
-                std::mem::swap(&mut self.token_buf, &mut buf);
-                sz = match spec {
-                    Lexeme::U2 => Some(Uint::U2),
-                    Lexeme::U4 => Some(Uint::U4),
-                    Lexeme::U8 => Some(Uint::U8),
-                    Lexeme::U16 => Some(Uint::U16),
-                    Lexeme::U32 => Some(Uint::U32),
-                    _ => {
-                        self.errors.push(errors::NonDigitInNumber {
-                            span: self.loc_span(),
-                        });
-                        self.synchronize_to_non_alphanum();
-                        self.token_buf.clear();
-                        return;
-                    }
-                };
-                break;
             } else {
-                break;
+                self.errors.push(errors::NonDigitInNumber {
+                    span: self.loc_span(),
+                });
+                self.synchronize_to_non_alphanum();
+                self.token_buf.clear();
+                return;
             }
         }
 

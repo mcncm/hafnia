@@ -36,7 +36,7 @@ use crate::{
     source::Span,
     store::Store,
     store_type,
-    types::{CachedTypeInterner, RefKind, TyId, Type},
+    types::{RefKind, TyId, Type, TypeInterner},
     util::FmtWith,
 };
 
@@ -134,7 +134,7 @@ struct Ascriber<'l, 'a> {
     /// possibly many of these for parameters with different lifetimes, but we
     /// will temporarily simplify the problem by using only (at most) one.
     end: Option<LtId>,
-    types: &'a CachedTypeInterner,
+    types: &'a TypeInterner,
     block_sizes: &'a [usize],
 }
 
@@ -199,12 +199,11 @@ impl<'l, 'a> Ascriber<'l, 'a> {
     }
 
     fn node_from_ty(&mut self, ty: TyId, is_end: bool) -> Option<AscrNode> {
-        let ty = &self.types[ty];
         if ty.is_owned(self.types) {
             return None;
         }
 
-        match ty {
+        match &self.types[ty] {
             Type::Tuple(tys) => self.node_from_inners(None, tys, is_end),
             Type::Array(ty, _) => self.node_from_inners(None, &[*ty], is_end),
             // FIXME

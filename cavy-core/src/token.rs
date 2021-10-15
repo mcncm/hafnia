@@ -19,11 +19,10 @@ pub enum Lexeme {
 
     // keywords
     If, Else, Match, For, Let, Mut, In, Fn, FFn, Type, Struct,
-    Enum, Impl, Io, True, False, Bool, U2, U4, U8, U16, U32, Ord,
-    Unsafe, Assert, Drop,
+    Enum, Impl, Io, Unsafe, Assert, Drop,
 
     // literals
-    Nat(Unsigned, Option<Uint>),
+    Nat(Unsigned, Option<Uint>), True, False,
 
     // two-character token types
     DotDot, EqualEqual, TildeEqual, MinusRAngle, LAngleMinus, EqualRAngle,
@@ -69,12 +68,6 @@ impl fmt::Display for Lexeme {
             Let => "let",
             Mut => "mut",
             In => "in",
-            Bool => "bool",
-            U2 => "u2",
-            U4 => "u4",
-            U8 => "u8",
-            U16 => "u16",
-            U32 => "u32",
             Nat(nat, sz) => {
                 let _ = write!(f, "{}", nat);
                 if let Some(sz) = sz {
@@ -128,7 +121,6 @@ impl fmt::Display for Lexeme {
             True => "true",
             False => "false",
             Question => "?",
-            Ord => "ord",
             Unsafe => "unsafe",
             Assert => "assert",
             Drop => "drop",

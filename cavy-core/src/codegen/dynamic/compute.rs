@@ -113,7 +113,7 @@ impl<'m> Interpreter<'m> {
 
         // Then free the bits
         let ty = self.st.type_of(place);
-        if let Some(RefKind::Shrd) = ty.ref_kind(self.ctx) {
+        if let Some(RefKind::Shrd) = ty.ref_kind(&self.ctx.types) {
             circ.map_free(&lhs, |(_, _)| FreeState::Clean, |(_, _)| FreeState::Clean);
         } else {
             // This is *WAY* too conservative: reference fields of an owned tuple
@@ -148,7 +148,7 @@ impl<'m> Interpreter<'m> {
     // TODO: Figure out where to put this and how it affects the factoring of
     // this module.
     fn destructor_for(&mut self, place: &Place, parents: &[&Place]) -> Option<Destructor<'m>> {
-        if let Some(RefKind::Uniq) = self.st.type_of(place).ref_kind(self.ctx) {
+        if let Some(RefKind::Uniq) = self.st.type_of(place).ref_kind(&self.ctx.types) {
             Some(Destructor::from_parents(parents, &self.st))
         } else {
             None
@@ -187,7 +187,7 @@ impl<'m> Interpreter<'m> {
                 destructor.ancillas = xnors.qbits;
             }
             Nequal => {
-                if self.st.type_of(fst_place) != self.ctx.common.shrd_qbool {
+                if self.st.type_of(fst_place) != self.ctx.types.common.shrd_qbool {
                     // for larger types, we have to take the AND of the XNORs,
                     // which means allocating intermediates. This isn't
                     // something we're going to be able to tackle in five

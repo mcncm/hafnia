@@ -459,12 +459,11 @@ pub enum LiteralKind {
 
 impl FromToken for Literal {
     fn from_token(token: Token) -> Result<Self, ()> {
-        use crate::token::Lexeme::*;
+        use crate::token::Lexeme;
         let kind = match token.lexeme {
-            Nat(n, sz) => LiteralKind::Nat(n, sz),
-            True => LiteralKind::True,
-            False => LiteralKind::False,
-            Ord => LiteralKind::Ord,
+            Lexeme::Nat(n, sz) => LiteralKind::Nat(n, sz),
+            Lexeme::True => LiteralKind::True,
+            Lexeme::False => LiteralKind::False,
             _ => {
                 return Err(());
             }
@@ -713,26 +712,18 @@ pub type Annot = Spanned<AnnotKind>;
 
 #[derive(Debug, Clone)]
 pub enum AnnotKind {
-    Bool,
-    Uint(Uint),
-
     Tuple(Vec<Annot>),
     Array(Box<Annot>, usize),
-
     /// Linearization of a type annotation: e.g. `?u8`
     Question(Box<Annot>),
     /// Delinearization of a type annotation: e.g. `!Cat`
     Bang(Box<Annot>),
-
     /// User-defined types
     Ident(Ident),
-
     /// Function types
     Func(Vec<Annot>, Option<Box<Annot>>),
-
     /// `&T` or `&mut T`
     Ref(RefAnnot, Box<Annot>),
-
     /// Provisional experimental type
     Ord,
 }

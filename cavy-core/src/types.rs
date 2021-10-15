@@ -11,7 +11,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-interner_type! { TypeInterner : TyId -> Type }
+interner_type! { BareTypeInterner : TyId -> Type }
 
 /// A type properties table to be computed once and stored in the
 /// `CachedTypeInterner`.
@@ -33,24 +33,76 @@ pub struct TypeProperties {
 /// A type interner that also carries some satellite data caches
 pub struct CachedTypeInterner {
     /// The interner proper
-    interner: TypeInterner,
+    interner: BareTypeInterner,
     /// A cache of the properties of each interned type, eliminating the need to
     /// recompute sizes recursively.
     cache: HashMap<TyId, TypeProperties>,
 }
 
+/// A type interner that also carries common types that should be accessible
+/// without lookup.
+pub struct TypeInterner {
+    interner: CachedTypeInterner,
+    pub common: CommonTypes,
+}
+
+macro_rules! common_types {
+    ($($field:ident => $ty:expr),*) => {
+        pub struct CommonTypes {
+            $(pub $field: TyId),*
+        }
+
+        impl TypeInterner {
+            pub fn new() -> Self {
+                let mut interner = CachedTypeInterner::new();
+                $(
+                    let $field = interner.intern($ty);
+                )*
+                let common = CommonTypes {
+                    $(
+                        $field: $field
+                    ),*
+                };
+                Self {
+                    interner,
+                    common,
+                }
+            }
+        }
+    };
+
+}
+
+common_types! {
+    unit => Type::Tuple(vec![]),
+    qbool => Type::QBool,
+    qu2 => Type::QUint(Uint::U2),
+    qu4 => Type::QUint(Uint::U4),
+    qu8 => Type::QUint(Uint::U8),
+    qu16 => Type::QUint(Uint::U16),
+    qu32 => Type::QUint(Uint::U32),
+    bool => Type::Ref(RefKind::Shrd, qbool),
+    u2 => Type::Ref(RefKind::Uniq, qu2),
+    u4 => Type::Ref(RefKind::Uniq, qu4),
+    u8 => Type::Ref(RefKind::Uniq, qu8),
+    u16 => Type::Ref(RefKind::Uniq, qu16),
+    u32 => Type::Ref(RefKind::Uniq, qu32),
+    shrd_qbool => Type::Ref(RefKind::Shrd, qbool),
+    // This is a provisional type not intended to stay in the compiler forever
+    ord => Type::Ord
+}
+
 impl CachedTypeInterner {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
-            interner: TypeInterner::new(),
+            interner: BareTypeInterner::new(),
             cache: HashMap::new(),
         }
     }
-
     // NOTE This isn't quite perfect: because Types are containers for `TyId`s,
     // not `Box<Type>`s, we'll end up making redundant hashtable lookups when
     // caching a type.
-    pub fn intern(&mut self, ty: Type) -> TyId {
+    fn intern(&mut self, ty: Type) -> TyId {
         let props = TypeProperties {
             size: ty.size(self),
             owned: ty.is_owned(self),
@@ -69,39 +121,45 @@ impl CachedTypeInterner {
     }
 }
 
-impl Index<TyId> for CachedTypeInterner {
-    type Output = Type;
-
-    fn index(&self, index: TyId) -> &Self::Output {
-        &self.interner[index]
+impl TypeInterner {
+    pub fn intern(&mut self, ty: Type) -> TyId {
+        self.interner.intern(ty)
     }
 }
 
-impl IndexMut<TyId> for CachedTypeInterner {
+impl Index<TyId> for TypeInterner {
+    type Output = Type;
+
+    fn index(&self, index: TyId) -> &Self::Output {
+        &self.interner.interner[index]
+    }
+}
+
+impl IndexMut<TyId> for TypeInterner {
     fn index_mut(&mut self, index: TyId) -> &mut Self::Output {
-        &mut self.interner[index]
+        &mut self.interner.interner[index]
     }
 }
 
 impl TyId {
-    pub fn is_uint(&self, ctx: &Context) -> bool {
-        matches!(ctx.types[*self], Type::Uint(_))
+    pub fn is_uint(&self, interner: &TypeInterner) -> bool {
+        matches!(interner[*self], Type::Uint(_))
     }
 
-    pub fn is_quint(&self, ctx: &Context) -> bool {
-        matches!(ctx.types[*self], Type::QUint(_))
+    pub fn is_quint(&self, interner: &TypeInterner) -> bool {
+        matches!(interner[*self], Type::QUint(_))
     }
 
-    pub fn is_owned(&self, ctx: &Context) -> bool {
-        self.is_owned_inner(&ctx.types)
+    pub fn is_owned(&self, interner: &TypeInterner) -> bool {
+        self.is_owned_inner(&interner.interner)
     }
 
     fn is_owned_inner(&self, interner: &CachedTypeInterner) -> bool {
         interner.cache[self].owned
     }
 
-    pub fn ref_kind(&self, ctx: &Context) -> Option<RefKind> {
-        self.ref_kind_inner(&ctx.types)
+    pub fn ref_kind(&self, interner: &TypeInterner) -> Option<RefKind> {
+        self.ref_kind_inner(&interner.interner)
     }
 
     pub fn ref_kind_inner(&self, interner: &CachedTypeInterner) -> Option<RefKind> {
@@ -164,7 +222,7 @@ impl TyId {
 
     /// Check the linearity of a type, with the help of the global context
     pub fn is_affine(&self, ctx: &Context) -> bool {
-        self.is_affine_inner(&ctx.types)
+        self.is_affine_inner(&ctx.types.interner)
     }
 
     fn is_affine_inner(&self, interner: &CachedTypeInterner) -> bool {
@@ -173,7 +231,7 @@ impl TyId {
 
     /// Check the bit size of a type, with the help of the global context
     pub fn size<'a>(&'a self, ctx: &'a Context) -> &'a TypeSize {
-        self.size_inner(&ctx.types)
+        self.size_inner(&ctx.types.interner)
     }
 
     fn size_inner<'a>(&'a self, interner: &'a CachedTypeInterner) -> &'a TypeSize {
@@ -188,7 +246,7 @@ impl TyId {
     pub fn slot(&self, proj: &Proj, ctx: &Context) -> (TyId, Offset) {
         let ty = &ctx.types[*self];
         let inner = ty.slot(proj);
-        let offsets = &ctx.types.cache[self].offsets;
+        let offsets = &ctx.types.interner.cache[self].offsets;
         let offset = match proj {
             Proj::Field(n) => offsets[*n],
             Proj::Deref => offsets[0],
@@ -575,8 +633,8 @@ impl<'c> FmtWith<Context<'c>> for TyId {
         match &ctx.types[*self] {
             Type::Bool => f.write_str("bool"),
             Type::Uint(u) => write!(f, "{}", u),
-            Type::QBool => f.write_str("?bool"),
-            Type::QUint(u) => write!(f, "?{}", u),
+            Type::QBool => f.write_str("qbool"),
+            Type::QUint(u) => write!(f, "q{}", u),
             Type::Tuple(tys) => {
                 f.write_str("(")?;
                 for (n, ty) in tys.iter().enumerate() {

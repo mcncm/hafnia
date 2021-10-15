@@ -920,18 +920,6 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
         // possible for macros to expand to match arms. An or-pattern? Not
         // stable yet.
         let ty = match lexeme {
-            Bool => Annot {
-                span,
-                data: AnnotKind::Bool,
-            },
-            U2 | U4 | U8 | U16 | U32 => Annot {
-                span,
-                data: AnnotKind::Uint(Uint::from_lexeme(lexeme).unwrap()),
-            },
-            Ord => Annot {
-                span,
-                data: AnnotKind::Ord,
-            },
             LDelim(Bracket) => self.finish_array_type(span)?,
             LDelim(Paren) => self.finish_tuple_type(span)?,
             Question => {
@@ -1147,7 +1135,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
     fn primary(&mut self) -> Maybe<Expr> {
         let token = self.next().unwrap();
         match token.lexeme {
-            Nat(_, _) | True | False | Ord => {
+            Nat(_, _) | True | False => {
                 let lit = ast::Literal::from_token(token).unwrap();
                 let lit_span = lit.span;
                 Ok(self.node(ExprKind::Literal(lit), lit_span))

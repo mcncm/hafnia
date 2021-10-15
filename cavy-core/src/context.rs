@@ -1,7 +1,7 @@
 //! This module is home to the `Context` data structure central to the
 //! compilation process.
 
-use crate::types::{CachedTypeInterner, TyId, Type};
+use crate::types::{TyId, Type, TypeInterner};
 use crate::{cavy_errors::ErrorBuf, num::Uint};
 use crate::{interner_type, types::TypeSize};
 use crate::{
@@ -16,20 +16,43 @@ use std::{collections::HashMap, fmt};
 
 interner_type! { SymbolInterner : SymbolId -> String }
 
-macro_rules! common_types {
-    ($($ty:ident),*) => {
-        pub struct CommonTypes {
-            $(pub $ty: TyId),*
+pub struct Prelude {
+    pub types: HashMap<SymbolId, TyId>,
+}
+
+macro_rules! prelude_types {
+    ($symbols:ident $($symb:expr => $ty:expr),*) => {
+        {
+            let mut prelude_types = HashMap::new();
+            $(
+                let symb = $symbols.intern($symb.to_owned());
+                prelude_types.insert(symb, $ty);
+            )*
+            prelude_types
         }
     };
 }
 
-common_types! {
-    unit, bool, u2, u4, u8, u16, u32,
-    qbool, qu2, qu4, qu8, qu16, qu32,
-    shrd_qbool,
-    // This is a provisional type not intended to stay in the compiler forever
-    ord
+impl Prelude {
+    fn new(symbols: &mut SymbolInterner, types: &TypeInterner) -> Self {
+        let common = &types.common;
+        let types = prelude_types! {
+            symbols
+            "bool"  => common.bool,
+            "u2"    => common.u2,
+            "u4"    => common.u4,
+            "u8"    => common.u8,
+            "u16"   => common.u16,
+            "u32"   => common.u32,
+            "qbool" => common.qbool,
+            "qu2"   => common.qu2,
+            "qu4"   => common.qu4,
+            "qu8"   => common.qu8,
+            "qu16"  => common.qu16,
+            "qu32"  => common.qu32
+        };
+        Self { types }
+    }
 }
 
 /// This is the big data structure that carries around all the data associated
@@ -46,39 +69,28 @@ pub struct Context<'ctx> {
     /// Interned symbols
     pub symbols: SymbolInterner,
     /// Interned types
-    pub types: CachedTypeInterner,
-    /// Common types, made more conveniently accessible
-    pub common: CommonTypes,
+    pub types: TypeInterner,
+    /// Names automatically brought into scope
+    pub prelude: Prelude,
+}
+
+struct CommonType {
+    symbol: Option<SymbolId>,
+    ty: TyId,
 }
 
 impl<'ctx> Context<'ctx> {
     pub fn new(conf: &'ctx Config, stats: &'ctx mut Statistics) -> Self {
-        let mut types = CachedTypeInterner::new();
-        let qbool = types.intern(Type::QBool);
-        let common = CommonTypes {
-            unit: types.intern(Type::unit()),
-            bool: types.intern(Type::Bool),
-            u2: types.intern(Type::Uint(Uint::U2)),
-            u4: types.intern(Type::Uint(Uint::U4)),
-            u8: types.intern(Type::Uint(Uint::U8)),
-            u16: types.intern(Type::Uint(Uint::U16)),
-            u32: types.intern(Type::Uint(Uint::U32)),
-            qbool,
-            qu2: types.intern(Type::QUint(Uint::U2)),
-            qu4: types.intern(Type::QUint(Uint::U4)),
-            qu8: types.intern(Type::QUint(Uint::U8)),
-            qu16: types.intern(Type::QUint(Uint::U16)),
-            qu32: types.intern(Type::QUint(Uint::U32)),
-            shrd_qbool: types.intern(Type::Ref(RefKind::Shrd, qbool)),
-            ord: types.intern(Type::Ord),
-        };
+        let types = TypeInterner::new();
+        let mut symbols = SymbolInterner::new();
+        let prelude = Prelude::new(&mut symbols, &types);
         Self {
             conf,
             stats,
-            types,
-            common,
             srcs: SrcStore::new(),
-            symbols: SymbolInterner::new(),
+            symbols,
+            types,
+            prelude,
         }
     }
 
