@@ -72,7 +72,7 @@ impl<'a> SubCondAnalysis<'a> {
 
 impl<'a> SummaryAnalysis for SubCondAnalysis<'a> {
     /// If we encounter a delinearization operator, add that.
-    fn trans_stmt(&mut self, stmt: &mir::Stmt, loc: &GraphPt) {
+    fn trans_stmt(&mut self, stmt: &mir::Stmt, _loc: &GraphPt) {
         let (_place, rhs) = match &stmt.kind {
             mir::StmtKind::Assn(place, rhs) => (place.clone(), rhs),
             _ => return,

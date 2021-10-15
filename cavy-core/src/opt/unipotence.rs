@@ -17,7 +17,7 @@ pub fn optimize(mir: &mut Mir, _ctx: &Context) {
 fn simpl_graph(gr: &mut Graph) {
     let mut checker = StrandChecker::new();
     for block in gr.iter_mut() {
-        &mut checker.simplify(block);
+        let _ = checker.simplify(block);
     }
 }
 
