@@ -87,7 +87,10 @@ common_types! {
     u8 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu8),
     u16 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu16),
     u32 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu32),
-    shrd_qbool => Type::Ref(RefKind::Shrd, Lifetime::Static, qbool),
+    // This is a bit of a hack: `Bounded` and `Static` refs are *different
+    // types* now, so it helps to have an easily-accessible copy of a `Bounded`
+    // one for typechecking.
+    shrd_qbool => Type::Ref(RefKind::Shrd, Lifetime::Bounded, qbool),
     // This is a provisional type not intended to stay in the compiler forever
     ord => Type::Ord
 }

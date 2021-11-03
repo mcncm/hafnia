@@ -993,6 +993,9 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let cond_ty = self.type_expr(cond)?;
         let span = cond.span;
         self.expect_type(
+            // This is a bit of a hack: `Bounded` and `Static` refs are
+            // *different types* now, but both of them have been kept for
+            // convenience in the common types cache.
             &[self.ctx.types.common.bool, self.ctx.types.common.shrd_qbool],
             cond_ty,
             cond.span,
