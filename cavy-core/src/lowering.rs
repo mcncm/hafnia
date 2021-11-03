@@ -1106,7 +1106,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         }
 
         // Get the reference kind
-        let ref_kind = typing::resolve_ref_annot(annot);
+        let (ref_kind, _) = typing::resolve_ref_annot(annot);
 
         // Finally, put it there
         let rvalue = Rvalue {
@@ -1249,13 +1249,19 @@ mod typing {
     //! Hindley-Milner type inference, it will be broken out into another file
     //! or even a separate crate.
     use super::*;
-    use crate::index_type;
+    use crate::{index_type, types};
 
-    pub fn resolve_ref_annot(annot: &RefAnnot) -> RefKind {
-        match annot.kind {
+    pub fn resolve_ref_annot(annot: &RefAnnot) -> (RefKind, types::Lifetime) {
+        let kind = match annot.kind {
             RefAnnotKind::Shrd => RefKind::Shrd,
             RefAnnotKind::Uniq => RefKind::Uniq,
-        }
+        };
+        let lt = if let Some(_) = &annot.lifetime.as_ref() {
+            todo!("Assign a lifetime");
+        } else {
+            types::Lifetime::Bounded
+        };
+        (kind, lt)
     }
 
     /// We're not doing full type inference, but we do need to know what to do
@@ -1313,14 +1319,14 @@ mod typing {
                 }
                 ExprKind::Index { head, index } => todo!(),
                 ExprKind::Ref { annot, expr } => {
-                    let kind = resolve_ref_annot(annot);
+                    let (kind, lt) = resolve_ref_annot(annot);
                     let ty = self.type_expr(expr)?;
-                    self.ctx.intern_ty(Type::Ref(kind, ty))
+                    self.ctx.intern_ty(Type::Ref(kind, lt, ty))
                 }
                 ExprKind::Deref(expr) => {
                     let ty = self.type_expr(expr)?;
                     match self.ctx.types[ty] {
-                        Type::Ref(_, ty) => ty,
+                        Type::Ref(_, _, ty) => ty,
                         _ => {
                             return self.error(errors::NonDereferenceableType {
                                 span: expr.span,
@@ -1384,7 +1390,7 @@ mod typing {
                     let lty = &self.ctx.types[left];
                     let rty = &self.ctx.types[left];
                     match (lty, rty) {
-                        (Type::Ref(Shrd, _), Type::Ref(Shrd, _)) => {
+                        (Type::Ref(Shrd, _, _), Type::Ref(Shrd, _, _)) => {
                             if left == right && !left.is_classical(self.ctx) {
                                 return Ok(self.ctx.types.common.shrd_qbool);
                             }
@@ -1522,7 +1528,7 @@ mod typing {
                     if lty.is_classical(self.ctx) {
                         lty == rty
                     } else {
-                        if let Type::Ref(RefKind::Shrd, rty_inner) = self.ctx.types[rty] {
+                        if let Type::Ref(RefKind::Shrd, _, rty_inner) = self.ctx.types[rty] {
                             lty == rty_inner
                         } else {
                             false
@@ -1760,8 +1766,8 @@ mod typing {
             }
             AnnotKind::Ref(annot, inner) => {
                 let ty = resolve_annot(inner, tab, tables, udt_tys, errs, ctx)?;
-                let kind = resolve_ref_annot(annot);
-                ctx.intern_ty(Type::Ref(kind, ty))
+                let (kind, lt) = resolve_ref_annot(annot);
+                ctx.intern_ty(Type::Ref(kind, lt, ty))
             }
             AnnotKind::Ord => ctx.types.common.ord,
         };
@@ -1775,11 +1781,10 @@ mod typing {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
-            Bool => QBool,
-            Uint(u) => QUint(u),
+            Ref(RefKind::Shrd, _, ty) => ty,
             _ => todo!(),
         };
-        Ok(ctx.intern_ty(ty))
+        Ok(ty)
     }
 
     // Can remove this attribute after implementing the rest of the function
@@ -1788,8 +1793,7 @@ mod typing {
         use Type::*;
         // can this be done with just pointer comparisons?
         let ty = match ctx.types[inner] {
-            QBool => Bool,
-            QUint(u) => Uint(u),
+            QBool | QUint(_) => Ref(RefKind::Shrd, types::Lifetime::Static, inner),
             _ => todo!(),
         };
         Ok(ctx.intern_ty(ty))

@@ -135,6 +135,7 @@ struct Ascriber<'l, 'a> {
     /// will temporarily simplify the problem by using only (at most) one.
     end: Option<LtId>,
     types: &'a TypeInterner,
+    /// The length of each block in the CFG, includin its tail
     block_sizes: &'a [usize],
 }
 
@@ -210,7 +211,7 @@ impl<'l, 'a> Ascriber<'l, 'a> {
             Type::Func(_, _) => todo!(),
             // FIXME
             Type::UserType(_) => None,
-            Type::Ref(kind, ty) => {
+            Type::Ref(kind, _, ty) => {
                 let lt = self.new_lifetime(is_end);
                 let ascr = Ascr { kind: *kind, lt };
                 self.node_from_inners(Some(ascr), &[*ty], is_end)

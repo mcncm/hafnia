@@ -60,7 +60,7 @@ macro_rules! common_types {
                 )*
                 let common = CommonTypes {
                     $(
-                        $field: $field
+                        $field
                     ),*
                 };
                 Self {
@@ -81,13 +81,13 @@ common_types! {
     qu8 => Type::QUint(Uint::U8),
     qu16 => Type::QUint(Uint::U16),
     qu32 => Type::QUint(Uint::U32),
-    bool => Type::Ref(RefKind::Shrd, qbool),
-    u2 => Type::Ref(RefKind::Uniq, qu2),
-    u4 => Type::Ref(RefKind::Uniq, qu4),
-    u8 => Type::Ref(RefKind::Uniq, qu8),
-    u16 => Type::Ref(RefKind::Uniq, qu16),
-    u32 => Type::Ref(RefKind::Uniq, qu32),
-    shrd_qbool => Type::Ref(RefKind::Shrd, qbool),
+    bool => Type::Ref(RefKind::Shrd, Lifetime::Static, qbool),
+    u2 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu2),
+    u4 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu4),
+    u8 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu8),
+    u16 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu16),
+    u32 => Type::Ref(RefKind::Shrd, Lifetime::Static, qu32),
+    shrd_qbool => Type::Ref(RefKind::Shrd, Lifetime::Static, qbool),
     // This is a provisional type not intended to stay in the compiler forever
     ord => Type::Ord
 }
@@ -143,7 +143,11 @@ impl IndexMut<TyId> for TypeInterner {
 
 impl TyId {
     pub fn is_uint(&self, interner: &TypeInterner) -> bool {
-        matches!(interner[*self], Type::Uint(_))
+        if let Type::Ref(RefKind::Shrd, Lifetime::Static, _) = interner[*self] {
+            matches!(interner[*self], Type::QUint(_))
+        } else {
+            false
+        }
     }
 
     pub fn is_quint(&self, interner: &TypeInterner) -> bool {
@@ -168,7 +172,7 @@ impl TyId {
 
     pub fn referent(&self, ctx: &Context) -> Option<TyId> {
         match &ctx.types[*self] {
-            Type::Ref(_, ty) => Some(*ty),
+            Type::Ref(_, _, ty) => Some(*ty),
             _ => None,
         }
     }
@@ -190,7 +194,7 @@ impl TyId {
     pub fn is_primitive(&self, ctx: &Context) -> bool {
         use Type::*;
         match &ctx.types[*self] {
-            Bool | QBool | Uint(_) | QUint(_) => true,
+            QBool | QUint(_) => true,
             // The unit type should also be considered primitive
             Tuple(tys) if tys.is_empty() => true,
             _ => false,
@@ -206,18 +210,13 @@ impl TyId {
     /// for this property--should come up with a better one.
     pub fn is_bitlike(&self, ctx: &Context) -> bool {
         let ty = &ctx.types[*self];
-        matches!(
-            ty,
-            Type::Bool | Type::Uint(_) | Type::QBool | Type::QUint(_)
-        ) || if let Type::Ref(RefKind::Shrd, inner) = ty {
-            let ty = &ctx.types[*inner];
-            matches!(
-                ty,
-                Type::Bool | Type::Uint(_) | Type::QBool | Type::QUint(_)
-            )
-        } else {
-            false
-        }
+        matches!(ty, Type::QBool | Type::QUint(_))
+            || if let Type::Ref(RefKind::Shrd, _, inner) = ty {
+                let ty = &ctx.types[*inner];
+                matches!(ty, Type::QBool | Type::QUint(_))
+            } else {
+                false
+            }
     }
 
     /// Check the linearity of a type, with the help of the global context
@@ -423,15 +422,19 @@ pub enum RefKind {
     Uniq,
 }
 
+/// Coarse-grained lifetimes: either static or bounded. Unlike in `rustc`, concrete
+/// inference variables are not assigned until region inference takes place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lifetime {
+    /// The static lifetime
+    Static,
+    /// A non-static lifetime
+    Bounded,
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// A non-linear (classical) boolean
-    Bool,
-
-    /// A non-linear (classical) unsigned integer
-    Uint(Uint),
-
     /// A linear boolean, like `?false`
     QBool,
 
@@ -451,7 +454,7 @@ pub enum Type {
     UserType(UserType),
 
     /// A reference
-    Ref(RefKind, TyId),
+    Ref(RefKind, Lifetime, TyId),
 
     /// A provisional experimental type
     Ord,
@@ -464,8 +467,8 @@ impl Type {
     }
 
     /// Create an instance of the size/index type
-    pub const fn size_type() -> Self {
-        Type::Uint(Uint::U32)
+    pub const fn size_type(interner: &TypeInterner) -> Self {
+        Type::Ref(RefKind::Shrd, Lifetime::Static, interner.common.u32)
     }
 
     /// Get the path positions held by this type
@@ -473,7 +476,7 @@ impl Type {
         match (self, proj) {
             (Type::Tuple(tys), Proj::Field(elem)) => tys[*elem],
             (Type::UserType(udt), Proj::Field(elem)) => udt.fields[*elem].1,
-            (Type::Ref(_, ty), Proj::Deref) => *ty,
+            (Type::Ref(_, _, ty), Proj::Deref) => *ty,
             _ => unreachable!(),
         }
     }
@@ -486,8 +489,6 @@ impl Type {
     /// Compute the memory offsets of the type's slots
     fn offsets(&self, interner: &CachedTypeInterner) -> Vec<Offset> {
         match self {
-            Type::Bool => vec![],
-            Type::Uint(_) => vec![],
             Type::QBool => vec![],
             Type::QUint(_) => vec![],
             Type::Tuple(elems) => {
@@ -519,7 +520,7 @@ impl Type {
             // There should be one offset *to the owned data*, which is just
             // contained in the ref. This is in contrast with Rust, where a
             // reference is of constant size.
-            Type::Ref(_, _) => vec![Offset::zero()],
+            Type::Ref(_, _, _) => vec![Offset::zero()],
             Type::Ord => vec![],
         }
     }
@@ -527,11 +528,6 @@ impl Type {
     /// Compute the number of bits owned by a type.
     fn size(&self, interner: &CachedTypeInterner) -> TypeSize {
         match self {
-            Type::Bool => TypeSize { qsize: 0, csize: 1 },
-            Type::Uint(u) => TypeSize {
-                qsize: 0,
-                csize: *u as usize,
-            },
             Type::QBool => TypeSize { qsize: 1, csize: 0 },
             Type::QUint(u) => TypeSize {
                 qsize: *u as usize,
@@ -564,7 +560,7 @@ impl Type {
             // Note that this is different from Rust: a 'reference' isn't a
             // fixed-size reference at all; it's actually the original data in
             // memory. It's just the usage contract that differs.
-            Type::Ref(_, ty) => *ty.size_inner(interner),
+            Type::Ref(_, _, ty) => *ty.size_inner(interner),
             Type::Ord => TypeSize { qsize: 0, csize: 0 },
         }
     }
@@ -575,15 +571,13 @@ impl Type {
             Type::Array(ty, _) => ty.is_owned_inner(interner),
             Type::Func(_, _) => todo!(),
             Type::UserType(ty) => ty.as_tuple().is_owned(interner),
-            Type::Ref(_, _) => false,
+            Type::Ref(_, _, _) => false,
             _ => true,
         }
     }
 
     pub fn is_affine(&self, interner: &CachedTypeInterner) -> bool {
         match self {
-            Type::Bool => false,
-            Type::Uint(_) => false,
             Type::QBool => true,
             Type::QUint(_) => true,
             Type::Tuple(tys) => tys.iter().any(|ty| ty.is_affine_inner(interner)),
@@ -598,7 +592,7 @@ impl Type {
                         .iter()
                         .any(|field| field.1.is_affine_inner(interner))
             }
-            Type::Ref(ref_kind, _) => match ref_kind {
+            Type::Ref(ref_kind, _, _) => match ref_kind {
                 RefKind::Shrd => false,
                 RefKind::Uniq => true,
             },
@@ -611,7 +605,7 @@ impl Type {
     }
 
     pub fn ref_kind(&self, _interner: &CachedTypeInterner) -> Option<RefKind> {
-        if let Type::Ref(ref_kind, _) = self {
+        if let Type::Ref(ref_kind, _, _) = self {
             Some(*ref_kind)
         } else {
             None
@@ -631,8 +625,6 @@ impl fmt::Display for RefKind {
 impl<'c> FmtWith<Context<'c>> for TyId {
     fn fmt(&self, ctx: &Context, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &ctx.types[*self] {
-            Type::Bool => f.write_str("bool"),
-            Type::Uint(u) => write!(f, "{}", u),
             Type::QBool => f.write_str("qbool"),
             Type::QUint(u) => write!(f, "q{}", u),
             Type::Tuple(tys) => {
@@ -659,7 +651,11 @@ impl<'c> FmtWith<Context<'c>> for TyId {
                 write!(f, ") -> {}", ctx.types[*ret])
             }
             Type::UserType(ty) => write!(f, "{}", ty.def_name.fmt_with(ctx)),
-            Type::Ref(kind, ty) => write!(f, "{}{}", kind, ty.fmt_with(ctx)),
+            // TODO This currently doesn't show anything known about the
+            // lifetime, whether bounded or static. It could at least
+            // distinguish those cases; with further refinement, we could also
+            // display e.g. named lifetimes.
+            Type::Ref(kind, _, ty) => write!(f, "{}{}", kind, ty.fmt_with(ctx)),
             Type::Ord => write!(f, "ord"),
         }
     }

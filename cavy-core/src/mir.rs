@@ -439,7 +439,10 @@ impl Place {
         let mut ty = &ctx.types[local.ty];
         self.is_prefix_with(
             |proj, in_self| {
-                if !in_self && (proj == &Proj::Deref) && matches!(ty, Type::Ref(RefKind::Shrd, _)) {
+                if !in_self
+                    && (proj == &Proj::Deref)
+                    && matches!(ty, Type::Ref(RefKind::Shrd, _, _))
+                {
                     false
                 } else {
                     ty = &ctx.types[ty.slot(proj)];

@@ -67,11 +67,18 @@ store_type! { LifetimeStore : LtId -> Lifetime }
 pub struct Lifetime {
     /// The "finite" points within the graph
     pts: Store<BlockId, BitVec>,
+    kind: LifetimeKind,
+}
+
+pub enum LifetimeKind {
     /// The "points at infinity" in the caller. For now, we're making the
     /// simplifying assumption that there is a single such point; that is, that
-    /// all function arguments and return values have the *same* lifetime. This
-    /// bit is set if this lifetime extends to infinity.
-    end: bool,
+    /// all function arguments and return values have the *same* lifetime.
+    ///
+    /// For now, this will also play the role of the *static* lifetime
+    End,
+    /// A finite lifetime
+    Bounded,
 }
 
 impl Lifetime {
@@ -106,7 +113,7 @@ impl LifetimeStore {
     pub fn new_region(&mut self, block_sizes: &[usize]) -> LtId {
         let lifetime = Lifetime {
             pts: block_sizes.iter().map(|sz| bitvec![0; *sz]).collect(),
-            end: false,
+            kind: LifetimeKind::Bounded,
         };
         self.insert(lifetime)
     }
@@ -115,7 +122,7 @@ impl LifetimeStore {
     pub fn end_region(&mut self, block_sizes: &[usize]) -> LtId {
         let lifetime = Lifetime {
             pts: block_sizes.iter().map(|sz| bitvec![1; *sz]).collect(),
-            end: true,
+            kind: LifetimeKind::End,
         };
         self.insert(lifetime)
     }
