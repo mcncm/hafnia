@@ -409,13 +409,15 @@ impl<'s, 'c> Scanner<'s> {
         while let Some(ch) = self.scan_head.peek() {
             if ch.is_ascii_digit() {
                 self.next_char();
-            } else {
+            } else if is_ident_char(*ch) {
                 self.errors.push(errors::NonDigitInNumber {
                     span: self.loc_span(),
                 });
                 self.synchronize_to_non_alphanum();
                 self.token_buf.clear();
                 return;
+            } else {
+                break;
             }
         }
 
@@ -590,12 +592,6 @@ mod tests {
     #[test]
     fn numbers_no_whitespace() {
         lex_test!("12*3"; Nat(12, None), Star, Nat(3, None));
-    }
-
-    #[test]
-    fn number_with_specifier() {
-        use crate::num::Uint;
-        lex_test!("123u8"; Nat(123, Some(Uint::U8)));
     }
 
     // These `should_panic` tests are insufficiently sensitive: they don't in
