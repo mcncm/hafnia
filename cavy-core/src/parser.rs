@@ -25,7 +25,6 @@ use crate::{
     },
 };
 use errors::*;
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::Peekable;
 use std::{collections::HashMap, process::Command};

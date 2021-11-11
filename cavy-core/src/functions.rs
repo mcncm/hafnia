@@ -159,7 +159,6 @@ pub mod builtins {
     // Functions for manipulating iterators
 
     fn enumerate(_interp: &mut Interpreter, args: &[Value]) -> Result<Value, ErrorBuf> {
-        use std::convert::TryInto;
         use Value::{Array, Tuple};
         match &args[0] {
             Array(data) => {

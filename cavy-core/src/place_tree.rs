@@ -10,8 +10,6 @@
 //! as they do the exact same thing, but I don't have the time to refactor them
 //! for the generic implementation right now.
 
-use std::iter::FromIterator;
-
 use crate::{
     mir::{LocalId, Place, Proj},
     store::Store,

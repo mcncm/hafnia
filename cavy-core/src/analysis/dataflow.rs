@@ -33,11 +33,8 @@
 //! [2] The borrow checker, on the other hand, is based directly on
 //! Niko Matsakis' NLL RFC, not on rustc.
 
+use std::collections::{HashMap, HashSet};
 use std::{cell::Ref, collections::hash_map::Entry};
-use std::{
-    collections::{HashMap, HashSet},
-    iter::FromIterator,
-};
 use std::{hash::Hash, ops};
 
 use mir::Stmt;

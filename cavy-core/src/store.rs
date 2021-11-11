@@ -8,15 +8,12 @@
 //! `HashMap<V, Idx>`.
 
 use bitvec::prelude::*;
+use std::collections::{
+    hash_map::{Entry, Iter},
+    HashMap,
+};
 use std::marker::PhantomData;
 use std::{borrow::Borrow, hash::Hash, rc::Rc};
-use std::{
-    collections::{
-        hash_map::{Entry, Iter},
-        HashMap,
-    },
-    iter::FromIterator,
-};
 
 use crate::util::FmtWith;
 

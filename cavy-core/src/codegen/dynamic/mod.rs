@@ -12,7 +12,6 @@ use smallvec::{smallvec, SmallVec};
 use std::{
     cell::{Ref, RefCell},
     collections::{hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
-    iter::FromIterator,
     ops::RangeFrom,
     rc::Rc,
 };

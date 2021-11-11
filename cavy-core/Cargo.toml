@@ -1,7 +1,7 @@
 [package]
 authors = ["mcncm <cavy-lang-support@mit.edu>"]
 build = "build.rs"
-edition = "2018"
+edition = "2021"
 name = "cavy-core"
 version = "0.1.0"
 

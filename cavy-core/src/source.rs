@@ -2,7 +2,6 @@
 
 use crate::cavy_errors::{Diagnostic, ErrorBuf};
 use crate::store_type;
-use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
 use std::{collections::HashMap, str::Chars};

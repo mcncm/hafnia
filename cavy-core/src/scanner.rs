@@ -11,7 +11,6 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    convert::TryFrom,
     fmt,
     iter::Peekable,
     path::{Path, PathBuf},

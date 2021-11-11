@@ -16,7 +16,6 @@ use crate::{
     store::Counter,
 };
 use crate::{index_type, interner_type, store_type};
-use std::convert::TryFrom;
 use std::fmt;
 use std::{collections::HashMap, ops::RangeFrom};
 
