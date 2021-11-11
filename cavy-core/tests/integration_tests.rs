@@ -77,8 +77,8 @@ test_compiles! {
 
     field_access_binds_tightly [Analysis] {
         fn main() {
-            let x = (4u8, 111u8);
-            let y: ?u8 = ?x.0;
+            let x: (u32, u32) = (4, 111);
+            let y: ?u32 = ?x.0;
         }
     }
 

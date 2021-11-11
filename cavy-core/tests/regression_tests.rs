@@ -9,15 +9,6 @@ test_compiles! {
     /*
     FOUND: 2021-05-12
     FIXED: 2021-05-12
-    CAUSE: Never implemented
-    */
-    u2_parses {
-        fn main () { let x: u2 = 1u2; }
-    }
-
-    /*
-    FOUND: 2021-05-12
-    FIXED: 2021-05-12
     CAUSE: Incorrect `Value::Unit` default value in values tree.
     */
     const_prop_tuple {
@@ -35,12 +26,12 @@ test_compiles! {
     */
     return_place_linearity {
         fn main() {
-            let var = ?47u8;
+            let var: ?u32 = ?47;
             var = f(var);
             let num = !var;
         }
 
-        fn f(number: ?u8) -> ?u8 {
+        fn f(number: ?u32) -> ?u32 {
             ~number
         }
     }
