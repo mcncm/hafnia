@@ -69,7 +69,7 @@ test_compiles! {
 
     double_move_self [Analysis] {
         fn main() {
-            let y = ?false;
+            let y = false;
             y = y;
             y = y;
         }

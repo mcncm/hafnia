@@ -34,9 +34,7 @@ pub fn infer_regions<'a>(
     let ascriptions = ascription::ascribe(&mut lifetimes, context);
 
     let liveness_ana = liveness::LivenessAnalysis::new(context.gr, controls);
-    let liveness = DataflowRunner::new(liveness_ana, context)
-        .run()
-        .stmt_states;
+    let liveness = DataflowRunner::new(liveness_ana, context).run().stmt_states;
 
     let mut reginf = RegionInf {
         lifetimes,
@@ -226,8 +224,17 @@ impl<'a> RegionInf<'a> {
                     self.sub_constr_oper(nxt, lhs, lop);
                     self.sub_constr_oper(nxt, lhs, rop);
                 }
-                RvalueKind::UnOp(_, op) | RvalueKind::Use(op) => {
-                    self.sub_constr_oper(nxt, lhs, op);
+                // The left-hand side of a linearization operator has *no*
+                // associated lifetime, so there is no relationship with
+                // that of the right-hand side.
+                RvalueKind::UnOp(crate::ast::UnOpKind::Linear, _) => {
+                    // FIXME: there is more than one way we could choose to
+                    // enforce this fact. This feels like one of the *hackier*
+                    // ways to do it.
+                    return;
+                }
+                RvalueKind::UnOp(_, rhs) | RvalueKind::Use(rhs) => {
+                    self.sub_constr_oper(nxt, lhs, rhs);
                 }
                 RvalueKind::Ref(refr, place) => {
                     // Prefer if this weren't here; it's a hopeless tangle.
@@ -728,10 +735,12 @@ mod dbg {
                 let constrs = constrs[blk_id].iter();
                 let refs = (0..).map(|stmt| {
                     let pt = GraphPt { blk: blk_id, stmt };
-                    self.ascriptions.refs.get(&pt).map_or_else(
-                        String::new,
-                        |ln| format!("{}", self.ascriptions.loans[*ln].ascr),
-                    )
+                    self.ascriptions
+                        .refs
+                        .get(&pt)
+                        .map_or_else(String::new, |ln| {
+                            format!("{}", self.ascriptions.loans[*ln].ascr)
+                        })
                 });
 
                 table!([width = 10] f <<
