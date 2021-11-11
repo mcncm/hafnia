@@ -18,7 +18,7 @@ pub trait Diagnostic: std::fmt::Debug {
 
     /// Retrieves messages referencing spans of source code, of which there must
     /// be at least one.
-    fn spans<'a>(&'a self) -> Vec<SpanReport<'a>> {
+    fn spans(&self) -> Vec<SpanReport> {
         Vec::new()
     }
 
@@ -172,7 +172,7 @@ impl<'c> FmtWith<Context<'c>> for Box<dyn Diagnostic> {
         // FIXME clean up
         write!(f, "{} ", self.error_code())?;
         self.message(ctx, f)?;
-        writeln!(f, "")?;
+        writeln!(f)?;
 
         for span_report in self.spans() {
             let span = span_report.span;

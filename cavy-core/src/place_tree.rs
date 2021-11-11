@@ -117,7 +117,7 @@ impl<T> PlaceStore<T> {
         // implementation everywhere I go.
         let diff = (1 + <u32>::from(place.root) as usize).saturating_sub(self.store.len());
         self.store
-            .extend(std::iter::repeat_with(|| PlaceNode::default()).take(diff));
+            .extend(std::iter::repeat_with(PlaceNode::default).take(diff));
 
         let mut node = &mut self.store[place.root];
         for elem in &place.path {
@@ -138,7 +138,7 @@ impl<T> PlaceStore<T> {
                     0
                 }
             };
-            node = node.slots[slot].get_or_insert_with(|| PlaceNode::default());
+            node = node.slots[slot].get_or_insert_with(PlaceNode::default);
         }
         node
     }
@@ -204,7 +204,7 @@ pub struct PlaceNode<T> {
 }
 
 impl<T> PlaceNode<T> {
-    pub fn iter_post<'a>(&'a self) -> PlaceTreePost<'a, T> {
+    pub fn iter_post(&self) -> PlaceTreePost<'_, T> {
         PlaceTreePost {
             stack: vec![],
             node: self,
@@ -272,6 +272,7 @@ impl<T> Default for PlaceNode<T> {
 
 /// A postorder iterator on a `PlaceTree`
 pub struct PlaceTreePost<'a, T> {
+    // FIXME 3: type complexity
     stack: Vec<(&'a PlaceNode<T>, std::slice::Iter<'a, Option<PlaceNode<T>>>)>,
     node: &'a PlaceNode<T>,
     slots: std::slice::Iter<'a, Option<PlaceNode<T>>>,

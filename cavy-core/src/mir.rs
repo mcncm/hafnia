@@ -199,6 +199,7 @@ impl Graph {
     }
 
     /// Get the number of basic blocks in the graph.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.blocks.len()
     }
@@ -302,6 +303,7 @@ impl BasicBlock {
     }
 
     /// The length of this block, *including* its tail
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.stmts.len() + 1
     }
@@ -405,6 +407,7 @@ impl Place {
         self.path.is_empty()
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.path.len() + 1
     }
@@ -467,9 +470,9 @@ impl Place {
             return false;
         }
 
-        let mut this = self.path.iter();
+        let this = self.path.iter();
         let mut other = other.path.iter();
-        while let Some(l) = this.next() {
+        for l in this {
             if !(other.next() == Some(l) && pred(l, true)) {
                 return false;
             }

@@ -31,10 +31,10 @@ pub fn infer_regions<'a>(
     }
 
     let mut lifetimes = LifetimeStore::new();
-    let ascriptions = ascription::ascribe(&mut lifetimes, &context);
+    let ascriptions = ascription::ascribe(&mut lifetimes, context);
 
     let liveness_ana = liveness::LivenessAnalysis::new(context.gr, controls);
-    let liveness = DataflowRunner::new(liveness_ana, &context)
+    let liveness = DataflowRunner::new(liveness_ana, context)
         .run()
         .stmt_states;
 
@@ -729,7 +729,7 @@ mod dbg {
                 let refs = (0..).map(|stmt| {
                     let pt = GraphPt { blk: blk_id, stmt };
                     self.ascriptions.refs.get(&pt).map_or_else(
-                        || String::new(),
+                        String::new,
                         |ln| format!("{}", self.ascriptions.loans[*ln].ascr),
                     )
                 });

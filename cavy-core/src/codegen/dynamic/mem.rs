@@ -40,8 +40,8 @@ impl<T, I: Iterator<Item = T>> Iterator for ThreeWayAllocator<T, I> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let bit = self.clean.pop_front().or_else(|| self.fresh.next());
-        bit
+        
+        self.clean.pop_front().or_else(|| self.fresh.next())
     }
 }
 
@@ -76,7 +76,7 @@ impl BitAllocators {
     }
 
     pub fn alloc_for_ty(&mut self, ty: TyId, ctx: &Context) -> BitArray {
-        let sz = ty.size(&ctx);
+        let sz = ty.size(ctx);
         BitArray {
             cbits: self.class.by_ref().take(sz.csize).collect(),
             qbits: self.quant.by_ref().take(sz.qsize).collect(),
@@ -130,7 +130,7 @@ impl<'a> InterpreterState<'a> {
     /// fresh bits for the rest of them, from the *global allocator*.
     pub fn mem_init<'b, I>(
         &mut self,
-        mut params: I,
+        params: I,
         allocator: &mut BitAllocators,
         // NOTE: 2021-05-18 this parameter is a *hack* to get around ugly
         // circuits.
@@ -140,7 +140,7 @@ impl<'a> InterpreterState<'a> {
     {
         let mut locals = self.locals.idx_enumerate();
         // First copy in the parameter addresses
-        while let Some(param) = params.next() {
+        for param in params {
             locals.next().expect("more parameters than locals");
             self.bindings.insert(param.to_owned());
         }
@@ -283,8 +283,8 @@ pub trait AsBits {
 impl<'a> AsBits for BitSlice<'a> {
     fn as_bits<'b>(&'b self, _st: &'b InterpreterState) -> BitSlice<'b> {
         Self {
-            qbits: &self.qbits,
-            cbits: &self.cbits,
+            qbits: self.qbits,
+            cbits: self.cbits,
         }
     }
 }

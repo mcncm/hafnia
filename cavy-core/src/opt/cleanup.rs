@@ -130,7 +130,7 @@ impl SummaryAnalysis for LocalsUsed {
             BlockKind::Call(call) => {
                 self.insert(call.ret.root);
                 for arg in &call.args {
-                    arg.place().map(|pl| self.insert(pl.root));
+                    if let Some(pl) = arg.place() { self.insert(pl.root) }
                 }
             }
             BlockKind::Ret => {}

@@ -24,7 +24,7 @@ impl Qasm {
         // representation; it's content.
         match inst {
             Inst::QGate(GateQ { ctrls, base }) => {
-                if ctrls.len() != 0 {
+                if !ctrls.is_empty() {
                     panic!("QASM doesn't support multiple controls");
                 } else {
                     use BaseGateQ::*;

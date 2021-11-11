@@ -117,7 +117,7 @@ impl Strand {
 
     /// Merge the edit intervals
     fn merge(mut self) -> MergedStrand {
-        if self.edits.len() == 0 {
+        if self.edits.is_empty() {
             return MergedStrand(self);
         }
 
@@ -253,9 +253,8 @@ impl StrandChecker {
     fn kill_at_place(&mut self, place: Option<&Place>) {
         if let Some(place) = place {
             let dead_strands = &mut self.dead_strands;
-            self.live_strands
-                .remove(place)
-                .map(|strand| dead_strands.push(strand.merge()));
+            if let Some(strand) = self.live_strands
+                .remove(place) { dead_strands.push(strand.merge()) }
         }
     }
 }

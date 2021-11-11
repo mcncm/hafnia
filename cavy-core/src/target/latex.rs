@@ -430,7 +430,7 @@ impl<'l> LayoutArray<'l> {
     /// circuit of known size.
     fn new(latex: &'l LaTeX, qwires: usize, cwires: usize) -> Self {
         debug_assert!(qwires + cwires > 0);
-        let wires = iter::repeat_with(|| Wire::new())
+        let wires = iter::repeat_with(Wire::new)
             .take(Self::layout_width(latex, qwires, cwires))
             .collect();
         Self {
@@ -444,18 +444,16 @@ impl<'l> LayoutArray<'l> {
     // Should maybe just compute some `Sections` struct during `new`
     fn layout_width(latex: &LaTeX, qwires: usize, cwires: usize) -> usize {
         let mut width = qwires + cwires;
-        match &latex.package {
-            Quantikz { wave: true, .. } => width += 1,
-            _ => (),
+        if let Quantikz { wave: true, .. } = &latex.package {
+            width += 1
         }
         width
     }
 
     fn first_cwire_index(latex: &LaTeX, qwires: usize) -> usize {
         let mut cwire = qwires;
-        match &latex.package {
-            Quantikz { wave: true, .. } => cwire += 1,
-            _ => (),
+        if let Quantikz { wave: true, .. } = &latex.package {
+            cwire += 1
         }
         cwire
     }
@@ -608,7 +606,7 @@ impl<'l> LayoutArray<'l> {
     }
 
     fn push_cgate(&mut self, gate: GateC) {
-        if gate.ctrls.len() > 0 {
+        if !gate.ctrls.is_empty() {
             // Let's special-case this like mad: only build the circuit for
             // classical control from one bit.
             if gate.ctrls.len() == 1 {
@@ -665,7 +663,7 @@ impl<'l> LayoutArray<'l> {
         let wire = self.cwire(io.addr);
         let io = IoLabelData {
             // Nice, I get to clone it *again*! (See `dynamic/gates.rs`)
-            name: io.channel.clone(),
+            name: io.channel,
             elem: io.elem,
         };
         let elem = Elem::IoLabel(Box::new(io));

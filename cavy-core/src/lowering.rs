@@ -42,7 +42,7 @@ pub struct MirBuilder<'mir, 'ctx> {
 
 impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
     pub fn new(ast: &'mir Ast, ctx: &'mir mut Context<'ctx>) -> Self {
-        let mir = Mir::new(&ast);
+        let mir = Mir::new(ast);
         let sigs = Store::with_capacity(ast.funcs.len());
         let udt_tys = HashMap::new();
         Self {
@@ -153,7 +153,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
 
     /// Typecheck all functions in the AST, enter the lowered functions in the cfg
     pub fn lower(mut self) -> Result<Mir, ErrorBuf> {
-        if let Err(_) = self.resolve_global() {
+        if self.resolve_global().is_err() {
             return Err(self.errors);
         }
 
@@ -162,7 +162,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
         for (fn_id, func) in self.ast.funcs.idx_enumerate() {
             // The table argument serves to pass in the function's environment.
             let builder =
-                GraphBuilder::new(self.ctx, &self.sigs, &self.ast, &self.udt_tys, fn_id, func);
+                GraphBuilder::new(self.ctx, &self.sigs, self.ast, &self.udt_tys, fn_id, func);
             let graph = match builder.lower() {
                 Ok(gr) => gr,
                 Err((gr, mut errs)) => {
@@ -226,7 +226,7 @@ impl<'mir, 'ctx> MirBuilder<'mir, 'ctx> {
             &self.ast.tables,
             &self.udt_tys,
             &mut self.errors,
-            &mut self.ctx,
+            self.ctx,
         )
     }
 }
@@ -311,7 +311,7 @@ impl ScopeStack {
     fn get(&self, item: &SymbolId) -> Option<&LocalId> {
         let mut cursor = self.current;
         loop {
-            if let local @ Some(_) = self.scopes[cursor].get(&item) {
+            if let local @ Some(_) = self.scopes[cursor].get(item) {
                 return local;
             } else if cursor > 0 {
                 cursor -= 1;
@@ -492,7 +492,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         let old_unsafe = self.in_unsafe;
         self.in_unsafe = is_unsafe;
         let restore = |this: &mut Self| {
-            // NOTE: unnecessary allocation
+            // NOTE: unnecessary allocation, but cannot be (easily) fixed
+            // without violating borrow rules.
             let drops: Vec<_> = this.st.pop_table().collect();
             for local in drops.into_iter() {
                 this.push_stmt(span.last_point(), mir::StmtKind::Drop(Place::from(local)));
@@ -714,11 +715,8 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         // This was not an `Equal` assignment; do the operation and store it
         // *back* in the lhs.
         let rhs = self.lower_expr(rhs)?;
-        let rvalue_kind = RvalueKind::BinOp(
-            binop,
-            self.operand_of(lhs.clone()),
-            self.operand_of(rhs.clone()),
-        );
+        let rvalue_kind =
+            RvalueKind::BinOp(binop, self.operand_of(lhs.clone()), self.operand_of(rhs));
         let rvalue = Rvalue {
             span,
             data: rvalue_kind,
@@ -821,7 +819,7 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
                 let id = self.st.get(&ident.data).unwrap();
                 (*id).into()
             }
-            ExprKind::Field(head, field) => self.resolve_fields(head, &field)?,
+            ExprKind::Field(head, field) => self.resolve_fields(head, field)?,
             ExprKind::Deref(expr) => self.resolve_deref(expr)?,
             _ => {
                 let head_place = self.auto_place(head_ty);
@@ -1137,28 +1135,27 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
     }
 
     fn lower_io_stmt(&mut self, io: &ast::IoStmt, span: Span) -> Maybe<()> {
-        match io {
-            ast::IoStmt { lhs, name, dir } => {
-                // ...Make something up, for now? But in fact, you'll have to do
-                // some kind of "weak"/"ad hoc" type inference to get this type.
-                let ty = match self.type_expr(lhs) {
-                    Ok(ty) => ty,
-                    Err(_) => Err(self.errors.push(errors::InferenceFailure {
-                        span: name.span,
-                        name: name.data,
-                    }))?,
-                };
-                let place = self.auto_place(ty);
-                self.lower_into(&place, lhs)?;
-                let stmt = mir::IoStmt {
-                    dir: *dir,
-                    place,
-                    channel: name.data,
-                };
-                self.push_stmt(span, mir::StmtKind::Io(stmt));
-                Ok(())
+        let ast::IoStmt { lhs, name, dir } = io;
+        // ...Make something up, for now? But in fact, you'll have to do
+        // some kind of "weak"/"ad hoc" type inference to get this type.
+        let ty = match self.type_expr(lhs) {
+            Ok(ty) => ty,
+            Err(_) => {
+                return Err(self.errors.push(errors::InferenceFailure {
+                    span: name.span,
+                    name: name.data,
+                }))
             }
-        }
+        };
+        let place = self.auto_place(ty);
+        self.lower_into(&place, lhs)?;
+        let stmt = mir::IoStmt {
+            dir: *dir,
+            place,
+            channel: name.data,
+        };
+        self.push_stmt(span, mir::StmtKind::Io(stmt));
+        Ok(())
     }
 
     fn lower_assert_stmt(&mut self, expr: &Expr, span: Span) -> Maybe<()> {
@@ -1236,10 +1233,10 @@ impl<'mir, 'ctx> GraphBuilder<'mir, 'ctx> {
         typing::resolve_annot(
             ty,
             &self.tables[self.table],
-            &self.tables,
-            &self.udt_tys,
+            self.tables,
+            self.udt_tys,
             &mut self.errors,
-            &mut self.ctx,
+            self.ctx,
         )
     }
 }
@@ -1259,7 +1256,7 @@ mod typing {
             RefAnnotKind::Shrd => RefKind::Shrd,
             RefAnnotKind::Uniq => RefKind::Uniq,
         };
-        let lt = if let Some(_) = &annot.lifetime.as_ref() {
+        let lt = if annot.lifetime.as_ref().is_some() {
             todo!("Assign a lifetime");
         } else {
             types::Lifetime::Bounded
@@ -1402,7 +1399,6 @@ mod typing {
                             if left == right && left.is_classical(self.ctx) {
                                 return Ok(self.ctx.types.common.bool);
                             } else {
-                                ()
                             }
                         }
                     }
@@ -1412,7 +1408,7 @@ mod typing {
                     if left == right {
                         if left.is_uint(&self.ctx.types) {
                             return Ok(left);
-                        } else if let Some(ty) = left.referent(&self.ctx) {
+                        } else if let Some(ty) = left.referent(self.ctx) {
                             if ty.is_quint(&self.ctx.types) {
                                 return Ok(left);
                             }
@@ -1432,7 +1428,7 @@ mod typing {
                 }
                 And | Or | Xor => {
                     use RefKind::*;
-                    if left == right && left.is_bitlike(&self.ctx) {
+                    if left == right && left.is_bitlike(self.ctx) {
                         return Ok(left);
                     }
                 }
@@ -1530,12 +1526,10 @@ mod typing {
                 AssnOpKind::Xor => {
                     if lty.is_classical(self.ctx) {
                         lty == rty
+                    } else if let Type::Ref(RefKind::Shrd, _, rty_inner) = self.ctx.types[rty] {
+                        lty == rty_inner
                     } else {
-                        if let Type::Ref(RefKind::Shrd, _, rty_inner) = self.ctx.types[rty] {
-                            lty == rty_inner
-                        } else {
-                            false
-                        }
+                        false
                     }
                 }
             };
@@ -1679,7 +1673,7 @@ mod typing {
 
         fn type_ext_arr(&mut self, items: &[Expr]) -> Maybe<TyId> {
             let mut elems = items.iter();
-            let fst = match elems.next().and_then(|head| Some(self.type_expr(head))) {
+            let fst = match elems.next().map(|head| self.type_expr(head)) {
                 Some(ty) => ty?,
                 None => todo!(),
             };
@@ -1811,7 +1805,7 @@ mod util {
         // to be the first place-value at which the mask no longer overlaps
         let mut place: usize = 0;
         while (n.saturating_sub(1) & mask) != 0 {
-            mask = mask << 1;
+            mask <<= 1;
             place += 1;
         }
         //place.saturating_sub(1)

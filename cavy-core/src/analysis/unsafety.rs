@@ -66,22 +66,19 @@ impl<'a> UnsafeAnalysis<'a> {
 
 impl<'a> SummaryAnalysis for UnsafeAnalysis<'a> {
     fn trans_stmt(&mut self, stmt: &mir::Stmt, _loc: &GraphPt) {
-        match stmt.kind {
-            mir::StmtKind::Assert(_) => {
-                if !stmt.scope_data.in_unsafe {
-                    self.violations.push(UnsafeOperation {
-                        kind: UnsafetyKind::Assert,
-                        span: stmt.span,
-                    })
-                }
+        if let mir::StmtKind::Assert(_) = stmt.kind {
+            if !stmt.scope_data.in_unsafe {
+                self.violations.push(UnsafeOperation {
+                    kind: UnsafetyKind::Assert,
+                    span: stmt.span,
+                })
             }
-            _ => {}
         }
     }
 
     fn trans_block(&mut self, block: &BlockKind, _loc: &BlockId) {
         if let BlockKind::Call(call) = block {
-            if self.unsafe_call(&call) {
+            if self.unsafe_call(call) {
                 self.violations.push(UnsafeOperation {
                     kind: UnsafetyKind::UnsafeCall(call.callee),
                     span: call.span,

@@ -74,7 +74,7 @@ impl<'a> Destructor<'a> {
     fn from_parents(parents: &[&Place], st: &InterpreterState<'a>) -> Self {
         let parents = parents
             .iter()
-            .map(|parent| st.destructors.get(parent).map(|dest| dest.clone()))
+            .map(|parent| st.destructors.get(parent).cloned())
             .flatten()
             .flatten()
             .collect();
@@ -209,7 +209,7 @@ impl<'a> Circ<'a> {
     {
         CircAssembler {
             allocators: &mut self.allocators,
-            ctx: &self.ctx,
+            ctx: self.ctx,
             gate_buf: &mut self.gate_buf,
             controls: &self.controls,
             qsink: None,
@@ -227,7 +227,7 @@ impl<'a> Circ<'a> {
     {
         CircAssembler {
             allocators: &mut self.allocators,
-            ctx: &self.ctx,
+            ctx: self.ctx,
             gate_buf: &mut self.gate_buf,
             controls: &self.controls,
             qsink,
@@ -315,7 +315,7 @@ impl<'a> Interpreter<'a> {
         let params = std::iter::once(caller_ret_adr).chain(caller_arg_adrs);
         st.mem_init(
             params,
-            &mut self.circ.borrow_mut().allocators,
+            self.circ.borrow_mut().allocators,
             &self.mir_facts[*callee].shared_mem_borrows,
         );
 
@@ -374,7 +374,7 @@ impl<'a> Interpreter<'a> {
 
     fn exec_stmt(&mut self, stmt: &Stmt) {
         match &stmt.kind {
-            StmtKind::Assn(place, rvalue) => self.exec_assn(&place, &rvalue),
+            StmtKind::Assn(place, rvalue) => self.exec_assn(place, rvalue),
             StmtKind::Assert(_place) => {
                 // See, this is why we need these analysis things. It's really
                 // pretty hard to say whether something has been asserted from

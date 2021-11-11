@@ -56,10 +56,8 @@ fn optimize_graph(gr: &mut Graph, ctx: &Context) {
                 if data.defs.len() == 1 {
                     if data.uses.len() == 1 {
                         Some((data.defs[0], data.uses[0]))
-                    } else if let Some(drop) = data.drop {
-                        Some((data.defs[0], (drop, Terminal)))
                     } else {
-                        None
+                        data.drop.map(|drop| (data.defs[0], (drop, Terminal)))
                     }
                 } else {
                     None
@@ -161,7 +159,7 @@ fn replace_places_at(
         match &mut block.kind {
             Call(call) => {
                 for arg in call.args.iter_mut() {
-                    replace_place_op(arg, place, &prev);
+                    replace_place_op(arg, place, prev);
                 }
                 if !last {
                     // debug_assert_eq!(call.args.len(), 1);
@@ -370,16 +368,12 @@ fn matching_arg<'s>(
 ) -> Option<(usize, &'s Operand)> {
     // Use the first argument of the same type as the return value
     let ret_ty = gr.type_of(&call.ret, ctx);
-    call.args
-        .iter()
-        .enumerate()
-        .filter(
-            |(_, arg)| match arg.place().map(|place| gr.type_of(place, ctx)) {
-                Some(ty) => ty == ret_ty,
-                _ => false,
-            },
-        )
-        .next()
+    call.args.iter().enumerate().find(|(_, arg)| {
+        match arg.place().map(|place| gr.type_of(place, ctx)) {
+            Some(ty) => ty == ret_ty,
+            _ => false,
+        }
+    })
 }
 
 fn use_operand(use_data: &mut PlaceStore<UseData>, op: &Operand, pt: GraphPt, term: TerminalUse) {
@@ -399,7 +393,7 @@ enum Action {
 
 fn insert_action(use_data: &mut PlaceStore<UseData>, place: &Place, pt: GraphPt, action: Action) {
     let node = use_data.create_node(place);
-    let data = node.this.get_or_insert_with(|| UseData::default());
+    let data = node.this.get_or_insert_with(UseData::default);
     match action {
         Action::Def => data.defs.push(pt),
         Action::Use(term) => data.uses.push((pt, term)),

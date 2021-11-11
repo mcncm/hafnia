@@ -50,21 +50,17 @@ pub fn control_places(gr: &Graph, _postdom: &Store<BlockId, Dominators>) -> Cont
             if preds[curr].len() > 1 {
                 merges += 1;
             }
-            match &gr[*prev].kind {
-                BlockKind::Switch(switch) => {
-                    if merges == 0 {
-                        let place = switch.cond.clone();
-                        let branch = switch.blks.iter().enumerate().find(|(_, &blk)| blk == curr);
-                        let (branch, _) = branch.unwrap();
-                        let value = branch == 1; // *RIDICULOUS* hackery
-                        ctrls.push(CtrlCond { place, value });
-                    }
-
-                    merges = merges.saturating_sub(1);
+            if let BlockKind::Switch(switch) = &gr[*prev].kind {
+                if merges == 0 {
+                    let place = switch.cond.clone();
+                    let branch = switch.blks.iter().enumerate().find(|(_, &blk)| blk == curr);
+                    let (branch, _) = branch.unwrap();
+                    let value = branch == 1; // *RIDICULOUS* hackery
+                    ctrls.push(CtrlCond { place, value });
                 }
-                _ => {
-                    // unreachable!("I assumed that block could not be postdominated")
-                }
+                merges = merges.saturating_sub(1);
+            } else {
+                // unreachable!("I assumed that block could not be postdominated")
             }
             curr = *prev;
         }

@@ -234,7 +234,7 @@ impl TokenBuf {
     }
 
     fn digest(&mut self) -> String {
-        std::mem::replace(&mut self.chars, String::new())
+        std::mem::take(&mut self.chars)
     }
 
     fn clear(&mut self) {

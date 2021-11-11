@@ -39,7 +39,7 @@ struct BorrowChecker<'a> {
 
 impl<'a> BorrowChecker<'a> {
     fn run(mut self) {
-        let actions = ActionStream::new(&self.context);
+        let actions = ActionStream::new(self.context);
         for action in actions {
             self.check(action);
         }
@@ -195,7 +195,7 @@ impl<'a> ActionStream<'a> {
         let mut blocks = context.gr.idx_enumerate();
         let (blk, block) = blocks.next().expect("CFG without any blocks");
         Self {
-            ctx: &context.ctx,
+            ctx: context.ctx,
             locals: &context.gr.locals,
             blockstream: Box::new(blocks),
             pt: GraphPt::first(blk),
@@ -258,8 +258,8 @@ impl<'a> ActionStream<'a> {
             None => return,
         };
 
-        let ty = self.locals.type_of(place, &self.ctx);
-        let kind = if ty.is_affine(&self.ctx) {
+        let ty = self.locals.type_of(place, self.ctx);
+        let kind = if ty.is_affine(self.ctx) {
             ActionKind::Move
         } else {
             ActionKind::Copy
@@ -277,8 +277,8 @@ impl<'a> ActionStream<'a> {
                 //
                 // No, that's not true; it could be classical, and we could
                 // overwrite it.
-                let ty = self.locals.type_of(&switch.cond, &self.ctx);
-                let kind = if ty.is_coherent(&self.ctx) {
+                let ty = self.locals.type_of(&switch.cond, self.ctx);
+                let kind = if ty.is_coherent(self.ctx) {
                     ActionKind::GuardImmut
                 } else {
                     ActionKind::GuardMut

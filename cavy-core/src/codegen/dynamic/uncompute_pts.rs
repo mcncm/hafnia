@@ -71,6 +71,7 @@ pub fn cfg_facts(gr: &Graph, ctx: &Context) -> CfgFacts {
                 if lts.contains(&ascr.lt) {
                     ending_locals.push(local);
                 }
+                // FIXME 1: loop never loops. Why?
                 break;
             }
         }
@@ -111,8 +112,8 @@ fn lifetime_ends(regions: &RegionInf, gr: &Graph) -> BTreeMap<GraphPt, Vec<LtId>
                     blk,
                     stmt: gr[blk].stmts.len(),
                 };
-                let lts = lts_at(pt, regions);
-                lts
+
+                lts_at(pt, regions)
             })
             .fold(empty(regions), |acc, elem| acc | elem);
         // first statement looks at pred blocks
@@ -202,18 +203,12 @@ fn shared_mem_borrows<'a>(gr: &'a Graph, regions: &RegionInf) -> HashMap<LocalId
     // and just take all the lhses from match some place whose root is only
     // borrowed once in the CFG.
     for (_, stmt) in stmts {
-        match &stmt.kind {
-            StmtKind::Assn(lhs, rhs) => match &rhs.data {
-                RvalueKind::Ref(_, place) => {
-                    if uniq_loan_places.contains(place) {
-                        if lhs.path.is_empty() {
-                            shared_mem_refs.insert(lhs.root, place.clone());
-                        }
-                    }
+        if let StmtKind::Assn(lhs, rhs) = &stmt.kind {
+            if let RvalueKind::Ref(_, place) = &rhs.data {
+                if uniq_loan_places.contains(place) && lhs.path.is_empty() {
+                    shared_mem_refs.insert(lhs.root, place.clone());
                 }
-                _ => {}
-            },
-            _ => {}
+            }
         }
     }
     shared_mem_refs

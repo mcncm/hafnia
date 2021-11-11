@@ -18,8 +18,8 @@ pub use super::ascription::LoanId;
 bitset! { LocalLoans(LoanId) }
 
 pub fn loan_scopes(regions: &RegionInf, context: &DataflowCtx) -> StmtStates<LocalLoans> {
-    let loan_ana = LiveLoanAnalysis::new(&regions);
-    DataflowRunner::new(loan_ana, &context).run().stmt_states
+    let loan_ana = LiveLoanAnalysis::new(regions);
+    DataflowRunner::new(loan_ana, context).run().stmt_states
 }
 
 impl Lattice for LocalLoans {
@@ -90,7 +90,7 @@ impl<'a> LiveLoanAnalysis<'a> {
             // Kill loans whose regions are not in the point.
             if !self.lifetimes[loan.ascr.lt].contains(&pt) {
                 *bit = false;
-                return;
+                
             }
         });
     }

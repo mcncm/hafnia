@@ -87,7 +87,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
         if let Some(sink) = &mut self.qsink {
             sink.push(gate.clone());
         }
-        gate.ctrls.extend(self.controls.clone());
+        gate.ctrls.extend(self.controls);
 
         if self.ctx.conf.rerep {
             self.rerep_qgate(gate);
@@ -131,7 +131,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
             ] {
                 self.push_cgate_inner(GateC {
                     ctrls: gate.ctrls.clone(),
-                    base: base.clone().into(),
+                    base: (*base).into(),
                 })
             }
         } else {
@@ -153,21 +153,18 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
     /// physically-realizable gate set.
     fn rerep_qgate(&mut self, mut gate: GateQ) {
         use BaseGateQ::*;
-        match gate.base {
-            Phase(u, phase) => {
-                if phase == 1.0 || phase == -1.0 {
-                    gate.base = Z(u);
-                } else if phase == 0.5 {
-                    gate.base = S(u);
-                } else if phase == -0.5 {
-                    gate.base = SDag(u);
-                } else if phase == 0.25 {
-                    gate.base = T(u);
-                } else if phase == 0.25 {
-                    gate.base = TDag(u);
-                }
+        if let Phase(u, phase) = gate.base {
+            if phase == 1.0 || phase == -1.0 {
+                gate.base = Z(u);
+            } else if phase == 0.5 {
+                gate.base = S(u);
+            } else if phase == -0.5 {
+                gate.base = SDag(u);
+            } else if phase == 0.25 {
+                gate.base = T(u);
+            } else if phase == -0.25 {
+                gate.base = TDag(u);
             }
-            _ => {}
         }
         self.push_qgate_inner(gate);
     }
@@ -269,13 +266,13 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
 
     /// Apply a Z gate to all the qubits
     pub fn map_phase(&mut self, obj: &BitSlice) {
-        let phase = |u| BaseGateQ::Z(u);
+        let phase = BaseGateQ::Z;
         self.mapgate_sq(obj, phase);
     }
 
     /// Apply an H gate to all the qubits
     pub fn map_hadamard(&mut self, obj: &BitSlice) {
-        let split = |u| BaseGateQ::H(u);
+        let split = BaseGateQ::H;
         self.mapgate_sq(obj, split);
     }
 
@@ -339,7 +336,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
             debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
             let quant = |(_, tgt, ctrl)| BaseGateQ::Cnot { ctrl, tgt };
             let class = |(_, tgt, ctrl)| BaseGateC::Cnot { ctrl, tgt };
-            self.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
+            self.mapgate_pair(lhs, rhs, Some(quant), Some(class));
         }
     }
 
@@ -350,7 +347,7 @@ impl<'a, 'c> CircAssembler<'a, 'c> {
             debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
             let quant = |(_, fst, snd)| BaseGateQ::Swap(fst, snd);
             let class = |(_, fst, snd)| BaseGateC::Swap(fst, snd);
-            self.mapgate_pair(&lhs, &rhs, Some(quant), Some(class));
+            self.mapgate_pair(lhs, rhs, Some(quant), Some(class));
         }
     }
 

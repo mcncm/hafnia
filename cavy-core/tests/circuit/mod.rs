@@ -29,17 +29,17 @@ pub fn test_unitary_inner(src: &'static str, exp_gates: Vec<Inst>) -> io::Result
     let mut stats = cavy_core::session::Statistics::new();
     let conf = cavy_core::session::Config::default();
     let mut ctx = cavy_core::context::Context::new(&conf, &mut stats);
-    let id = ctx.srcs.insert_input(&src);
+    let id = ctx.srcs.insert_input(src);
     let circ = cavy_core::compile::compile_circuit(id, &mut ctx)
         .unwrap()
         .unwrap();
 
     let max_qubit: u32 = circ.max_qbit.unwrap().into();
-    let true_gates: String = circ.into_iter().map(|inst| inst_to_circ(inst)).collect();
+    let true_gates: String = circ.into_iter().map(inst_to_circ).collect();
 
     let exp_gates: String = exp_gates
         .into_iter()
-        .map(|inst| inst_to_circ(inst))
+        .map(inst_to_circ)
         .collect();
 
     let script = format!(

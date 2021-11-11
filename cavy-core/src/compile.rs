@@ -33,7 +33,7 @@ pub fn compile_circuit(
     ctx.stats.tick("lowering");
     if ctx.last_phase() == &Phase::Typecheck {
         if ctx.conf.debug {
-            println!("{}", mir.fmt_with(&ctx));
+            println!("{}", mir.fmt_with(ctx));
         }
         return Ok(None);
     }
@@ -48,7 +48,7 @@ pub fn compile_circuit(
     ctx.stats.tick("optimization");
     if ctx.last_phase() == &Phase::Optimization {
         if ctx.conf.debug {
-            println!("{}", mir.fmt_with(&ctx));
+            println!("{}", mir.fmt_with(ctx));
         }
         return Ok(None);
     }
@@ -74,5 +74,5 @@ pub fn compile_target(
     ctx: &mut Context,
     target: Box<dyn Target>,
 ) -> Result<Option<ObjectCode>, ErrorBuf> {
-    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| target.from(circ, &ctx)))
+    compile_circuit(entry_point, ctx).map(|opt| opt.map(|circ| target.from(circ, ctx)))
 }

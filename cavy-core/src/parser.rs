@@ -876,7 +876,7 @@ impl<'p, 'ctx> Parser<'p, 'ctx> {
             }
             Some(LDelim(Bracket)) => {
                 let opening = self.token()?.span;
-                return self.finish_array(opening);
+                self.finish_array(opening)
             }
             _ => self.call(),
         }

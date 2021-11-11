@@ -58,7 +58,7 @@ pub fn ascribe<'l, 'a>(
     }
     // Loans also have lifetimes. They may coincide with the lifetime of the
     // borrower, but they don't need to!
-    ascriber.ascribe_loans(&context.gr);
+    ascriber.ascribe_loans(context.gr);
 
     ascriber.ascriptions
 }
@@ -95,11 +95,11 @@ impl<'g> AscriptionStore<'g> {
     }
 
     pub fn get_ref(&self, pt: &GraphPt) -> Option<&Loan> {
-        self.refs.get(pt).and_then(|id| Some(&self.loans[*id]))
+        self.refs.get(pt).map(|id| &self.loans[*id])
     }
 
     /// Get all the livetime ascriptions to the type of `local`.
-    pub fn local_ascriptions<'a>(&'a self, local: LocalId) -> impl Iterator<Item = Ascr> + 'a {
+    pub fn local_ascriptions(&self, local: LocalId) -> impl Iterator<Item = Ascr> + '_ {
         self.place_ascriptions(&<Place>::from(local))
     }
 
@@ -154,9 +154,9 @@ impl<'l, 'a> Ascriber<'l, 'a> {
         let block_sizes = &self.block_sizes;
         if is_end {
             let lifetimes = &mut self.lifetimes;
-            self.end
+            *self
+                .end
                 .get_or_insert_with(|| lifetimes.end_region(block_sizes))
-                .clone()
         } else {
             self.lifetimes.new_region(block_sizes)
         }
@@ -165,29 +165,27 @@ impl<'l, 'a> Ascriber<'l, 'a> {
     fn ascribe_loans(&mut self, gr: &Graph) {
         // Doesn't matter what order we traverse the graph in; this is just a summary pass
         for (loc, stmt) in enumerate_stmts(gr) {
-            match &stmt.kind {
-                StmtKind::Assn(
-                    _,
-                    Rvalue {
-                        data: RvalueKind::Ref(kind, rhs),
-                        span,
-                    },
-                ) => {
-                    let lt = self.new_lifetime(false);
+            if let StmtKind::Assn(
+                _,
+                Rvalue {
+                    data: RvalueKind::Ref(kind, rhs),
+                    span,
+                },
+            ) = &stmt.kind
+            {
+                let lt = self.new_lifetime(false);
 
-                    let ascr = Ascr { kind: *kind, lt };
-                    let loan = Loan {
-                        ascr,
-                        span: *span,
-                        place: rhs.clone(),
-                        pt: loc,
-                    };
-                    let id = self.ascriptions.loans.insert(loan);
-                    let key = self.ascriptions.refs.insert(loc, id);
-                    // We better visit each line only once!
-                    debug_assert_eq!(key, None);
-                }
-                _ => {}
+                let ascr = Ascr { kind: *kind, lt };
+                let loan = Loan {
+                    ascr,
+                    span: *span,
+                    place: rhs.clone(),
+                    pt: loc,
+                };
+                let id = self.ascriptions.loans.insert(loan);
+                let key = self.ascriptions.refs.insert(loc, id);
+                // We better visit each line only once!
+                debug_assert_eq!(key, None);
             };
         }
     }

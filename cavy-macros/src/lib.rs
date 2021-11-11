@@ -203,7 +203,7 @@ impl<'ast> DiagnosticData<'ast> {
             }
         }
 
-        let msg = Self::get_msg(&ast);
+        let msg = Self::get_msg(ast);
         let (ctx_fields, dis_fields) = Self::fmt_fields(msg.clone(), fields);
 
         let msg = InterpolatedMessage {
@@ -233,10 +233,7 @@ impl<'ast> DiagnosticData<'ast> {
     }
 
     /// Get the names of fields that should be interpolated into a given message.
-    fn fmt_fields<'a>(
-        msg: syn::Lit,
-        fields: &'a Punctuated<Field, Comma>,
-    ) -> (Vec<&'a Ident>, Vec<&'a Ident>) {
+    fn fmt_fields(msg: syn::Lit, fields: &Punctuated<Field, Comma>) -> (Vec<&Ident>, Vec<&Ident>) {
         // Identify which fields are interpolated into this message
         let fmt_fields = Self::find_fmt_fields(&msg);
         // Now we iterate through the fields again, this time in order to split

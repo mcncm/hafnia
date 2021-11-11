@@ -12,7 +12,7 @@ use std::fmt;
 use cavy_core::{cavy_errors, compile, context::Context, default_context, source, util::FmtWith};
 use proc_macro::{Delimiter, Group, LineColumn, TokenStream, TokenTree};
 use quote::quote;
-use syn;
+
 
 mod types;
 
@@ -90,7 +90,7 @@ fn emit_diagnostic(
     let spans: Vec<proc_macro::Span> = err
         .spans()
         .into_iter()
-        .map(|report| translate_span(report.span, &rspans, ctx))
+        .map(|report| translate_span(report.span, rspans, ctx))
         .collect();
     let diag = proc_macro::Diagnostic::spanned(spans, level, msg);
     diag.emit();

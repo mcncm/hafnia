@@ -356,6 +356,7 @@ impl<Idx: Index, V> Store<Idx, V> {
         self.backing_store.iter_mut()
     }
 
+    // FIXME 4: could be standard trait implementation
     pub fn into_iter(self) -> std::vec::IntoIter<V> {
         self.backing_store.into_iter()
     }
@@ -385,13 +386,15 @@ impl<Idx: Index, V> Store<Idx, V> {
             .collect();
     }
 
-    // Safety: `idx` out of bounds is undefined behavior
+    /// # Safety
+    /// `idx` out of bounds is undefined behavior
     pub unsafe fn get_unchecked_mut(&mut self, idx: Idx) -> &mut V {
         self.backing_store.get_unchecked_mut(idx.into() as usize)
     }
 
-    // Safety: `idx` out of bounds is undefined behavior; `fst` and `snd` must
-    // not be equal.
+    /// # Safety
+    /// `idx` out of bounds is undefined behavior; `fst` and `snd` must
+    /// not be equal.
     pub unsafe fn get_two_unchecked_mut(&mut self, fst: Idx, snd: Idx) -> (&mut V, &mut V) {
         let fst = &mut *(self.get_unchecked_mut(fst) as *mut _);
         let snd = &mut *(self.get_unchecked_mut(snd) as *mut _);

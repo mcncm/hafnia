@@ -45,7 +45,7 @@ impl Target for Summary {
                 },
                 Inst::QGate(g) => {
                     use BaseGateQ::*;
-                    if g.ctrls.len() > 0 || g.is_swap() || g.is_cx() {
+                    if !g.ctrls.is_empty() || g.is_swap() || g.is_cx() {
                         mqgates += 1;
 
                         if g.is_cx() {
@@ -136,6 +136,6 @@ impl Target for Summary {
                 unreachable!();
             }
         }
-        format!("{}", serde_json::to_string_pretty(&stats).unwrap())
+        serde_json::to_string_pretty(&stats).unwrap()
     }
 }

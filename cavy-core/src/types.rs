@@ -306,11 +306,7 @@ pub enum Discriminant {
 
 impl Discriminant {
     fn is_affine(&self) -> bool {
-        if let Self::Q(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Q(_))
     }
 }
 
@@ -499,7 +495,7 @@ impl Type {
                     .iter()
                     .map(|ty| ty.size_inner(interner))
                     .scan(Offset::zero(), |offset, sz| {
-                        let prev_offset = offset.clone();
+                        let prev_offset = *offset;
                         *offset = *offset + *sz;
                         Some(prev_offset)
                     })
@@ -517,7 +513,7 @@ impl Type {
                     return vec![Offset::from(tag_size)];
                 } else {
                     let tuple = udt.as_tuple();
-                    return tuple.offsets(interner);
+                    tuple.offsets(interner)
                 }
             }
             // There should be one offset *to the owned data*, which is just
