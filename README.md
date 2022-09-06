@@ -1,25 +1,25 @@
 
 <div align="center">
-<img src="assets/cavies.svg" width=400 alt="Cavy logo: a capybara with pups."></img>
+<img src="assets/cavies.svg" width=400 alt="Hafnia logo: a capybara with pups."></img>
 </div>
 
 # Overview
 
-[![Build Status](https://travis-ci.com/mcncm/cavy-lang.svg?token=wTZePJvDpqqWnfcvqYkS&branch=main)](https://travis-ci.com/mcncm/cavy-lang)
+[![Build Status](https://travis-ci.com/mcncm/hafnia-lang.svg?token=wTZePJvDpqqWnfcvqYkS&branch=main)](https://travis-ci.com/mcncm/hafnia-lang)
 
-Cavy is a little imperative programming language for quantum computers.
+Hafnia is a little imperative programming language for quantum computers.
 
 For everyday programmers, it's designed to be accessible without cheating you
 out of correctness. For working scientists, it's meant to give you more powerful
 tools of abstraction than you're likely used to, and aspires to run on any
 platform you might need.
 
-You'll feel right at home here if you're familiar with Rust[2], but Cavy is a much
+You'll feel right at home here if you're familiar with Rust[2], but Hafnia is a much
 simpler language. The compiler generates code in multiple executable and
 representational low-level circuit languages, including OpenQASM and Quantikz,
 the LaTeX quantum circuits package. You can run it as a standalone compiler, a
 REPL, or a domain-specific language within Rust or your favorite scripting
-language. It even has an [Emacs mode](https://github.com/mcncm/cavy-mode)!
+language. It even has an [Emacs mode](https://github.com/mcncm/hafnia-mode)!
 
 This is not the only quantum programming language out there. Both academic and
 corporate researchers have written their own, some of which I've drawn
@@ -28,13 +28,13 @@ Some are not at all abstracted from the quantum circuit model. Some are closely
 tied to one platform. Many are either embedded in some difficult
 metalanguage<sup>1</sup>, or are better understood as bare-bones
 circuit-building libraries. They're all perfectly nice, though--I just wanted
-one with Cavy's features! I hope you enjoy it, too.
+one with Hafnia's features! I hope you enjoy it, too.
 
 **All the examples below are written as though the implementation were complete,
 which it is not. Only some of these things actually work, and they’re not
 documented yet.**
 
-[1] Cavy can also be used in this way, but need not be!
+[1] Hafnia can also be used in this way, but need not be!
 
 [2] Its syntax and semantics are *strongly* inspired by rust. As a result,
 you'll find that while its parser and backend are *de novo*, many of the IR data
@@ -45,14 +45,14 @@ that reading this repository (especially its `ast.rs` and `mir.rs`) isn't a bad
 way to get the gist of how `rustc` works.
 
 # Examples
-Because Cavy is a small language, we can get the gist of it by looking at
+Because Hafnia is a small language, we can get the gist of it by looking at
 some simple examples. These are also meant to teach the major points of
 departure of quantum mechanics from the classical intuition of most programmers.
 
 ## Quantum random number generation
 One of the main applications of quantum technologies used today is the
 production of entropy with the strongest possible guarantees of _true physical
-randomness_. Below is some sample Cavy code implementing a simple one-byte QRNG.
+randomness_. Below is some sample Hafnia code implementing a simple one-byte QRNG.
 
 ```rust
 let q: ?u8 = 0;  // Declare a "qubyte" unsigned int, deterministically initialized to 0.
@@ -73,7 +73,7 @@ terminological coincidence (or is it?), this is exactly the
 [constraint](https://en.wikipedia.org/wiki/No-cloning_theorem) imposed on
 quantum states by the
 [linearity](https://en.wikipedia.org/wiki/Quantum_superposition) of quantum
-mechanics. In Cavy, the _relevance_ (must-use) constraint is relaxed; as in
+mechanics. In Hafnia, the _relevance_ (must-use) constraint is relaxed; as in
 Rust, values are "dropped" when they go out of scope. However, we’re constrained
 by an extra rule, that linear values _have no concrete value_ until they’re
 unwrapped in a specific way. If this were not so, it would cause all kinds of
@@ -128,7 +128,7 @@ is called, both the |0⟩ and
 ```
 
 but one of the sub-branches picks up a minus sign, annihilating the weight on
-|1⟩ through _interference_. This isn't a design choice within Cavy; the [laws of quantum mechanics](https://en.wikipedia.org/wiki/Unitarity_(physics)) dictate this minus sign. Every call to `split` really _does_ split the wavefunction on the current branch, but the value-dependent sign causes some branches to wash out.
+|1⟩ through _interference_. This isn't a design choice within Hafnia; the [laws of quantum mechanics](https://en.wikipedia.org/wiki/Unitarity_(physics)) dictate this minus sign. Every call to `split` really _does_ split the wavefunction on the current branch, but the value-dependent sign causes some branches to wash out.
 
 ## Entanglement generation
 We can create an entangled pair like this:
@@ -158,7 +158,7 @@ quadratic one, but a speedup nonetheless!).
 
 Suppose we have a subroutine
 
-```cavy
+```hafnia
 mem <- qalloc(n);
 
 ```
@@ -167,29 +167,29 @@ mem <- qalloc(n);
 # Installation
 
 ## On your personal computer
-You can build and install a Cavy binary with Cargo. Clone the repository, `cd`
-to the Cavy directory, and run `$ cargo build --release && cargo install --path
+You can build and install a Hafnia binary with Cargo. Clone the repository, `cd`
+to the Hafnia directory, and run `$ cargo build --release && cargo install --path
 .`. Make sure that `~/.cargo/bin` is in your `PATH` variable. It should build
 and run on Rust stable, beta, and nightly, and on Linux, MacOS, and Windows. I
 don’t anticipate any architecture-dependence, but am curious to know if it
-builds and runs on aarch64. Cavy currently requires rustc >= 1.48.0.
+builds and runs on aarch64. Hafnia currently requires rustc >= 1.48.0.
 
 ## For your quantum computing infrastructure
-Cavy is probably too unstable for most experimental research, but if you’re
-interested in learning more, please email `cavy` dash `lang` dash `support` at
+Hafnia is probably too unstable for most experimental research, but if you’re
+interested in learning more, please email `hafnia` dash `lang` dash `support` at
 `mit` dot `edu`.
 
 # Usage
 
-You can invoke the cavy compiler binary as `cavy`. If given no command line
+You can invoke the hafnia compiler binary as `hafnia`. If given no command line
 arguments, it spawns a REPL.
 
 ## Interfacing with scripting languages
 
 ### Python
-You can call the Cavy compiler from Python through
-[pycavy](https://github.com/mcncm/pycavy) wrapper, which provides utility
-functions for compiling Cavy programs and loading them as
+You can call the Hafnia compiler from Python through
+[pyhafnia](https://github.com/mcncm/pyhafnia) wrapper, which provides utility
+functions for compiling Hafnia programs and loading them as
 [https://github.com/quantumlib/Cirq](Cirq) and [https://qiskit.org/](Qiskit)
 circuits.
 
@@ -198,18 +198,18 @@ If I hear of any interest from the community, I would be happy to put out
 similar wrappers for Javascript, Ruby, Julia, and so on.
 
 ## As a Rust crate
-The Cavy crate will (soon) export a convenience macro for compiling and
-executing inline Cavy programs.
+The Hafnia crate will (soon) export a convenience macro for compiling and
+executing inline Hafnia programs.
 
 # Features
 
 # Development
 
-Cavy has an Emacs major mode,
-[cavy-mode.el](https://github.com/mcncm/cavy-mode), which provides syntax
+Hafnia has an Emacs major mode,
+[hafnia-mode.el](https://github.com/mcncm/hafnia-mode), which provides syntax
 highlighting and object code display (in QASM or as a LaTeX circuit).
 
 # Contributing
 If you discover a bug, want to contribute to the compiler, or talk about its
-design and goals, please open an issue and/or email `cavy` dash `lang` dash
+design and goals, please open an issue and/or email `hafnia` dash `lang` dash
 `support` at `mit` dot `edu`. Pull requests are welcome!

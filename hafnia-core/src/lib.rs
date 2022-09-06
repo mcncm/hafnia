@@ -1,0 +1,41 @@
+//! This is the main library crate for the Hafnia language compiler. It's used by
+//! all drivers of the compiler, including the `hafniac` command-line interface
+//! and the `pyhafnia` Python package. You can also use it as an ordinary Rust
+//! crate, to include Hafnia as a domain-specific language within your Rust
+//! programs.
+
+#![allow(clippy::new_without_default)]
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+// pub mod alloc;
+pub mod analysis;
+pub mod arch;
+pub mod ast;
+pub mod hafnia_errors;
+pub mod circuit;
+pub mod codegen;
+pub mod compile;
+#[macro_use]
+pub mod context;
+pub mod mir;
+pub mod opt;
+pub mod session;
+// pub mod environment;
+// pub mod functions;
+// pub mod interpreter;
+// pub mod inference;
+pub mod parser;
+// pub mod qram;
+pub mod lowering;
+pub mod num;
+pub(crate) mod place_tree;
+pub mod scanner;
+pub mod source;
+pub mod store;
+pub mod sys;
+pub mod target;
+pub mod token;
+pub mod types;
+pub mod util;
+pub mod values;

@@ -1,0 +1,19 @@
+[package]
+name = "hafnia"
+version = "0.1.0"
+authors = ["mcncm <33966432+mcncm@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hafnia-core = { path = "../hafnia-core" }
+
+[dependencies.hafnia-inline]
+optional = true
+path = "../hafnia-inline"
+
+[features]
+default = []
+inline = ["hafnia-inline", "hafnia-core/serde", "hafnia-core/serde_json"]
+summary = ["hafnia-core/summary"]

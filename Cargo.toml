@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "cavy",
-    "cavy-core",
-    "cavy-macros",
-    "cavy-cli",
-    "cavy-inline",
+    "hafnia",
+    "hafnia-core",
+    "hafnia-macros",
+    "hafnia-cli",
+    "hafnia-inline",
 ]
-default-members = ["cavy-cli"]
+default-members = ["hafnia-cli"]
 
 [profile.release]
 lto = "fat"

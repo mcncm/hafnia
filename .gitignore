@@ -1,8 +1,8 @@
 /target
-/cavy-core/target
+/hafnia-core/target
 /examples
 /std
-/cavy/target
+/hafnia/target
 *.qasm
 __pycache__
 result
