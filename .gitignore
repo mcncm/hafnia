@@ -5,3 +5,4 @@
 /cavy/target
 *.qasm
 __pycache__
+result
