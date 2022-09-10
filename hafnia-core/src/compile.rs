@@ -1,8 +1,8 @@
 use crate::{
     arch::Arch,
-    hafnia_errors::ErrorBuf,
     circuit::CircuitBuf,
     context::Context,
+    hafnia_errors::ErrorBuf,
     lowering, parser, scanner,
     session::Phase,
     source::{SrcId, SrcObject},
@@ -33,7 +33,7 @@ pub fn compile_circuit(
     ctx.stats.tick("lowering");
     if ctx.last_phase() == &Phase::Typecheck {
         if ctx.conf.debug {
-            println!("{}", mir.fmt_with(&ctx));
+            println!("{}", mir.fmt_with(ctx));
         }
         return Ok(None);
     }
@@ -48,7 +48,7 @@ pub fn compile_circuit(
     ctx.stats.tick("optimization");
     if ctx.last_phase() == &Phase::Optimization {
         if ctx.conf.debug {
-            println!("{}", mir.fmt_with(&ctx));
+            println!("{}", mir.fmt_with(ctx));
         }
         return Ok(None);
     }

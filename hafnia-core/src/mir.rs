@@ -464,9 +464,9 @@ impl Place {
             return false;
         }
 
-        let mut this = self.path.iter();
+        let this = self.path.iter();
         let mut other = other.path.iter();
-        while let Some(l) = this.next() {
+        for l in this {
             if !(other.next() == Some(l) && pred(l, true)) {
                 return false;
             }

@@ -17,7 +17,7 @@ pub fn optimize(mir: &mut Mir, _ctx: &Context) {
 fn simpl_graph(gr: &mut Graph) {
     let mut checker = StrandChecker::new();
     for block in gr.iter_mut() {
-        &mut checker.simplify(block);
+        checker.simplify(block);
     }
 }
 
@@ -117,7 +117,7 @@ impl Strand {
 
     /// Merge the edit intervals
     fn merge(mut self) -> MergedStrand {
-        if self.edits.len() == 0 {
+        if self.edits.is_empty() {
             return MergedStrand(self);
         }
 

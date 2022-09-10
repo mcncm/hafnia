@@ -77,16 +77,12 @@ impl<'a> DataflowCtx<'a> {
     /// Iterate over all the points in the graph, including block tails, in no
     /// particular order.
     pub fn iter_pts(&self) -> impl Iterator<Item = GraphPt> + '_ {
-        self.block_sizes
-            .iter()
-            .enumerate()
-            .map(|(blk, sz)| {
-                (0..*sz).map(move |stmt| GraphPt {
-                    blk: BlockId::from(blk as u32),
-                    stmt,
-                })
+        self.block_sizes.iter().enumerate().flat_map(|(blk, sz)| {
+            (0..*sz).map(move |stmt| GraphPt {
+                blk: BlockId::from(blk as u32),
+                stmt,
             })
-            .flatten()
+        })
     }
 }
 
@@ -433,7 +429,7 @@ where
     /// for both granularities.
     fn init_block_states(&mut self) {
         let bot = self.analysis.bottom();
-        let states = std::iter::repeat(bot.clone()).take(self.gr.len());
+        let states = std::iter::repeat(bot).take(self.gr.len());
         self.block_states.extend(states);
     }
 
@@ -451,9 +447,9 @@ where
     G: Granularity,
     Self: Update<A, D, G>,
 {
-    fn successors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId];
+    fn successors(&self, blk_id: BlockId) -> &[BlockId];
 
-    fn predecessors<'b>(&'b self, blk_id: BlockId) -> &'b [BlockId];
+    fn predecessors(&self, blk_id: BlockId) -> &[BlockId];
 
     fn propagate(&mut self, state: &mut A::Domain, blk: BlockId);
 }

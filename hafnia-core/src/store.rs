@@ -193,11 +193,11 @@ macro_rules! bitset {
 
         impl $name {
             pub fn full(n: usize) -> Self {
-                Self(crate::store::BitSet::<$I>::full(n))
+                Self($crate::store::BitSet::<$I>::full(n))
             }
 
             pub fn empty(n: usize) -> Self {
-                Self(crate::store::BitSet::<$I>::empty(n))
+                Self($crate::store::BitSet::<$I>::empty(n))
             }
 
             pub fn contains(&self, idx: &$I) -> bool {
@@ -306,16 +306,16 @@ macro_rules! store_type {
 
     // This branch is for making a store
     ($store:ident : $index:ident -> $V:ty) => {
-        crate::index_type! { $index }
-        pub type $store = crate::store::Store<$index, $V>;
+        $crate::index_type! { $index }
+        pub type $store = $crate::store::Store<$index, $V>;
     };
 }
 
 #[macro_export]
 macro_rules! interner_type {
     ($interner:ident : $index:ident -> $V:ty) => {
-        crate::index_type! { $index }
-        pub type $interner = crate::store::Interner<$index, $V>;
+        $crate::index_type! { $index }
+        pub type $interner = $crate::store::Interner<$index, $V>;
     };
 }
 

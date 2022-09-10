@@ -7,7 +7,7 @@ pub fn check_linearity(context: &DataflowCtx, errs: &mut ErrorBuf) {
     let linearity_ana = LinearityAnalysis {
         locals: context.gr.locals.len(),
     };
-    let moves = &DataflowRunner::new(linearity_ana, &context)
+    let moves = &DataflowRunner::new(linearity_ana, context)
         .run()
         // This is sort of, but not *quite* correct. I can't fix it right
         // now, but it is a little troubling.
@@ -118,15 +118,17 @@ impl MoveState {
             }
         });
         //Is there any "get_or_insert" with an optional insert?
-        let prev = node.this.clone().or(ancestor.or_else(|| {
-            // A bit of an odd choice of iterator, but it works
-            let mut children = node
-                .slots
-                .iter()
-                .filter_map(|node| node.as_ref().map(|node| node.iter_post()))
-                .flatten();
-            children.next().cloned()
-        }));
+        let prev = node.this.clone().or_else(|| {
+            ancestor.or_else(|| {
+                // A bit of an odd choice of iterator, but it works
+                let mut children = node
+                    .slots
+                    .iter()
+                    .filter_map(|node| node.as_ref().map(|node| node.iter_post()))
+                    .flatten();
+                children.next().cloned()
+            })
+        });
         if new.is_some() {
             node.this = new;
         }

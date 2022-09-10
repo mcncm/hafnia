@@ -5,8 +5,8 @@
 
 use crate::{
     ast::{self, StmtKind, *},
-    hafnia_errors::{HafniaError, Diagnostic, ErrorBuf, Maybe},
     context::{Context, SymbolId},
+    hafnia_errors::{Diagnostic, ErrorBuf, HafniaError, Maybe},
     mir::{self, FnCall, *},
     num::{USmall, Uint},
     source::Span,
@@ -1386,8 +1386,6 @@ mod typing {
                         _ => {
                             if left == right && left.is_classical(self.ctx) {
                                 return Ok(self.ctx.common.bool);
-                            } else {
-                                ()
                             }
                         }
                     }
@@ -1515,12 +1513,10 @@ mod typing {
                 AssnOpKind::Xor => {
                     if lty.is_classical(self.ctx) {
                         lty == rty
+                    } else if let Type::Ref(RefKind::Shrd, rty_inner) = self.ctx.types[rty] {
+                        lty == rty_inner
                     } else {
-                        if let Type::Ref(RefKind::Shrd, rty_inner) = self.ctx.types[rty] {
-                            lty == rty_inner
-                        } else {
-                            false
-                        }
+                        false
                     }
                 }
             };

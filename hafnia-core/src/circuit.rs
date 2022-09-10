@@ -200,7 +200,7 @@ impl GateQ {
 
     pub fn is_cx(&self) -> bool {
         (matches!(self.base, BaseGateQ::X(_)) && self.ctrls.len() == 1)
-            || (matches!(self.base, BaseGateQ::Cnot { .. }) && self.ctrls.len() == 0)
+            || (matches!(self.base, BaseGateQ::Cnot { .. }) && self.ctrls.is_empty())
     }
 
     pub fn is_cz(&self) -> bool {
@@ -208,7 +208,7 @@ impl GateQ {
     }
 
     pub fn is_swap(&self) -> bool {
-        matches!(self.base, BaseGateQ::Swap(_, _)) && self.ctrls.len() == 0
+        matches!(self.base, BaseGateQ::Swap(_, _)) && self.ctrls.is_empty()
     }
 
     pub fn is_cswap(&self) -> bool {

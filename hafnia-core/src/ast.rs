@@ -140,7 +140,7 @@ impl Table {
     where
         F: Fn(&'a Self, &'a SymbolId) -> Option<&'a T>,
     {
-        match get_inner(self, &symb) {
+        match get_inner(self, symb) {
             v @ Some(_) => v,
             None => match self.parent {
                 Some(id) => {
@@ -846,8 +846,8 @@ pub enum GenericBinderKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Lifetime(pub SymbolId);
 
-impl Into<GenericBinderKind> for Lifetime {
-    fn into(self) -> GenericBinderKind {
-        GenericBinderKind::Lifetime(self)
+impl From<Lifetime> for GenericBinderKind {
+    fn from(val: Lifetime) -> Self {
+        GenericBinderKind::Lifetime(val)
     }
 }

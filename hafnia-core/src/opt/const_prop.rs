@@ -71,7 +71,7 @@ fn simpl_block(blk: BlockId, gr: &mut Graph, interp: &mut Interpreter) {
             // Replace args with compile-time evaluated ones
             for arg in call.args.iter_mut() {
                 if let Operand::Copy(place) | Operand::Move(place) = arg {
-                    if let Some(c) = interp.env.get(&place) {
+                    if let Some(c) = interp.env.get(place) {
                         *arg = Operand::Const(c.clone());
                     }
                 }

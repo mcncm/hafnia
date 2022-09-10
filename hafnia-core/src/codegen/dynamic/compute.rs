@@ -204,7 +204,7 @@ impl<'m> Interpreter<'m> {
                 assert_eq!(fst.cbits.len(), 0);
                 let snd = snd.qbits;
                 circ.map_cnot(fst, lhs);
-                circ.draper_addition(&lhs.qbits, snd);
+                circ.draper_addition(lhs.qbits, snd);
             }
             Minus => {}
             Times => {}
@@ -241,7 +241,7 @@ impl<'m> Interpreter<'m> {
             .destructors
             .create_node(place)
             .this
-            .get_or_insert_with(|| vec![]);
+            .get_or_insert_with(Vec::new);
         dest.clear();
         dest.push(Rc::new(RefCell::new(destructor)));
     }
@@ -277,8 +277,8 @@ impl<'m> Interpreter<'m> {
                     UnOpKind::Minus => todo!(),
                     UnOpKind::Linear => {
                         let mut circ = self.circ.borrow_mut();
-                        circ.map_init(&lhs);
-                        circ.cnot_const(&lhs, value);
+                        circ.map_init(lhs);
+                        circ.cnot_const(lhs, value);
                     }
                     UnOpKind::Not => todo!(),
                     _ => {}
@@ -309,7 +309,7 @@ impl<'m> Interpreter<'m> {
                     debug_assert!(!lhs.cbits.iter().zip(rhs.cbits.iter()).any(|(l, r)| l == r));
 
                     // This is actually the right order
-                    circ.map_cnot(&rhs, &lhs);
+                    circ.map_cnot(&rhs, lhs);
                 }
 
                 (rhs, Some(dest))
@@ -359,11 +359,11 @@ impl<'m> Interpreter<'m> {
             UnOpKind::Minus => todo!(),
 
             UnOpKind::Not => {
-                circ.map_not(&lhs);
+                circ.map_not(lhs);
             }
 
             UnOpKind::Split => {
-                circ.map_hadamard(&lhs);
+                circ.map_hadamard(lhs);
             }
 
             UnOpKind::Linear => {
@@ -374,10 +374,10 @@ impl<'m> Interpreter<'m> {
                 // ...Right? I *THINK* that's right. Ach, we *really* have to be sure about this case, though.
                 let not = |(_, ctrl, tgt)| BaseGateQ::X(tgt);
                 // This is the correct argument order. That could be confusing.
-                circ.mapgate_class_ctrl(&rhs, &lhs, Some(not));
+                circ.mapgate_class_ctrl(&rhs, lhs, Some(not));
             }
             UnOpKind::Delin => {
-                circ.meas(&rhs.qbits, &lhs.cbits, &self.st);
+                circ.meas(rhs.qbits, lhs.cbits, &self.st);
             }
         };
 

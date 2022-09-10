@@ -50,7 +50,7 @@ fn optimize_graph(gr: &mut Graph, ctx: &Context) {
     // TODO: clean up this mess, it's hard to read
     let single_def_use: HashMap<_, _> = use_data
         .iter()
-        .map(|tree| {
+        .flat_map(|tree| {
             tree.iter_post().filter_map(|data| {
                 // Drops only count as a use if there is no other use
                 if data.defs.len() == 1 {
@@ -66,7 +66,6 @@ fn optimize_graph(gr: &mut Graph, ctx: &Context) {
                 }
             })
         })
-        .flatten()
         .collect();
     // Next, build the chains.
     let chains = build_chains(single_def_use);
@@ -161,7 +160,7 @@ fn replace_places_at(
         match &mut block.kind {
             Call(call) => {
                 for arg in call.args.iter_mut() {
-                    replace_place_op(arg, place, &prev);
+                    replace_place_op(arg, place, prev);
                 }
                 if !last {
                     // debug_assert_eq!(call.args.len(), 1);
@@ -399,7 +398,7 @@ enum Action {
 
 fn insert_action(use_data: &mut PlaceStore<UseData>, place: &Place, pt: GraphPt, action: Action) {
     let node = use_data.create_node(place);
-    let data = node.this.get_or_insert_with(|| UseData::default());
+    let data = node.this.get_or_insert_with(UseData::default);
     match action {
         Action::Def => data.defs.push(pt),
         Action::Use(term) => data.uses.push((pt, term)),

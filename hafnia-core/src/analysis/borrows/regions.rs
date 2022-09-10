@@ -31,12 +31,10 @@ pub fn infer_regions<'a>(
     }
 
     let mut lifetimes = LifetimeStore::new();
-    let ascriptions = ascription::ascribe(&mut lifetimes, &context);
+    let ascriptions = ascription::ascribe(&mut lifetimes, context);
 
     let liveness_ana = liveness::LivenessAnalysis::new(context.gr, controls);
-    let liveness = DataflowRunner::new(liveness_ana, &context)
-        .run()
-        .stmt_states;
+    let liveness = DataflowRunner::new(liveness_ana, context).run().stmt_states;
 
     let mut reginf = RegionInf {
         lifetimes,
@@ -82,18 +80,15 @@ impl Lifetime {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = GraphPt> + '_ {
-        self.pts
-            .idx_enumerate()
-            .map(move |(blk, stmts)| {
-                stmts.iter().enumerate().filter_map(move |(stmt, bit)| {
-                    if *bit {
-                        Some(GraphPt { blk, stmt })
-                    } else {
-                        None
-                    }
-                })
+        self.pts.idx_enumerate().flat_map(move |(blk, stmts)| {
+            stmts.iter().enumerate().filter_map(move |(stmt, bit)| {
+                if *bit {
+                    Some(GraphPt { blk, stmt })
+                } else {
+                    None
+                }
             })
-            .flatten()
+        })
     }
 
     pub fn contains(&self, pt: &GraphPt) -> bool {
@@ -721,10 +716,12 @@ mod dbg {
                 let constrs = constrs[blk_id].iter();
                 let refs = (0..).map(|stmt| {
                     let pt = GraphPt { blk: blk_id, stmt };
-                    self.ascriptions.refs.get(&pt).map_or_else(
-                        || String::new(),
-                        |ln| format!("{}", self.ascriptions.loans[*ln].ascr),
-                    )
+                    self.ascriptions
+                        .refs
+                        .get(&pt)
+                        .map_or_else(String::new, |ln| {
+                            format!("{}", self.ascriptions.loans[*ln].ascr)
+                        })
                 });
 
                 table!([width = 10] f <<

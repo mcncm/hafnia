@@ -12,14 +12,12 @@ use crate::mir::*;
 /// points. The case where you might want it is where you're also, separately,
 /// iterating over block tails. But you probably want `DataflowCtx::iter_pts`.
 pub fn enumerate_stmts(gr: &Graph) -> impl Iterator<Item = (GraphPt, &Stmt)> {
-    gr.idx_enumerate()
-        .map(|(blk, block)| {
-            block.stmts.iter().enumerate().map(move |(pos, stmt)| {
-                let loc = GraphPt { blk, stmt: pos };
-                (loc, stmt)
-            })
+    gr.idx_enumerate().flat_map(|(blk, block)| {
+        block.stmts.iter().enumerate().map(move |(pos, stmt)| {
+            let loc = GraphPt { blk, stmt: pos };
+            (loc, stmt)
         })
-        .flatten()
+    })
 }
 
 pub fn enumerate_tails(gr: &Graph) -> impl Iterator<Item = (GraphPt, &BlockKind)> {

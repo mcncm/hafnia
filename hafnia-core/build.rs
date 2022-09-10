@@ -5,7 +5,6 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 #[cfg(debug_assertions)]
 const BUILD_TYPE: &str = "debug";

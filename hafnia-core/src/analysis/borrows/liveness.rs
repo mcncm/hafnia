@@ -90,7 +90,9 @@ impl<'a> LivenessAnalysis<'a> {
     }
 
     fn gen_operand(&self, state: &mut LiveVars, operand: &Operand) {
-        operand.place().map(|place| self.gen(state, place));
+        if let Some(place) = operand.place() {
+            self.gen(state, place)
+        }
     }
 
     /// This is a difference from Rust: controls have to be live for the
