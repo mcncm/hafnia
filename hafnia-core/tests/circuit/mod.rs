@@ -58,7 +58,6 @@ pub fn test_unitary_inner(src: &'static str, exp_gates: Vec<Inst>) -> io::Result
 
     let stdin = proc.stdin.as_mut().unwrap();
     stdin.write_all(script.as_bytes())?;
-    drop(stdin);
 
     let output = proc.wait_with_output()?;
     assert!(
